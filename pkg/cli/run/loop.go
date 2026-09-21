@@ -9,6 +9,7 @@ import (
 
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"github.com/szksh-lab-2/ar2/pkg/cli/token"
 	"github.com/szksh-lab-2/ar2/pkg/controller/index"
 	ctrl "github.com/szksh-lab-2/ar2/pkg/controller/run"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
@@ -36,11 +37,10 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		return fmt.Errorf("get the aqua-registry definitions: %w", err)
 	}
 
-	branchGH, err := branchClient()
+	reg, err := registryClient(gh, args)
 	if err != nil {
 		return err
 	}
-	reg := g2.New(gh, branchGH, args.G2Owner, args.G2Repo)
 	// The catalogue is written with the ordinary client: it goes to a branch of its
 	// own, not to a package branch, so the bypass token has no business there.
 	c := ctrl.New(gh, generate.New(gh.Repositories), reg,
@@ -77,6 +77,23 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 	return nil
 }
 
+// registryClient builds the client that reads and writes aqua-registry-g2.
+//
+// Three tokens go into it, because two of the things a run does are things the
+// repository's own token can't: create a package branch past the ruleset, and open a
+// pull request whose checks start without a person approving them.
+func registryClient(gh *gogithub.Client, args *Args) (*g2.Client, error) {
+	branchGH, err := token.Client(token.BranchEnv)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the error already names the token it is for
+	}
+	prGH, err := token.Client(token.PREnv)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the error already names the token it is for
+	}
+	return g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo), nil
+}
+
 // readState reads the state that orders the work.
 //
 // It comes from the container registry, where 'ar2 init' put it. --state reads a
@@ -105,30 +122,6 @@ func readState(ctx context.Context, logger *slogutil.Logger, args *Args) (*state
 	// has is new to it, so the sync that follows builds the whole thing.
 	logger.Info("the container registry holds no state; building it from scratch")
 	return state.New(), nil
-}
-
-// branchTokenEnv holds the token that creates the package branches.
-//
-// Creating one has to get past the ruleset requiring status checks, which a brand
-// new branch can't have. The token belongs to a GitHub App listed as a bypass actor
-// for that ruleset and holding no pull-requests permission, so it can't open or
-// merge a pull request and the bypass can't become a way to land an unchecked
-// change. Without it, branches are created with the ordinary token, which works
-// wherever no such ruleset exists.
-const branchTokenEnv = "AR2_BRANCH_TOKEN" //nolint:gosec // the name of an environment variable, not a credential
-
-// branchClient returns the client that creates package branches, or nil to use the
-// ordinary one.
-func branchClient() (*gogithub.Client, error) {
-	token := os.Getenv(branchTokenEnv)
-	if token == "" {
-		return nil, nil //nolint:nilnil
-	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(token))
-	if err != nil {
-		return nil, fmt.Errorf("create a GitHub client for creating branches: %w", err)
-	}
-	return gh, nil
 }
 
 // writeState stores the state where it was read from.

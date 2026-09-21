@@ -97,7 +97,7 @@ func (c *Client) IndexPullRequest(ctx context.Context) (*gogithub.PullRequest, e
 
 // CreateIndexPullRequest opens a pull request updating the catalogue.
 func (c *Client) CreateIndexPullRequest(ctx context.Context, base, title, body string) (*gogithub.PullRequest, error) {
-	pr, _, err := c.gh.PullRequests.Create(ctx, c.owner, c.repo, gogithub.CreatePullRequest{
+	pr, _, err := c.prGH.PullRequests.Create(ctx, c.owner, c.repo, gogithub.CreatePullRequest{
 		Title: new(title),
 		Body:  new(body),
 		Head:  IndexBranch,

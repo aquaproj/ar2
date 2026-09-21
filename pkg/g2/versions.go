@@ -27,14 +27,27 @@ type Client struct {
 	// into a way to land an unchecked change. When it isn't configured, branches are
 	// created with the ordinary client, which works wherever no such ruleset exists.
 	branchGH *gogithub.Client
+	// prGH commits to the head branches and opens the pull requests. It is separate
+	// because a pull request opened or updated with GITHUB_TOKEN gets its workflow
+	// runs in an approval-required state, so nothing would check one until a person
+	// pressed a button and auto-merge would never fire.
+	//
+	// The token behind it is a GitHub App installation token, which doesn't carry
+	// that restriction. Its app is a bypass actor for nothing: it opens pull
+	// requests and that is all, so the checks still decide what merges. When it
+	// isn't configured the ordinary client is used, which is what a local run does.
+	prGH *gogithub.Client
 }
 
-// New creates a Client. branchGH may be nil.
-func New(gh, branchGH *gogithub.Client, owner, repo string) *Client {
+// New creates a Client. branchGH and prGH may be nil.
+func New(gh, branchGH, prGH *gogithub.Client, owner, repo string) *Client {
 	if branchGH == nil {
 		branchGH = gh
 	}
-	return &Client{gh: gh, branchGH: branchGH, owner: owner, repo: repo}
+	if prGH == nil {
+		prGH = gh
+	}
+	return &Client{gh: gh, branchGH: branchGH, prGH: prGH, owner: owner, repo: repo}
 }
 
 // Versions returns the versions of the package whose registry.json is in the

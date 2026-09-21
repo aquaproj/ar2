@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
+	"github.com/szksh-lab-2/ar2/pkg/cli/token"
 	ctrl "github.com/szksh-lab-2/ar2/pkg/controller/index"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 )
@@ -69,15 +70,20 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
+	ghToken := os.Getenv("GITHUB_TOKEN")
+	if ghToken == "" {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(token))
+	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
 
-	c := ctrl.New(g2.New(gh, nil, args.G2Owner, args.G2Repo), args.BaseBranch)
+	prGH, err := token.Client(token.PREnv)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already names the token it is for
+	}
+
+	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo), args.BaseBranch)
 	return c.Sync(ctx, logger.Logger) //nolint:wrapcheck
 }
