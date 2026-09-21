@@ -28,7 +28,16 @@ type Args struct {
 	Output      string
 	RegistryRef string
 	Verify      bool
+	Limit       int
+	OutputDir   string
+	StateFile   string
+	G2Owner     string
+	G2Repo      string
 }
+
+// defaultLimit bounds one run. Generating the whole registry in one invocation is
+// not possible, so a run takes a slice of the work and records it.
+const defaultLimit = 100
 
 // New creates the 'ar2 run' command.
 func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
@@ -36,7 +45,7 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		GlobalFlags: gFlags,
 	}
 	cmd := &cobra.Command{
-		Use:   "run <package name>[@<version>]",
+		Use:   "run [<package name>[@<version>]]",
 		Short: "Generate registry.json from an upstream release",
 		Long: `Generate registry.json from an upstream release.
 
@@ -44,11 +53,18 @@ The asset naming rule is not read from a registry. aqua gr infers it from the
 release's own asset list, and the result is resolved for every supported
 environment the same way aqua resolves it at install time.
 
+Without an argument it works through aqua-registry, most starred package first and
+newest version first, skipping what the state says is already generated. The state
+records progress, so the next run continues rather than starting over.
+
+$ ar2 run --skip-pr --output-dir out
 $ ar2 run cli/cli@v2.101.0 --skip-pr
 $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, positional []string) error {
-			args.Target = positional[0]
+			if len(positional) > 0 {
+				args.Target = positional[0]
+			}
 			return action(cmd.Context(), logger, args)
 		},
 	}
@@ -57,6 +73,11 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.StringVar(&args.Output, "output", "", "write registry.json to this file instead of standard output")
 	fs.StringVar(&args.RegistryRef, "registry-ref", "main", "the aqua-registry ref the package definition is read from")
 	fs.BoolVar(&args.Verify, "verify", false, "download and extract every asset to check that files[].src matches the archive")
+	fs.IntVar(&args.Limit, "limit", defaultLimit, "how many package versions to generate in one run")
+	fs.StringVar(&args.OutputDir, "output-dir", "", "write registry.json files under this directory")
+	fs.StringVar(&args.StateFile, "state", "", "read the state from this file instead of the container registry")
+	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
+	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
 	return cmd
 }
 
@@ -69,11 +90,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return errSkipPRRequired
 	}
 
-	pkgName, version, found := strings.Cut(args.Target, "@")
-	if !found {
-		return errVersionRequired
-	}
-
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
 		return errTokenRequired
@@ -81,6 +97,19 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	gh, err := gogithub.NewClient(gogithub.WithAuthToken(token))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
+	}
+
+	if args.Target == "" {
+		return loop(ctx, logger, gh, args)
+	}
+	return single(ctx, logger, gh, args)
+}
+
+// single generates registry.json for one package version.
+func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args) error {
+	pkgName, version, found := strings.Cut(args.Target, "@")
+	if !found {
+		return errVersionRequired
 	}
 
 	base, err := baseDefinition(ctx, logger, gh, args.RegistryRef, pkgName)

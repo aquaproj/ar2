@@ -21,6 +21,11 @@ const FileName = "state.json"
 const Tag = "latest"
 
 // State is ar2's state.
+//
+// It holds only what is safe to cache. Which versions have been generated is not
+// here: that is read from aqua-registry-g2 itself, because a version only counts
+// once its pull request is merged, and a record of "already generated" would stop a
+// version whose CI failed from ever being retried.
 type State struct {
 	// SchemaVersion allows the format to change without breaking an older ar2 that
 	// reads the state.
