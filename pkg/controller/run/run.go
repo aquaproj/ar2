@@ -13,6 +13,7 @@ import (
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/szksh-lab-2/ar2/pkg/github"
 	"github.com/szksh-lab-2/ar2/pkg/state"
 	"github.com/szksh-lab-2/ar2/pkg/summary"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
@@ -23,7 +24,7 @@ type Controller struct {
 	gh        *gogithub.Client
 	generator *generate.Generator
 	g2        Registry
-	graphql   AutoMerger
+	graphql   GraphQL
 	verifier  *verify.Verifier
 	summary   *summary.Writer
 }
@@ -37,14 +38,19 @@ type Registry interface {
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
 
-// AutoMerger turns on auto-merge, which is what makes CI the gate: a pull request
-// merges itself once the checks pass and stays open when they don't.
-type AutoMerger interface {
+// GraphQL is the part of GitHub's GraphQL API a run uses.
+//
+// EnableAutoMerge is what makes CI the gate: a pull request merges itself once the
+// checks pass and stays open when they don't. The star counts are for the packages
+// aqua-registry has gained since the state was built.
+type GraphQL interface {
 	EnableAutoMerge(ctx context.Context, pullRequestID string) error
+	GetStars(ctx context.Context, repos []github.Repo) (map[string]int, map[string]string, error)
+	FillForbiddenStars(ctx context.Context, stars map[string]int, reasons map[string]string)
 }
 
 // New creates a Controller.
-func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql AutoMerger, verifier *verify.Verifier) *Controller {
+func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier) *Controller {
 	return &Controller{
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
 		summary: summary.New(),

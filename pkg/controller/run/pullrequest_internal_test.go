@@ -10,6 +10,7 @@ import (
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/szksh-lab-2/ar2/pkg/github"
 )
 
 type fakeRegistry struct {
@@ -39,10 +40,19 @@ func (f *fakeRegistry) CreatePullRequest(_ context.Context, _, _, _ string) (*go
 	return &gogithub.PullRequest{Number: new(1), NodeID: new("node")}, nil
 }
 
+// failingAutoMerger stands in for GitHub refusing auto-merge, which it does on a
+// branch with no required checks.
 type failingAutoMerger struct{}
 
 func (failingAutoMerger) EnableAutoMerge(_ context.Context, _ string) error {
 	return errors.New("auto-merge is not allowed for this repository")
+}
+
+func (failingAutoMerger) GetStars(_ context.Context, _ []github.Repo) (map[string]int, map[string]string, error) {
+	return map[string]int{}, map[string]string{}, nil
+}
+
+func (failingAutoMerger) FillForbiddenStars(_ context.Context, _ map[string]int, _ map[string]string) {
 }
 
 func discardLogger() *slog.Logger {

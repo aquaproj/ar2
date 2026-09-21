@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,9 +35,23 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		return fmt.Errorf("get the aqua-registry definitions: %w", err)
 	}
 
-	logger.Info("generating registry.json", "limit", args.Limit, "output_dir", args.OutputDir)
 	c := ctrl.New(gh, generate.New(gh.Repositories), g2.New(gh, args.G2Owner, args.G2Repo),
 		github.NewClient(httpClient), verify.New(http.DefaultClient))
+
+	// aqua-registry gains packages continuously, and one the state doesn't know
+	// about is never ordered and so never processed. Adding it here means it waits
+	// for the next run rather than for the next 'ar2 init'.
+	changed, err := c.SyncState(ctx, logger.Logger, s, pkgInfos)
+	if err != nil {
+		return fmt.Errorf("add the new packages to the state: %w", err)
+	}
+	if changed {
+		if err := writeState(ctx, logger, args, s); err != nil {
+			return err
+		}
+	}
+
+	logger.Info("generating registry.json", "limit", args.Limit, "output_dir", args.OutputDir)
 	generated, err := c.Run(ctx, logger.Logger, &ctrl.Input{
 		Limit:     args.Limit,
 		OutputDir: args.OutputDir,
@@ -69,10 +84,38 @@ func readState(ctx context.Context, logger *slogutil.Logger, args *Args) (*state
 	logger.Info("pulling the state from the container registry",
 		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
 	s, err := state.Fetch(ctx, reg, token)
-	if err != nil {
+	if err == nil {
+		return s, nil
+	}
+	if !errors.Is(err, state.ErrNotFound) {
 		return nil, fmt.Errorf("pull the state: %w", err)
 	}
-	return s, nil
+	// Nothing has been pushed yet, which is what a repository looks like before
+	// 'ar2 init' has ever run. An empty state is enough: every package aqua-registry
+	// has is new to it, so the sync that follows builds the whole thing.
+	logger.Info("the container registry holds no state; building it from scratch")
+	return state.New(), nil
+}
+
+// writeState stores the state where it was read from.
+func writeState(ctx context.Context, logger *slogutil.Logger, args *Args, s *state.State) error {
+	if args.StateFile != "" {
+		logger.Info("writing the state to a file", "path", args.StateFile)
+		if err := state.Write(args.StateFile, s); err != nil {
+			return fmt.Errorf("write the state: %w", err)
+		}
+		return nil
+	}
+	reg, err := args.Flags().Resolve()
+	if err != nil {
+		return fmt.Errorf("resolve the container registry: %w", err)
+	}
+	logger.Info("pushing the state to the container registry",
+		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
+	if err := state.Store(ctx, reg, os.Getenv("GITHUB_TOKEN"), s); err != nil {
+		return fmt.Errorf("push the state: %w", err)
+	}
+	return nil
 }
 
 func readStateFile(path string) (*state.State, error) {

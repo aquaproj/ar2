@@ -2,10 +2,13 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"oras.land/oras-go/v2/errdef"
 )
 
 // Flags are the settings locating the state in a container registry.
@@ -40,7 +43,30 @@ func (f *Flags) Resolve() (*Registry, error) {
 	}, nil
 }
 
+// ErrNotFound is returned by Fetch when the container registry holds no state yet,
+// which is what a repository looks like before 'ar2 init' has ever run.
+var ErrNotFound = errors.New("the container registry holds no state")
+
+// Store writes the state to the container registry.
+func Store(ctx context.Context, reg *Registry, token string, s *State) error {
+	repo, err := NewRepository(reg, token)
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "ar2-state")
+	if err != nil {
+		return fmt.Errorf("create a temporary directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	if err := Write(filepath.Join(dir, FileName), s); err != nil {
+		return err
+	}
+	return Push(ctx, repo, dir, Tag)
+}
+
 // Fetch pulls the state from the container registry and reads it.
+// It returns ErrNotFound when there is none.
 func Fetch(ctx context.Context, reg *Registry, token string) (*State, error) {
 	repo, err := NewRepository(reg, token)
 	if err != nil {
@@ -53,6 +79,9 @@ func Fetch(ctx context.Context, reg *Registry, token string) (*State, error) {
 	defer os.RemoveAll(dir)
 
 	if err := Pull(ctx, repo, dir, Tag); err != nil {
+		if errors.Is(err, errdef.ErrNotFound) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 	f, err := os.Open(filepath.Join(dir, FileName))
