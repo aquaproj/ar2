@@ -21,7 +21,6 @@ var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is requ
 // Args holds the command's flags.
 type Args struct {
 	*flag.GlobalFlags
-	Branch     string
 	BaseBranch string
 	G2Owner    string
 	G2Repo     string
@@ -33,37 +32,29 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		GlobalFlags: gFlags,
 	}
 	cmd := &cobra.Command{
-		Use:   "index [<package branch>]",
-		Short: "Add packages to aqua-registry-g2's index.json",
-		Long: `Add packages to aqua-registry-g2's index.json.
+		Use:   "index",
+		Short: "Add the packages missing from aqua-registry-g2's index.json",
+		Long: `Add the packages missing from aqua-registry-g2's index.json.
 
 index.json is what 'aqua g' searches: it holds the name, description and link of
 every package the registry has. Everything else about a package lives on its own
 branch, but searching reads all of them at once, so the catalogue is one file on the
 default branch and has to be kept in step with the branches.
 
-Given a package branch, only that package is looked at. That is the form a workflow
-watching for branch creation uses, and it costs one request: the branch that was just
-created is the only one that can be missing.
-
-$ ar2 index pkg_cli_2fcli
-
-Without an argument every package branch is listed and whatever the catalogue doesn't
-have is added. That is what catches a package the other form missed, which happens
-whenever the event didn't fire or its pull request never merged. Nothing else would
-notice.
+'ar2 run' adds a package as it takes it over, so this command is the reconciliation
+rather than the ordinary path. Every package branch is listed and whatever the
+catalogue doesn't have is added, which is what catches a package whose run failed
+after committing its definition or whose pull request was never merged. Nothing else
+would notice. It belongs on a schedule.
 
 $ ar2 index
 
-Either way the update goes into one pull request, and a run finding one already open
-adds to it rather than opening another.
+The update goes into one pull request, and a run finding one already open adds to it
+rather than opening another.
 
 The GitHub access token is read from the GITHUB_TOKEN environment variable.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, positional []string) error {
-			if len(positional) > 0 {
-				args.Branch = positional[0]
-			}
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return action(cmd.Context(), logger, args)
 		},
 	}
@@ -88,8 +79,5 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	}
 
 	c := ctrl.New(g2.New(gh, nil, args.G2Owner, args.G2Repo), args.BaseBranch)
-	if args.Branch == "" {
-		return c.Sync(ctx, logger.Logger) //nolint:wrapcheck
-	}
-	return c.Add(ctx, logger.Logger, args.Branch) //nolint:wrapcheck
+	return c.Sync(ctx, logger.Logger) //nolint:wrapcheck
 }

@@ -47,7 +47,7 @@ func TestSyncState(t *testing.T) {
 		"aquaproj/aqua": {RepoOwner: "aquaproj", RepoName: "aqua"},
 		"gone/gone":     {RepoOwner: "gone", RepoName: "gone"},
 	}
-	c := New(nil, nil, nil, starFetcher{stars: map[string]int{"aquaproj/aqua": 42}}, nil)
+	c := New(nil, nil, nil, starFetcher{stars: map[string]int{"aquaproj/aqua": 42}}, nil, nil)
 
 	changed, err := c.SyncState(t.Context(), discardLogger(), s, pkgInfos)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestSyncState_nothingNew(t *testing.T) {
 	s := &state.State{Packages: map[string]*state.Package{
 		"cli/cli": {RepoOwner: "cli", RepoName: "cli", Stars: 100},
 	}}
-	c := New(nil, nil, nil, starFetcher{}, nil)
+	c := New(nil, nil, nil, starFetcher{}, nil, nil)
 	changed, err := c.SyncState(t.Context(), discardLogger(), s, map[string]*aquaregistry.PackageInfo{
 		"cli/cli": {RepoOwner: "cli", RepoName: "cli"},
 	})

@@ -9,6 +9,7 @@ import (
 
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"github.com/szksh-lab-2/ar2/pkg/controller/index"
 	ctrl "github.com/szksh-lab-2/ar2/pkg/controller/run"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
@@ -39,8 +40,12 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 	if err != nil {
 		return err
 	}
-	c := ctrl.New(gh, generate.New(gh.Repositories), g2.New(gh, branchGH, args.G2Owner, args.G2Repo),
-		github.NewClient(httpClient), verify.New(http.DefaultClient))
+	reg := g2.New(gh, branchGH, args.G2Owner, args.G2Repo)
+	// The catalogue is written with the ordinary client: it goes to a branch of its
+	// own, not to a package branch, so the bypass token has no business there.
+	c := ctrl.New(gh, generate.New(gh.Repositories), reg,
+		github.NewClient(httpClient), verify.New(http.DefaultClient),
+		index.New(reg, args.BaseBranch))
 
 	// aqua-registry gains packages continuously, and one the state doesn't know
 	// about is never ordered and so never processed. Adding it here means it waits

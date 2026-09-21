@@ -70,12 +70,12 @@ func logger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-func TestController_Add(t *testing.T) {
+func TestController_AddPackage(t *testing.T) {
 	t.Parallel()
-	reg := &fakeRegistry{configs: map[string]*aquag2.Config{
-		"cli/cli": config("GitHub's official command line tool"),
-	}}
-	if err := New(reg, "main").Add(t.Context(), logger(), "pkg_cli_2fcli"); err != nil {
+	reg := &fakeRegistry{}
+	err := New(reg, "main").AddPackage(t.Context(), logger(), "cli/cli",
+		config("GitHub's official command line tool"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if reg.createdPRs != 1 {
@@ -87,35 +87,21 @@ func TestController_Add(t *testing.T) {
 	if !strings.Contains(reg.committed[0].Content, "cli/cli") {
 		t.Errorf("the catalogue doesn't hold the package:\n%s", reg.committed[0].Content)
 	}
-	// Only the branch that was given: adding one package lists nothing.
-	if diff := cmp.Diff([]string{"cli/cli"}, reg.configRead); diff != "" {
-		t.Errorf("the definitions read are wrong (-want +got):\n%s", diff)
-	}
-}
-
-// A ref that doesn't hold a package is turned away. The workflow passes whichever ref
-// was created, so this is how a tag or an operational branch arrives.
-func TestController_Add_notAPackageBranch(t *testing.T) {
-	t.Parallel()
-	reg := &fakeRegistry{}
-	if err := New(reg, "main").Add(t.Context(), logger(), "ar2_index"); err == nil {
-		t.Fatal("an error must be returned")
-	}
-	if reg.createdPRs != 0 {
-		t.Errorf("opened %d pull requests, want none", reg.createdPRs)
-	}
-}
-
-// A package already in the catalogue costs nothing: its definition isn't read and
-// nothing is committed.
-func TestController_Add_alreadyThere(t *testing.T) {
-	t.Parallel()
-	reg := &fakeRegistry{index: &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}}
-	if err := New(reg, "main").Add(t.Context(), logger(), "pkg_cli_2fcli"); err != nil {
-		t.Fatal(err)
-	}
+	// The definition came with the call, so no branch is read for it.
 	if len(reg.configRead) != 0 {
 		t.Errorf("read %v, want nothing", reg.configRead)
+	}
+}
+
+// A package already in the catalogue costs nothing: nothing is committed and no pull
+// request is opened.
+func TestController_AddPackage_alreadyThere(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{index: &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}}
+	err := New(reg, "main").AddPackage(t.Context(), logger(), "cli/cli",
+		config("GitHub's official command line tool"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	if reg.committed != nil {
 		t.Errorf("committed %+v, want nothing", reg.committed)
@@ -149,14 +135,15 @@ func TestController_Sync(t *testing.T) {
 
 // An open pull request is added to rather than replaced, and the catalogue is read
 // from it. Reading the default branch would make this run undo the last one.
-func TestController_Add_addsToTheOpenPullRequest(t *testing.T) {
+func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{
-		openPR:  &gogithub.PullRequest{Number: new(7)},
-		index:   &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "aquaproj/aqua"}}},
-		configs: map[string]*aquag2.Config{"cli/cli": config("GitHub's official command line tool")},
+		openPR: &gogithub.PullRequest{Number: new(7)},
+		index:  &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "aquaproj/aqua"}}},
 	}
-	if err := New(reg, "main").Add(t.Context(), logger(), "pkg_cli_2fcli"); err != nil {
+	err := New(reg, "main").AddPackage(t.Context(), logger(), "cli/cli",
+		config("GitHub's official command line tool"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff(g2.IndexBranch, reg.readRef); diff != "" {

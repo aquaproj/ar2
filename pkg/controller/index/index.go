@@ -39,24 +39,21 @@ func New(registry Registry, baseBranch string) *Controller {
 	return &Controller{g2: registry, baseBranch: baseBranch}
 }
 
-// Add puts one package into the catalogue.
+// AddPackage puts one package into the catalogue.
 //
-// This is the path a new branch takes. The branch that was just created is the only
-// one that can be missing, so nothing else is looked at: no branches are listed and
-// no other definition is read.
-func (c *Controller) Add(ctx context.Context, logger *slog.Logger, branch string) error {
-	pkgName, ok := aquag2.PackageName(branch)
-	if !ok {
-		return fmt.Errorf("%w: %s", errNotAPackageBranch, branch)
-	}
-	return c.add(ctx, logger, []string{pkgName})
+// This is the path a run takes as it takes a package over: it has just built the
+// definition, so nothing is read back and no branches are listed. The definition is
+// passed in because the branch doesn't hold it yet — it is in the pull request that
+// brings the package, which is the moment the catalogue can first describe it.
+func (c *Controller) AddPackage(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error {
+	return c.addOne(ctx, logger, pkgName, cfg)
 }
 
 // Sync puts every package that has a branch into the catalogue.
 //
-// This is what catches what the other path missed. A branch created while the event
-// didn't fire, or whose pull request failed or was never merged, leaves a package out
-// of the catalogue and nothing else would ever notice.
+// This is what catches what the other path missed. A package whose run failed after
+// committing its definition, or whose pull request was never merged, is left out of
+// the catalogue and nothing else would ever notice.
 func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 	pkgNames, err := c.g2.PackageBranches(ctx)
 	if err != nil {

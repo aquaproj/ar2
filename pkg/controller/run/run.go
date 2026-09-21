@@ -27,6 +27,7 @@ type Controller struct {
 	g2        Registry
 	graphql   GraphQL
 	verifier  *verify.Verifier
+	index     Index
 	summary   *summary.Writer
 }
 
@@ -38,6 +39,14 @@ type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
+}
+
+// Index is the catalogue of the packages the registry holds.
+//
+// A run touches it only when it takes a package over, which is the one moment a
+// package can be new to the catalogue. Everything else is the reconciliation's job.
+type Index interface {
+	AddPackage(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error
 }
 
 // GraphQL is the part of GitHub's GraphQL API a run uses.
@@ -52,10 +61,10 @@ type GraphQL interface {
 }
 
 // New creates a Controller.
-func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier) *Controller {
+func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, index Index) *Controller {
 	return &Controller{
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
-		summary: summary.New(),
+		index: index, summary: summary.New(),
 	}
 }
 

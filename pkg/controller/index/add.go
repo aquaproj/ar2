@@ -7,45 +7,80 @@ import (
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	gogithub "github.com/google/go-github/v92/github"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 )
 
-// add puts the packages the catalogue doesn't have into it.
+// target is the catalogue an update is built on top of, and where it came from.
+type target struct {
+	pr    *gogithub.PullRequest
+	index *aquag2.Index
+	ref   string
+}
+
+// read fetches the catalogue the update is added to.
 //
-// The catalogue is read from the branch the update is written to rather than from the
-// default branch, so that a run adds to what an earlier one is still waiting to
-// merge. Reading the default branch instead would make the second run undo the first.
-func (c *Controller) add(ctx context.Context, logger *slog.Logger, pkgNames []string) error {
+// It is read from the branch the update is written to rather than from the default
+// branch, so that a run adds to what an earlier one is still waiting to merge.
+// Reading the default branch instead would make the second run undo the first.
+func (c *Controller) read(ctx context.Context) (*target, error) {
 	pr, err := c.g2.IndexPullRequest(ctx)
 	if err != nil {
-		return fmt.Errorf("look for an open pull request: %w", err)
+		return nil, fmt.Errorf("look for an open pull request: %w", err)
 	}
 	ref := c.baseBranch
 	if pr != nil {
 		ref = g2.IndexBranch
 	}
-
 	index, err := c.g2.Index(ctx, ref)
 	if err != nil {
-		return err //nolint:wrapcheck
+		return nil, err //nolint:wrapcheck
 	}
+	return &target{pr: pr, index: index, ref: ref}, nil
+}
 
-	added, err := c.entries(ctx, logger, index, pkgNames)
+// add puts the packages the catalogue doesn't have into it, reading a definition for
+// each one that is missing.
+func (c *Controller) add(ctx context.Context, logger *slog.Logger, pkgNames []string) error {
+	t, err := c.read(ctx)
 	if err != nil {
 		return err
 	}
+	added, err := c.entries(ctx, logger, t.index, pkgNames)
+	if err != nil {
+		return err
+	}
+	return c.write(ctx, logger, t, added)
+}
+
+// addOne puts one package into the catalogue from a definition already in hand.
+func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error {
+	t, err := c.read(ctx)
+	if err != nil {
+		return err
+	}
+	if _, ok := t.index.Names()[pkgName]; ok {
+		logger.Debug("the catalogue already holds the package", "package", pkgName)
+		return nil
+	}
+	logger.Info("adding a package to the catalogue", "package", pkgName)
+	return c.write(ctx, logger, t, []*aquag2.IndexPackage{aquag2.NewIndexPackage(pkgName, cfg)})
+}
+
+// write commits the catalogue and takes it to a pull request.
+func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, added []*aquag2.IndexPackage) error {
 	if len(added) == 0 {
 		logger.Info("the catalogue is up to date")
 		return nil
 	}
-	index.Add(added...)
+	t.index.Add(added...)
 
-	if err := c.commit(ctx, logger, index, ref, added); err != nil {
+	if err := c.commit(ctx, logger, t.index, t.ref, added); err != nil {
 		return err
 	}
-	if pr != nil {
+	if t.pr != nil {
 		logger.Info("added to the open pull request",
-			"number", pr.GetNumber(), "num_of_packages", len(added))
+			"number", t.pr.GetNumber(), "num_of_packages", len(added))
 		return nil
 	}
 	return c.openPullRequest(ctx, logger, added)
