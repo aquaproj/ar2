@@ -36,8 +36,13 @@ type Args struct {
 }
 
 // defaultLimit bounds one run. Generating the whole registry in one invocation is
-// not possible, so a run takes a slice of the work and records it.
-const defaultLimit = 100
+// not possible, so a run takes a slice of the work.
+//
+// 300 is what saturates the API rate limit without exceeding it. A version costs
+// about 3.1 API calls, and a scheduled workflow runs 5 to 6 times an hour, so 300 a
+// run is around 5,100 calls an hour against a limit of 5,000. A run takes about nine
+// minutes at that size.
+const defaultLimit = 300
 
 // New creates the 'ar2 run' command.
 func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {

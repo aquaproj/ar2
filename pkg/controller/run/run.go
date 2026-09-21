@@ -98,6 +98,8 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		return 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
 	}
 
+	budget = limitBudget(budget, existing)
+
 	generated := 0
 	for _, version := range versions {
 		if generated >= budget {
@@ -116,6 +118,21 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		generated++
 	}
 	return generated, nil
+}
+
+// limitBudget limits how much of the run's remaining budget one package may take.
+//
+// A package that g2 holds fewer than breadthDepth versions of gets only enough to
+// reach it, so the run moves on to the next package instead of finishing this one.
+// A package already past that takes whatever is left.
+func limitBudget(budget int, existing map[string]struct{}) int {
+	if len(existing) >= breadthDepth {
+		return budget
+	}
+	if remaining := breadthDepth - len(existing); remaining < budget {
+		return remaining
+	}
+	return budget
 }
 
 // versions lists the package's releases, newest first.
@@ -140,6 +157,23 @@ func (c *Controller) versions(ctx context.Context, pkg *state.Package) ([]string
 
 // releasesPerPage is how many releases are looked at per package in one run.
 const releasesPerPage = 100
+
+// breadthDepth is how many versions a package that has none yet gets before the run
+// moves on to the next package.
+//
+// Without it a run spends itself on the most starred package, generating every
+// version it ever released while nothing else gets a single one. With it the first
+// sweep leaves every package with its newest versions, which is what makes the
+// registry usable: someone installing a package almost always wants a recent
+// version, and a package with nothing at all can't be installed from g2 at all.
+//
+// Switching on what g2 already holds needs no flag and no record of which sweep this
+// is. The version list is fetched either way.
+//
+// The extra cost is one ListReleases per package on the second sweep, since listing
+// is paid per package and generating is paid per version. Over the whole registry
+// that is about 6% more API calls, roughly an hour.
+const breadthDepth = 5
 
 // generate builds registry.json for one package version and writes it out.
 func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, pkgName, version string) error {

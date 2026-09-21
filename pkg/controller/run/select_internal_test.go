@@ -32,3 +32,38 @@ func TestOrder(t *testing.T) {
 		t.Errorf("order is wrong (-want +got):\n%s", diff)
 	}
 }
+
+// TestLimitBudget checks that a package g2 holds little of takes only enough of the
+// run to reach breadthDepth. Without the cap a run spends itself on the most starred
+// package while nothing else gets a version at all.
+func TestLimitBudget(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		budget   int
+		existing int
+		want     int
+	}{
+		{name: "nothing generated yet", budget: 300, existing: 0, want: breadthDepth},
+		{name: "partly generated", budget: 300, existing: 3, want: breadthDepth - 3},
+		{name: "past the breadth depth", budget: 300, existing: breadthDepth, want: 300},
+		{
+			// The run has less left than the package would take, so the run's budget
+			// is what bounds it.
+			name:   "the run is nearly spent",
+			budget: 2, existing: 0, want: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			existing := make(map[string]struct{}, tt.existing)
+			for i := range tt.existing {
+				existing[string(rune('a'+i))] = struct{}{}
+			}
+			if got := limitBudget(tt.budget, existing); got != tt.want {
+				t.Errorf("limitBudget is %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
