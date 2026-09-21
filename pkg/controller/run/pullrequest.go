@@ -116,12 +116,13 @@ func prBody(versions []*version, needsReview bool) string {
 	for _, v := range versions {
 		fmt.Fprintf(&b, "- %s", v.Version)
 		if v.NeedsReview {
-			b.WriteString(" (files were relocated; please check)")
+			b.WriteString(" (needs review)")
 		}
 		b.WriteString("\n")
 	}
 	if needsReview {
-		b.WriteString("\nAuto-merge is off: `files[].src` didn't match the archive and was relocated by name, which is a guess.\n")
+		b.WriteString("\nAuto-merge is off. Either `files[].src` didn't match the archive and was relocated by name, " +
+			"which is a guess, or the archive couldn't be checked at all. See the run's log.\n")
 	}
 	return b.String()
 }

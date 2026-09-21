@@ -27,12 +27,21 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, version string
 	for _, asset := range reg.Assets {
 		if extract {
 			review, err := v.fillByExtracting(ctx, logger, version, asset)
-			if err != nil {
-				return false, err
+			if err == nil {
+				needsReview = needsReview || review
+				continue
 			}
-			needsReview = needsReview || review
-			continue
+			// The entry isn't mergeable as it stands, but it is most of the way
+			// there: the checksum may already be recorded and the asset name came
+			// from the release. Throwing it away would mean generating it again from
+			// nothing, so it goes out for review and whoever picks it up starts from
+			// the pull request rather than from scratch.
+			logger.Warn("failed to check the files against the archive",
+				"os", asset.OS, "arch", asset.Arch, "error", err.Error())
+			needsReview = true
 		}
+		// A checksum is not optional the way extracting is: an entry without one
+		// would be installed unverified, which is what the lock file exists to stop.
 		if err := v.fillChecksum(ctx, logger, version, asset); err != nil {
 			return false, err
 		}
