@@ -3,6 +3,7 @@ package verify
 import (
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -112,5 +113,25 @@ func TestIndexByName(t *testing.T) {
 	}
 	if diff := cmp.Diff("bin/gh", index["gh"]); diff != "" {
 		t.Errorf("indexByName is wrong (-want +got):\n%s", diff)
+	}
+}
+
+// Whether an asset can be opened is a question about this machine, not about the
+// package. Everything unpacked in process can always be opened; dmg and pkg need a
+// macOS tool.
+func TestExtractable(t *testing.T) {
+	t.Parallel()
+	for _, format := range []string{"tar.gz", "zip", "raw", ""} {
+		if !Extractable(format) {
+			t.Errorf("%q should always be extractable", format)
+		}
+	}
+	// The result depends on where the test runs, so what is checked is that the
+	// answer follows the tool rather than the format.
+	for format, tool := range formatTools {
+		_, err := exec.LookPath(tool)
+		if got, want := Extractable(format), err == nil; got != want {
+			t.Errorf("%q is %v, want %v: %s is %v", format, got, want, tool, err)
+		}
 	}
 }

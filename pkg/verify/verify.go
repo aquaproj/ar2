@@ -22,9 +22,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/aquaproj/aqua/v2/pkg/osexec"
 	"github.com/aquaproj/aqua/v2/pkg/unarchive"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
@@ -37,14 +39,36 @@ type Verifier struct {
 
 // New creates a Verifier.
 //
-// The unarchiver is built without an executor, so dmg and pkg assets can't be
-// extracted: those formats need platform tools that aren't available everywhere.
-// Such a package fails rather than being silently treated as verified.
+// The unarchiver gets an executor, so dmg and pkg assets can be extracted where the
+// tools that open them exist. Whether they do is asked before extracting rather than
+// assumed from the format: the same code runs on a macOS laptop and a Linux runner,
+// and only one of them can open a dmg.
 func New(httpClient *http.Client) *Verifier {
 	return &Verifier{
 		httpClient: httpClient,
-		unarchiver: unarchive.New(nil),
+		unarchiver: unarchive.New(osexec.New()),
 	}
+}
+
+// formatTools names the command a format is opened with, for the formats that need
+// one. Everything else is unpacked in process.
+var formatTools = map[string]string{ //nolint:gochecknoglobals
+	unarchive.FormatDMG: "hdiutil",
+	unarchive.FormatPKG: "pkgutil",
+}
+
+// Extractable reports whether this machine can open the asset.
+//
+// A dmg on Linux isn't a broken package, it is a package this machine can't look
+// inside. Saying so lets the caller carry on with what it can establish instead of
+// failing the version over where it happens to be running.
+func Extractable(format string) bool {
+	tool, ok := formatTools[format]
+	if !ok {
+		return true
+	}
+	_, err := exec.LookPath(tool)
+	return err == nil
 }
 
 // Result is what extracting one asset established.

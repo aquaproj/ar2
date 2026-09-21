@@ -25,7 +25,13 @@ const ChecksumAlgorithm = "sha256"
 func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, version string, reg *generate.Registry, extract bool) (bool, error) {
 	needsReview := false
 	for _, asset := range reg.Assets {
-		if extract {
+		if extract && !Extractable(asset.Format) {
+			// Nothing is wrong with the package; this machine has no tool to open
+			// the format. The checksum below is still recorded, so the entry is
+			// complete apart from its files having gone unchecked.
+			logger.Warn("can't open this format here, so its files go unchecked",
+				"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
+		} else if extract {
 			review, err := v.fillByExtracting(ctx, logger, version, asset)
 			if err == nil {
 				needsReview = needsReview || review
