@@ -20,7 +20,7 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, arg
 	if args.OutputDir == "" {
 		return errOutputDirRequired
 	}
-	s, err := readState(args.StateFile)
+	s, err := readState(ctx, logger, args)
 	if err != nil {
 		return err
 	}
@@ -46,14 +46,30 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, arg
 	return nil
 }
 
-// readState reads the state from a file.
+// readState reads the state that orders the work.
 //
-// The state carries the star counts that order the work. Reading it from the
-// container registry isn't wired up yet, so a path is required.
-func readState(path string) (*state.State, error) {
-	if path == "" {
-		return nil, errStateRequired
+// It comes from the container registry, where 'ar2 init' put it. --state reads a
+// local file instead, which is what makes a run reproducible while working on it.
+func readState(ctx context.Context, logger *slogutil.Logger, args *Args) (*state.State, error) {
+	if args.StateFile != "" {
+		logger.Info("reading the state from a file", "path", args.StateFile)
+		return readStateFile(args.StateFile)
 	}
+	reg, err := args.Flags().Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolve the container registry: %w", err)
+	}
+	token := os.Getenv("GITHUB_TOKEN")
+	logger.Info("pulling the state from the container registry",
+		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
+	s, err := state.Fetch(ctx, reg, token)
+	if err != nil {
+		return nil, fmt.Errorf("pull the state: %w", err)
+	}
+	return s, nil
+}
+
+func readStateFile(path string) (*state.State, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open the state file: %w", err)

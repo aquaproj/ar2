@@ -16,6 +16,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
+	"github.com/szksh-lab-2/ar2/pkg/state"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
@@ -33,6 +34,18 @@ type Args struct {
 	StateFile   string
 	G2Owner     string
 	G2Repo      string
+	Registry    string
+	Repository  string
+	Username    string
+}
+
+// Flags returns the settings locating the state in the container registry.
+func (a *Args) Flags() *state.Flags {
+	return &state.Flags{
+		Registry:   a.Registry,
+		Repository: a.Repository,
+		Username:   a.Username,
+	}
 }
 
 // defaultLimit bounds one run. Generating the whole registry in one invocation is
@@ -81,6 +94,9 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.IntVar(&args.Limit, "limit", defaultLimit, "how many package versions to generate in one run")
 	fs.StringVar(&args.OutputDir, "output-dir", "", "write registry.json files under this directory")
 	fs.StringVar(&args.StateFile, "state", "", "read the state from this file instead of the container registry")
+	fs.StringVar(&args.Registry, "registry", "ghcr.io", "the container registry the state is read from")
+	fs.StringVar(&args.Repository, "repository", "", "the container registry repository (default $GITHUB_REPOSITORY)")
+	fs.StringVar(&args.Username, "username", "", "the user the GitHub access token belongs to (default the owner of --repository)")
 	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
 	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
 	return cmd
