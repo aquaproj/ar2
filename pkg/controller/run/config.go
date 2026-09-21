@@ -1,10 +1,12 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/migrate"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
@@ -51,9 +53,30 @@ func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, inp
 			"package", pkgName, "version_constraint", constraint)
 	}
 
-	b, err := yaml.Marshal(cfg)
+	content, err := marshalConfig(cfg)
 	if err != nil {
-		return nil, false, fmt.Errorf("marshal the package definition: %w", err)
+		return nil, false, err
 	}
-	return &g2.File{Path: g2.ConfigFileName, Content: string(b)}, len(unconverted) > 0, nil
+	return &g2.File{Path: g2.ConfigFileName, Content: content}, len(unconverted) > 0, nil
+}
+
+// yamlIndent is how far a registry file indents, which is what aqua-registry uses.
+const yamlIndent = 2
+
+// marshalConfig renders the definition the way aqua-registry writes one.
+//
+// The indentation is set rather than left to the encoder, whose default is four
+// spaces. Registry files are written and read by people, and one that doesn't look
+// like the others is one more thing to notice.
+func marshalConfig(cfg *aquag2.Config) (string, error) {
+	buf := &bytes.Buffer{}
+	encoder := yaml.NewEncoder(buf)
+	encoder.SetIndent(yamlIndent)
+	if err := encoder.Encode(cfg); err != nil {
+		return "", fmt.Errorf("marshal the package definition: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return "", fmt.Errorf("close the YAML encoder: %w", err)
+	}
+	return buf.String(), nil
 }
