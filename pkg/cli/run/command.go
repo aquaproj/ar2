@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	aquagithub "github.com/aquaproj/aqua/v2/pkg/github"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
@@ -91,15 +90,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		logger.Warn("aqua-registry has no definition of the package", "package", pkgName)
 	}
 
-	// aqua gr's interface is typed with aqua's own go-github aliases, which track a
-	// different major version than ar2 uses. aqua's client is built here so the two
-	// don't have to agree on a version.
-	aquaGH, err := aquagithub.New(ctx, logger.Logger)
-	if err != nil {
-		return fmt.Errorf("create a GitHub client for aqua: %w", err)
-	}
-
-	reg, err := generate.New(aquaGH).Generate(ctx, logger.Logger, &generate.Input{
+	reg, err := generate.New(gh.Repositories).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,
