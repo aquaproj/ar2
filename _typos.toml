@@ -2,3 +2,5 @@
 ERRO = "ERRO"
 intoto = "intoto"
 typ = "typ"
+# A GitHub account name that appears in the package-name encoding examples.
+rin = "rin"

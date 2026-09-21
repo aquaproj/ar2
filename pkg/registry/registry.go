@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/google/go-github/v92/github"
 	"gopkg.in/yaml.v3"
 )
@@ -103,4 +104,31 @@ func Parse(r io.Reader) (*Registry, error) {
 		return nil, fmt.Errorf("read registry.yaml as YAML: %w", err)
 	}
 	return registry, nil
+}
+
+// FetchAqua downloads aqua-registry's merged registry.yaml at ref and parses it with
+// aqua's own types.
+//
+// Fetch reads only the fields ar2 needs to build its work list; this returns the full
+// definitions, which registry.json generation merges on top of what it infers from a
+// release.
+func FetchAqua(ctx context.Context, client Client, ref string) (map[string]*aquaregistry.PackageInfo, error) {
+	req, err := client.NewRequest(ctx, http.MethodGet, APIPath(ref), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create a request for registry.yaml: %w", err)
+	}
+	req.Header.Set("Accept", mediaTypeRaw)
+	buf := &bytes.Buffer{}
+	if _, err := client.Do(req, buf); err != nil {
+		return nil, fmt.Errorf("get registry.yaml: %w", err)
+	}
+	cfg := &aquaregistry.Config{}
+	if err := yaml.NewDecoder(buf).Decode(cfg); err != nil {
+		return nil, fmt.Errorf("read registry.yaml as YAML: %w", err)
+	}
+	m := make(map[string]*aquaregistry.PackageInfo, len(cfg.PackageInfos))
+	for _, pkgInfo := range cfg.PackageInfos {
+		m[pkgInfo.GetName()] = pkgInfo
+	}
+	return m, nil
 }

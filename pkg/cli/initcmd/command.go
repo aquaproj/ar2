@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
@@ -26,6 +25,15 @@ type Args struct {
 	Repository  string
 	Username    string
 	Output      string
+}
+
+// Flags returns the settings locating the state in the container registry.
+func (a *Args) Flags() *state.Flags {
+	return &state.Flags{
+		Registry:   a.Registry,
+		Repository: a.Repository,
+		Username:   a.Username,
+	}
 }
 
 // New creates the 'ar2 init' command.
@@ -73,9 +81,11 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return errTokenRequired
 	}
 
-	reg, err := containerRegistry(args)
+	// The destination is resolved even with --output so that a misconfiguration is
+	// reported the same way either way.
+	reg, err := args.Flags().Resolve()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve the container registry: %w", err)
 	}
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
@@ -90,29 +100,4 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		Registry:    reg,
 		Output:      args.Output,
 	})
-}
-
-// containerRegistry resolves where the state is pushed. It is resolved even when
-// --output is given so that a misconfiguration is reported the same way either way.
-func containerRegistry(args *Args) (*state.Registry, error) {
-	repository := args.Repository
-	if repository == "" {
-		repository = os.Getenv("GITHUB_REPOSITORY")
-	}
-	if repository == "" {
-		return nil, errRepositoryRequired
-	}
-	owner, _, found := strings.Cut(repository, "/")
-	if !found {
-		return nil, errRepositoryFormat
-	}
-	username := args.Username
-	if username == "" {
-		username = owner
-	}
-	return &state.Registry{
-		Registry:   args.Registry,
-		Repository: repository,
-		Username:   username,
-	}, nil
 }
