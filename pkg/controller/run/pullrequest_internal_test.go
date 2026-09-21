@@ -68,6 +68,18 @@ func (failingAutoMerger) GetStars(_ context.Context, _ []github.Repo) (map[strin
 func (failingAutoMerger) FillForbiddenStars(_ context.Context, _ map[string]int, _ map[string]string) {
 }
 
+// ghClient is a client that is never called: these tests don't reach anything that
+// makes a request. It is a real one because the controller builds what it needs out
+// of it when it is created.
+func ghClient(t *testing.T) *gogithub.Client {
+	t.Helper()
+	gh, err := gogithub.NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gh
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
@@ -82,7 +94,7 @@ func discardLogger() *slog.Logger {
 func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(nil, nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
 	err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
@@ -99,7 +111,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(nil, nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
 	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
@@ -136,7 +148,7 @@ func (f *fakeIndex) AddPackage(_ context.Context, _ *slog.Logger, pkgName string
 func TestOpenPullRequest_indexUntouched(t *testing.T) {
 	t.Parallel()
 	idx := &fakeIndex{}
-	c := New(nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, idx)
+	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, idx)
 	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	}); err != nil {
@@ -152,7 +164,7 @@ func TestAddToIndex(t *testing.T) {
 	t.Parallel()
 	idx := &fakeIndex{}
 	cfg := &aquag2.Config{}
-	New(nil, nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", cfg)
+	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", cfg)
 	if idx.added["cli/cli"] != cfg {
 		t.Errorf("the catalogue got %v, want the definition just written", idx.added)
 	}
@@ -164,5 +176,5 @@ func TestAddToIndex(t *testing.T) {
 func TestAddToIndex_errorIsNotFatal(t *testing.T) {
 	t.Parallel()
 	idx := &fakeIndex{err: errors.New("the catalogue is unreachable")}
-	New(nil, nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", &aquag2.Config{})
+	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", &aquag2.Config{})
 }

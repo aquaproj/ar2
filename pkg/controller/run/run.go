@@ -12,6 +12,7 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/szksh-lab-2/ar2/pkg/attest"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/github"
@@ -27,6 +28,7 @@ type Controller struct {
 	g2        Registry
 	graphql   GraphQL
 	verifier  *verify.Verifier
+	attester  *attest.Checker
 	index     Index
 	summary   *summary.Writer
 }
@@ -65,7 +67,7 @@ type GraphQL interface {
 func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, index Index) *Controller {
 	return &Controller{
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
-		index: index, summary: summary.New(),
+		attester: attest.New(gh.Repositories), index: index, summary: summary.New(),
 	}
 }
 
@@ -279,7 +281,17 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
 	}
-	return &version{Version: tag, Registry: reg, NeedsReview: needsReview}, nil
+	// After Fill, because an attestation is held against the artifact's digest and
+	// Fill is what makes sure every asset has one.
+	dropped, err := c.attester.Check(ctx, logger, pkgName, reg)
+	if err != nil {
+		return nil, fmt.Errorf("check the attestations: %w", err)
+	}
+	return &version{
+		Version:     tag,
+		Registry:    reg,
+		NeedsReview: needsReview || dropped,
+	}, nil
 }
 
 // writeAll writes the generated files out instead of opening a pull request.
