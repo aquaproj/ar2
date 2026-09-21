@@ -1,0 +1,13 @@
+This commit also carries two changes its message doesn't mention.
+
+A pull request that couldn't be set to auto-merge is now counted as done.
+Enabling auto-merge returned an error, so the package was reported as having
+generated nothing and the run's budget never went down; every remaining package
+then got a pull request of its own, eight before the run was cancelled. The
+failure that exposed it was 'Protected branch rules not configured for this
+branch', which is what GitHub says about a branch with no required checks.
+
+The branch template moved from templates/pkg to template, and its contents are
+now copied to the package branch at the same paths. A workflow lives at
+template/.github/workflows/ and lands at .github/workflows/, so the layout of a
+package branch is visible in the template rather than only inside ar2.
