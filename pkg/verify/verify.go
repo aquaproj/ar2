@@ -61,6 +61,9 @@ type Result struct {
 	NeedsReview bool
 	// Unresolved names the files that aren't anywhere in the archive.
 	Unresolved []string
+	// LinkedLibc is the libc the executables need, read from the binaries. It is
+	// empty when the asset holds nothing that can be read that way.
+	LinkedLibc string
 }
 
 // Checksum downloads the asset and returns its SHA256, without extracting it.
@@ -126,6 +129,11 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version stri
 
 	result := &Result{Checksum: checksum}
 	result.Files, result.NeedsReview, result.Unresolved = resolveFiles(logger, dest, asset.Files)
+	// Only Linux has a libc to be linked against, and the files are the resolved
+	// ones because that is where the executables actually are.
+	if asset.OS == "linux" {
+		result.LinkedLibc = linkedLibc(logger, dest, result.Files)
+	}
 	return result, nil
 }
 

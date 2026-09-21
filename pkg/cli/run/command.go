@@ -91,7 +91,7 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.BoolVar(&args.SkipPR, "skip-pr", false, "generate registry.json without creating a branch, a commit, or a pull request")
 	fs.StringVar(&args.Output, "output", "", "write registry.json to this file instead of standard output")
 	fs.StringVar(&args.RegistryRef, "registry-ref", "main", "the aqua-registry ref the package definition is read from")
-	fs.BoolVar(&args.Verify, "verify", false, "download and extract every asset to check that files[].src matches the archive")
+	fs.BoolVar(&args.Verify, "verify", true, "download and extract every asset to check that files[].src matches the archive and to read which libc its executables need")
 	fs.IntVar(&args.Limit, "limit", defaultLimit, "how many package versions to generate in one run")
 	fs.StringVar(&args.OutputDir, "output-dir", "", "write registry.json files under this directory")
 	fs.StringVar(&args.StateFile, "state", "", "read the state from this file instead of the container registry")

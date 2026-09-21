@@ -56,6 +56,7 @@ func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, ve
 		return false, fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
 	}
 	asset.Files = result.Files
+	asset.LinkedLibc = result.LinkedLibc
 	if err := setChecksum(asset, result.Checksum); err != nil {
 		return false, err
 	}
