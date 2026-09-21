@@ -2,6 +2,7 @@ package g2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -16,6 +17,25 @@ import (
 // targets. The files live on main so that changing them changes what every new
 // branch gets.
 const TemplateDir = "templates/pkg"
+
+// errNoTemplate stops a package branch from being created without the workflow that
+// checks pull requests into it. A branch ruleset requiring status checks is what
+// actually keeps an unchecked change from merging; failing here means the branch is
+// never created in a state where its pull requests can't pass, rather than leaving
+// one behind that nothing can merge into.
+var errNoTemplate = errors.New("main has no " + TemplateDir + " to start a package branch from")
+
+const readmePath = "README.md"
+
+// readmeContent explains what a package branch is to whoever opens it.
+func readmeContent(pkgName string) string {
+	return fmt.Sprintf(`# %s
+
+This branch holds the generated registry.json of the aqua package %q, one per
+version under `+"`versions/`"+`. It is created and updated by ar2 and shares no history
+with the default branch.
+`, pkgName, pkgName)
+}
 
 // refNotFound reports whether an error is GitHub saying the ref doesn't exist.
 func refNotFound(resp *gogithub.Response) bool {
@@ -56,6 +76,15 @@ func (c *Client) EnsurePackageBranch(ctx context.Context, pkgName string) (strin
 	if err != nil {
 		return "", err
 	}
+	// A tree has to hold something: GitHub rejects an empty one. The README also
+	// tells anyone who lands on the branch what it is, which matters when a
+	// repository has one branch per package and none of them look like a project.
+	entries = append(entries, &gogithub.TreeEntry{
+		Path:    new(readmePath),
+		Mode:    new(blobMode),
+		Type:    new(blobType),
+		Content: new(readmeContent(pkgName)),
+	})
 	tree, _, err := c.gh.Git.CreateTree(ctx, c.owner, c.repo, "", entries)
 	if err != nil {
 		return "", fmt.Errorf("create the tree of a package branch: %w", err)
@@ -81,12 +110,11 @@ func (c *Client) templateEntries(ctx context.Context) ([]*gogithub.TreeEntry, er
 	_, contents, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, TemplateDir, nil)
 	if err != nil {
 		if refNotFound(resp) {
-			// Without templates a package branch still works; its pull requests just
-			// aren't checked by anything.
-			return nil, nil
+			return nil, errNoTemplate
 		}
 		return nil, fmt.Errorf("list the template files: %w", err)
 	}
+
 	entries := make([]*gogithub.TreeEntry, 0, len(contents))
 	for _, content := range contents {
 		if content.GetType() != "file" {
@@ -100,6 +128,9 @@ func (c *Client) templateEntries(ctx context.Context) ([]*gogithub.TreeEntry, er
 			Type: new("blob"),
 			SHA:  content.SHA,
 		})
+	}
+	if len(entries) == 0 {
+		return nil, errNoTemplate
 	}
 	return entries, nil
 }
