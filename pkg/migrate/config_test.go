@@ -19,8 +19,10 @@ func TestConfig(t *testing.T) {
 		// the same thing by having nothing there at all.
 		VersionConstraints: "false",
 		VersionOverrides: []*aquaregistry.VersionOverride{
-			{VersionConstraints: `semver("<= 2.0.0")`, Asset: "old"},
-			{VersionConstraints: `"true"`, Asset: "new"},
+			// The files identify the entries: the asset name is read from the
+			// release, so it doesn't survive the conversion.
+			{VersionConstraints: `semver("<= 2.0.0")`, Files: []*aquaregistry.File{{Name: "old"}}},
+			{VersionConstraints: `"true"`, Files: []*aquaregistry.File{{Name: "new"}}},
 		},
 	}
 
@@ -35,7 +37,7 @@ func TestConfig(t *testing.T) {
 	if cfg.VersionConstraints != "" {
 		t.Errorf("the top level constraint is %q, want none", cfg.VersionConstraints)
 	}
-	got := []string{cfg.VersionOverrides[0].Asset, cfg.VersionOverrides[1].Asset}
+	got := []string{cfg.VersionOverrides[0].Files[0].Name, cfg.VersionOverrides[1].Files[0].Name}
 	if diff := cmp.Diff([]string{"new", "old"}, got); diff != "" {
 		t.Errorf("the overrides are in the wrong order (-want +got):\n%s", diff)
 	}
@@ -71,8 +73,8 @@ func TestConfig_noVersionOverride(t *testing.T) {
 	if diff := cmp.Diff(`"true"`, cfg.VersionOverrides[0].VersionConstraints); diff != "" {
 		t.Errorf("the constraint is wrong (-want +got):\n%s", diff)
 	}
-	if cfg.VersionOverrides[0].Asset != "" {
-		t.Errorf("the override carries %q, want nothing", cfg.VersionOverrides[0].Asset)
+	if cfg.VersionOverrides[0].Files != nil {
+		t.Errorf("the override carries %v, want nothing", cfg.VersionOverrides[0].Files)
 	}
 }
 
@@ -93,5 +95,62 @@ func TestConfig_registryFilterWins(t *testing.T) {
 	}
 	if diff := cmp.Diff("cli-", cfg.VersionPrefix); diff != "" {
 		t.Errorf("the version prefix is wrong (-want +got):\n%s", diff)
+	}
+}
+
+// The format is kept only where the asset name and the file disagree, which happens
+// both ways round.
+func TestConfig_format(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		asset  string
+		format string
+		want   string
+	}{
+		{
+			name:   "the extension says it",
+			asset:  "tool_{{.OS}}_{{.Arch}}.tar.gz",
+			format: "tar.gz",
+			want:   "",
+		},
+		{
+			name:   "the name is built from the format",
+			asset:  "tool_{{.OS}}_{{.Arch}}.{{.Format}}",
+			format: "zip",
+			want:   "",
+		},
+		{
+			// An archive whose name doesn't say so would be read as raw and never
+			// unpacked.
+			name:   "no extension on an archive",
+			asset:  "tool-{{trimV .Version}}",
+			format: "tar.gz",
+			want:   "tar.gz",
+		},
+		{
+			// An extension that is part of the name would be read as an archive
+			// and unpacked into nothing.
+			name:   "an extension that isn't a format",
+			asset:  "tool_{{.OS}}.zip",
+			format: "raw",
+			want:   "raw",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+				Type:      "github_release",
+				RepoOwner: "foo",
+				RepoName:  "foo",
+				VersionOverrides: []*aquaregistry.VersionOverride{
+					{VersionConstraints: `"true"`, Asset: tt.asset, Format: tt.format},
+				},
+			}, nil)
+			if diff := cmp.Diff(tt.want, cfg.VersionOverrides[0].Format); diff != "" {
+				t.Errorf("the format is wrong (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
