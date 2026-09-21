@@ -58,7 +58,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// type the URL or the path is a template that nothing but registry.yaml knows,
 	// so its definition is used as it is.
 	if base != nil && base.Type != aquaregistry.PkgInfoTypeGitHubRelease {
-		return resolve(logger, base, nil, input.Version, nil)
+		return resolve(logger, input.PkgName, base, nil, input.Version, nil)
 	}
 
 	inferred, err := g.packageInfo(ctx, logger, input)
@@ -69,7 +69,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	if err != nil {
 		return nil, err
 	}
-	return resolve(logger, merge(inferred, base), base, input.Version, digests)
+	return resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, digests)
 }
 
 // resolveBase applies the version_overrides of aqua-registry's definition, so that
