@@ -11,6 +11,7 @@ import (
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
 	"github.com/szksh-lab-2/ar2/pkg/cli/initcmd"
+	"github.com/szksh-lab-2/ar2/pkg/cli/run"
 )
 
 // Run creates and executes the ar2 CLI application.
@@ -38,6 +39,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 	flag.LogLevel(cmd.PersistentFlags(), &gFlags.LogLevel)
 	cmd.AddCommand(
 		initcmd.New(logger, gFlags),
+		run.New(logger, gFlags),
 	)
 	return cobrautil.Command(env, cmd, nil)
 }

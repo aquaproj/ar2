@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	gogithub "github.com/google/go-github/v90/github"
+	gogithub "github.com/google/go-github/v91/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"github.com/szksh-lab-2/ar2/pkg/cli/flag"

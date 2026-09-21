@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	gogithub "github.com/google/go-github/v90/github"
+	gogithub "github.com/google/go-github/v91/github"
 	"github.com/szksh-lab-2/ar2/pkg/github"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
 	"github.com/szksh-lab-2/ar2/pkg/state"
