@@ -75,11 +75,18 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	if err != nil {
 		return nil, err
 	}
-	digests, err := g.digests(ctx, input)
+	rel, err := g.release(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	return resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, digests)
+	reg, err := resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, rel.digests)
+	if err != nil {
+		return nil, err
+	}
+	if err := inferSigning(input.PkgName, reg, rel.names); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 // useConfig replaces the aqua-registry definition with aqua-registry-g2's own when
@@ -189,32 +196,62 @@ func writeScaffold(raw *genrgst.RawConfig) (string, func(), error) {
 	return path, clean, nil
 }
 
-// digests returns the SHA256 digest of each asset, keyed by asset name.
+// release is what a release says about its own assets.
+type release struct {
+	// digests holds the SHA256 digest of each asset that has one, keyed by name.
+	//
+	// GitHub started exposing digests on 2025-06-03 and doesn't backfill them, so
+	// this is empty for older releases. Those are downloaded and hashed instead.
+	digests map[string]string
+	// names holds every asset name, which is what the signatures are found by.
+	names map[string]struct{}
+}
+
+// release reads the release's asset list.
 //
-// GitHub started exposing digests on 2025-06-03 and doesn't backfill them, so this
-// is empty for older releases. Those need the asset downloaded and hashed, which
-// this doesn't do yet.
-func (g *Generator) digests(ctx context.Context, input *Input) (map[string]string, error) {
-	owner, name, found := strings.Cut(input.PkgName, "/")
-	if !found {
-		return nil, errPkgNameFormat
+// The list comes with the release rather than being fetched separately, which is one
+// request instead of two per version. Assets whose upload never completed are left
+// out: GitHub keeps them in the "starter" state, where they are hidden from the
+// release page and can't be downloaded.
+func (g *Generator) release(ctx context.Context, input *Input) (*release, error) {
+	owner, name, err := repo(input.PkgName)
+	if err != nil {
+		return nil, err
 	}
-	// A package name can have more than two segments (a monorepo publishing several
-	// binaries); the repository is the first two.
-	if i := strings.Index(name, "/"); i >= 0 {
-		name = name[:i]
-	}
-	release, _, err := g.gh.GetReleaseByTag(ctx, owner, name, input.Version)
+	rel, _, err := g.gh.GetReleaseByTag(ctx, owner, name, input.Version)
 	if err != nil {
 		return nil, fmt.Errorf("get the release: %w", err)
 	}
-	digests := map[string]string{}
-	for _, asset := range release.Assets {
-		digest := asset.GetDigest()
-		if digest == "" {
+	out := &release{
+		digests: map[string]string{},
+		names:   map[string]struct{}{},
+	}
+	for _, asset := range rel.Assets {
+		if asset.GetState() != assetStateUploaded {
 			continue
 		}
-		digests[asset.GetName()] = strings.TrimPrefix(digest, "sha256:")
+		out.names[asset.GetName()] = struct{}{}
+		if digest := asset.GetDigest(); digest != "" {
+			out.digests[asset.GetName()] = strings.TrimPrefix(digest, "sha256:")
+		}
 	}
-	return digests, nil
+	return out, nil
+}
+
+// assetStateUploaded is the state of an asset whose upload has completed.
+const assetStateUploaded = "uploaded"
+
+// repo returns the repository a package is released from.
+//
+// A package name can have more than two segments — a monorepo publishing several
+// binaries — and the repository is the first two.
+func repo(pkgName string) (string, string, error) {
+	owner, name, found := strings.Cut(pkgName, "/")
+	if !found {
+		return "", "", errPkgNameFormat
+	}
+	if i := strings.Index(name, "/"); i >= 0 {
+		name = name[:i]
+	}
+	return owner, name, nil
 }
