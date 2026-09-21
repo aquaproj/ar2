@@ -46,19 +46,24 @@ func NewClient(httpClient *http.Client) *Client {
 	}
 }
 
-// GetStars returns the stargazer count of each repository.
-// Repositories that can't be read (deleted, renamed, private) are left out of the
-// result rather than failing the whole batch, because one missing package must not
-// stop the rest from being initialized.
-func (c *Client) GetStars(ctx context.Context, repos []Repo) (map[string]int, error) {
+// GetStars returns the stargazer count of each repository, and why any of them
+// couldn't be read.
+//
+// A repository that can't be read is left out of the result rather than failing the
+// whole batch, because one missing package must not stop the rest from being
+// initialized. The reason is returned so the caller can say more than that it
+// failed: a deleted repository and an organization refusing the request look the
+// same from here otherwise.
+func (c *Client) GetStars(ctx context.Context, repos []Repo) (map[string]int, map[string]string, error) {
 	stars := make(map[string]int, len(repos))
+	reasons := map[string]string{}
 	for start := 0; start < len(repos); start += BatchSize {
 		end := min(start+BatchSize, len(repos))
-		if err := c.getStars(ctx, repos[start:end], stars); err != nil {
-			return nil, err
+		if err := c.getStars(ctx, repos[start:end], stars, reasons); err != nil {
+			return nil, nil, err
 		}
 	}
-	return stars, nil
+	return stars, reasons, nil
 }
 
 // aliasPrefix keeps the GraphQL aliases valid: an alias can't start with a digit.
@@ -114,7 +119,7 @@ func (e *graphQLError) alias() string {
 // succeeds in a smaller batch.
 const errResourceLimits = "RESOURCE_LIMITS_EXCEEDED"
 
-func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]int) error {
+func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]int, reasons map[string]string) error {
 	result, err := c.request(ctx, repos)
 	if err != nil {
 		return err
@@ -126,7 +131,7 @@ func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]in
 	}
 	// Repositories whose alias hit the resource limit are retried in smaller batches.
 	// They are not missing: the same query succeeds when it asks for less.
-	overflowed := collect(repos, result, stars)
+	overflowed := collect(repos, result, stars, reasons)
 	if len(overflowed) == 0 {
 		return nil
 	}
@@ -134,27 +139,48 @@ func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]in
 		// Splitting would recurse forever on a batch that never shrinks.
 		return fmt.Errorf("GraphQL resource limits exceeded for %d repositories", len(overflowed))
 	}
-	return c.getStars(ctx, overflowed, stars)
+	return c.getStars(ctx, overflowed, stars, reasons)
 }
 
 // collect reads the star counts out of a response and returns the repositories that
 // have to be asked for again because their alias hit the resource limit.
 // Anything else left unanswered (NOT_FOUND) is a repository that can't be resolved;
 // it is left out of the result and reported by the caller.
-func collect(repos []Repo, result *graphQLResponse, stars map[string]int) []Repo {
+func collect(repos []Repo, result *graphQLResponse, stars map[string]int, reasons map[string]string) []Repo {
 	limited := limitedAliases(result.Errors)
+	byAlias := errorsByAlias(result.Errors)
 	var overflowed []Repo
 	for i, repo := range repos {
 		alias := aliasPrefix + strconv.Itoa(i)
 		if r := result.Data[alias]; r != nil {
 			stars[repo.String()] = r.StargazerCount
+			delete(reasons, repo.String())
 			continue
 		}
 		if _, ok := limited[alias]; ok {
 			overflowed = append(overflowed, repo)
+			continue
 		}
+		reasons[repo.String()] = byAlias[alias]
 	}
 	return overflowed
+}
+
+// errorsByAlias maps each alias to why it wasn't answered.
+func errorsByAlias(errs []graphQLError) map[string]string {
+	m := make(map[string]string, len(errs))
+	for _, e := range errs {
+		alias := e.alias()
+		if alias == "" {
+			continue
+		}
+		reason := e.Type
+		if reason == "" {
+			reason = e.Message
+		}
+		m[alias] = reason
+	}
+	return m
 }
 
 // request sends one GraphQL query asking for the star count of each repository.

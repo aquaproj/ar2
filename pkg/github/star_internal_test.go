@@ -77,7 +77,7 @@ func TestClient_GetStars_resourceLimits(t *testing.T) {
 
 	c := NewClient(srv.Client())
 	c.endpoint = srv.URL
-	got, err := c.GetStars(t.Context(), []Repo{
+	got, reasons, err := c.GetStars(t.Context(), []Repo{
 		{Owner: "o", Name: "answered"},
 		{Owner: "o", Name: "limited"},
 		{Owner: "o", Name: "missing"},
@@ -91,5 +91,10 @@ func TestClient_GetStars_resourceLimits(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("the client should retry once, made %d requests", calls)
+	}
+	// The repository that wasn't answered carries why, so the caller can tell a
+	// deleted repository from an organization refusing the request.
+	if got := reasons["o/missing"]; got != "NOT_FOUND" {
+		t.Errorf("the reason is %q, want NOT_FOUND", got)
 	}
 }
