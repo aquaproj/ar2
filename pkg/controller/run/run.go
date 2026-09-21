@@ -34,6 +34,7 @@ type Registry interface {
 	Versions(ctx context.Context, pkgName string) (map[string]struct{}, error)
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	HasConfig(ctx context.Context, pkgName string) (bool, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
@@ -73,6 +74,10 @@ type Input struct {
 	State *state.State
 	// PkgInfos are aqua-registry's definitions, keyed by package name.
 	PkgInfos map[string]*aquaregistry.PackageInfo
+	// RegistryRef is the aqua-registry ref the definitions were read from. A
+	// package's aqua gr configuration is read from the same ref, so that the two
+	// halves of a definition come from one state of that repository.
+	RegistryRef string
 }
 
 // Run generates registry.json for up to Limit package versions.
@@ -156,7 +161,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if input.SkipPR {
 		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
-	if err := c.openPullRequest(ctx, logger, candidate.Name, generated); err != nil {
+	if err := c.openPullRequest(ctx, logger, input, candidate.Name, generated); err != nil {
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil

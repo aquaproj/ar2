@@ -25,24 +25,15 @@ type version struct {
 // branch would conflict, since the second is written against a base the first has
 // moved. It also keeps the number of pull requests to something a maintainer can
 // look at.
-func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, pkgName string, versions []*version) error {
+func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []*version) error {
 	base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
 	if err != nil {
 		return fmt.Errorf("ensure the package branch: %w", err)
 	}
 
-	files := make([]*g2.File, 0, len(versions))
-	needsReview := false
-	for _, v := range versions {
-		content, err := marshal(v.Registry)
-		if err != nil {
-			return err
-		}
-		files = append(files, &g2.File{
-			Path:    fmt.Sprintf("%s/%s/registry.json", g2.VersionDir, v.Version),
-			Content: content,
-		})
-		needsReview = needsReview || v.NeedsReview
+	files, needsReview, err := c.filesToCommit(ctx, logger, input, pkgName, versions)
+	if err != nil {
+		return err
 	}
 
 	title := prTitle(pkgName, versions)
@@ -75,6 +66,39 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 			"number", pr.GetNumber(), "error", err.Error())
 	}
 	return nil
+}
+
+// filesToCommit gathers everything the pull request carries, and reports whether any
+// of it has to be looked at before merging.
+func (c *Controller) filesToCommit(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []*version) ([]*g2.File, bool, error) {
+	files := make([]*g2.File, 0, len(versions)+1)
+	needsReview := false
+
+	// A package whose definition isn't on its branch yet is one aqua-registry-g2
+	// hasn't taken over. Converting it here means the move happens as a package is
+	// worked on rather than as a migration of its own, and it arrives for review
+	// beside the files generated from it.
+	config, configReview, err := c.packageConfig(ctx, logger, input, pkgName)
+	if err != nil {
+		return nil, false, err
+	}
+	if config != nil {
+		files = append(files, config)
+		needsReview = needsReview || configReview
+	}
+
+	for _, v := range versions {
+		content, err := marshal(v.Registry)
+		if err != nil {
+			return nil, false, err
+		}
+		files = append(files, &g2.File{
+			Path:    fmt.Sprintf("%s/%s/registry.json", g2.VersionDir, v.Version),
+			Content: content,
+		})
+		needsReview = needsReview || v.NeedsReview
+	}
+	return files, needsReview, nil
 }
 
 // marshal renders registry.json the way it is stored: on one line.

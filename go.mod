@@ -3,7 +3,7 @@ module github.com/szksh-lab-2/ar2
 go 1.27.1
 
 require (
-	github.com/aquaproj/aqua/v2 v2.63.1-0.20260921115902-cd5d3f17bf07
+	github.com/aquaproj/aqua/v2 v2.63.1-0.20260921131847-5f71e92a53b9
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v92 v92.0.0
 	github.com/opencontainers/image-spec v1.1.1

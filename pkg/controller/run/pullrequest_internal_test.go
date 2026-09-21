@@ -30,6 +30,12 @@ func (f *fakeRegistry) EnsurePackageBranch(_ context.Context, _ string) (string,
 	return "base-sha", nil
 }
 
+// hasConfig says the branch already holds the package definition, so these tests see
+// only the generated files.
+func (f *fakeRegistry) HasConfig(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeRegistry) Commit(_ context.Context, _, _, _ string, files []*g2.File) error {
 	f.committed = files
 	return nil
@@ -70,7 +76,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(nil, nil, reg, failingAutoMerger{}, nil)
-	err := c.openPullRequest(t.Context(), discardLogger(), "cli/cli", []*version{
+	err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
 	if err != nil {
@@ -87,7 +93,7 @@ func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(nil, nil, reg, failingAutoMerger{}, nil)
-	if err := c.openPullRequest(t.Context(), discardLogger(), "cli/cli", []*version{
+	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
 	}); err != nil {
