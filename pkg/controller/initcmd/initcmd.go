@@ -67,6 +67,11 @@ func (c *Controller) Init(ctx context.Context, logger *slog.Logger, input *Input
 	if err != nil {
 		return fmt.Errorf("get star counts: %w", err)
 	}
+	// An organization's IP allow list refuses an authenticated request even for a
+	// public repository, and the GitHub Actions token counts, so running in Actions
+	// loses the star count of every package such an organization owns. Anonymous
+	// requests aren't covered by the allow list.
+	c.graphql.FillForbiddenStars(ctx, stars, reasons)
 	setStars(logger, s, stars, reasons)
 	s.UpdatedAt = c.now()
 
