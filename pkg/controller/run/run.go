@@ -99,6 +99,11 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		}
 		n, err := c.runPackage(ctx, logger, input, candidate, input.Limit-generated)
 		if err != nil {
+			if g2.ErrNoTemplate(err) {
+				// Every package would fail the same way, so the run stops instead of
+				// walking the whole registry to find that out.
+				return generated, err
+			}
 			// One package must not stop the run: a repository can be deleted or
 			// renamed at any time, and the remaining packages are still worth doing.
 			logger.Warn("failed to process a package", "package", candidate.Name, "error", err.Error())

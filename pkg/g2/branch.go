@@ -18,14 +18,21 @@ import (
 // checked, because a pull_request workflow is read from the branch the pull request
 // targets. The files live on main so that changing them changes what every new
 // branch gets.
-const TemplateDir = "templates"
+const TemplateDir = "template"
 
 // errNoTemplate stops a package branch from being created without the workflow that
 // checks pull requests into it. A branch ruleset requiring status checks is what
 // actually keeps an unchecked change from merging; failing here means the branch is
 // never created in a state where its pull requests can't pass, rather than leaving
 // one behind that nothing can merge into.
-var errNoTemplate = errors.New("main has no " + TemplateDir + " to start a package branch from")
+var errNoTemplate = errors.New("the default branch has no " + TemplateDir + " directory to start a package branch from")
+
+// ErrNoTemplate reports whether an error is the missing template. It stops a run
+// rather than being retried per package: every package would hit it, and walking the
+// whole registry to say so wastes a run's worth of API calls.
+func ErrNoTemplate(err error) bool {
+	return errors.Is(err, errNoTemplate)
+}
 
 const readmePath = "README.md"
 
