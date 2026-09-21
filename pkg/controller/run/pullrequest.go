@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
@@ -25,13 +26,13 @@ type version struct {
 // branch would conflict, since the second is written against a base the first has
 // moved. It also keeps the number of pull requests to something a maintainer can
 // look at.
-func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []*version) error {
+func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string, versions []*version) error {
 	base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
 	if err != nil {
 		return fmt.Errorf("ensure the package branch: %w", err)
 	}
 
-	files, needsReview, err := c.filesToCommit(ctx, logger, input, pkgName, versions)
+	files, needsReview, err := c.filesToCommit(ctx, logger, input, config, pkgName, versions)
 	if err != nil {
 		return err
 	}
@@ -70,7 +71,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, i
 
 // filesToCommit gathers everything the pull request carries, and reports whether any
 // of it has to be looked at before merging.
-func (c *Controller) filesToCommit(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []*version) ([]*g2.File, bool, error) {
+func (c *Controller) filesToCommit(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string, versions []*version) ([]*g2.File, bool, error) {
 	files := make([]*g2.File, 0, len(versions)+1)
 	needsReview := false
 
@@ -78,12 +79,12 @@ func (c *Controller) filesToCommit(ctx context.Context, logger *slog.Logger, inp
 	// hasn't taken over. Converting it here means the move happens as a package is
 	// worked on rather than as a migration of its own, and it arrives for review
 	// beside the files generated from it.
-	config, configReview, err := c.packageConfig(ctx, logger, input, pkgName)
+	cfgFile, configReview, err := c.packageConfig(ctx, logger, input, config, pkgName)
 	if err != nil {
 		return nil, false, err
 	}
-	if config != nil {
-		files = append(files, config)
+	if cfgFile != nil {
+		files = append(files, cfgFile)
 		needsReview = needsReview || configReview
 	}
 

@@ -21,12 +21,8 @@ import (
 // aqua-registry, so it is converted the first time the package is worked on. The
 // conversion travels with the files generated from it, which is what makes the move
 // happen package by package instead of as a migration of its own.
-func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, input *Input, pkgName string) (*g2.File, bool, error) {
-	has, err := c.g2.HasConfig(ctx, pkgName)
-	if err != nil {
-		return nil, false, fmt.Errorf("check whether the package definition exists: %w", err)
-	}
-	if has {
+func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string) (*g2.File, bool, error) {
+	if config != nil {
 		return nil, false, nil
 	}
 

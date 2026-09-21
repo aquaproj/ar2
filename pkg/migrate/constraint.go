@@ -43,11 +43,11 @@ func ReverseVersionOverrides(overrides []*aquaregistry.VersionOverride) ([]*aqua
 		// The oldest entry keeps its constraint: nothing sits below it, so its
 		// upper bound is the whole boundary.
 		if i > 0 {
-			bound, ok := upperBound(overrides[i-1].VersionConstraints)
+			lower, ok := lowerBound(overrides[i-1].VersionConstraints)
 			if !ok {
 				unconverted = append(unconverted, overrides[i-1].VersionConstraints)
 			} else {
-				vo.VersionConstraints = fmt.Sprintf("semver(%q)", "> "+bound)
+				vo.VersionConstraints = fmt.Sprintf("semver(%q)", lower)
 			}
 		}
 		reversed = append(reversed, &vo)
@@ -55,13 +55,20 @@ func ReverseVersionOverrides(overrides []*aquaregistry.VersionOverride) ([]*aqua
 	return reversed, unconverted
 }
 
-// upperBound reads the version a constraint bounds from above.
+// lowerBound turns the bound an entry has from above into the bound the entry above
+// it needs from below.
+//
+// The two have to meet exactly: whatever the one below doesn't cover, the one above
+// must. So "<= 3.0.7" becomes "> 3.0.7" and "< 4.14.0" becomes ">= 4.14.0", because
+// the version on the boundary belongs to whichever of them didn't exclude it.
+// Getting this wrong loses a single version to the wrong definition, which is the
+// kind of thing that only shows up on the day someone installs it.
 //
 // Only the shape v1 writes is understood: a single semver call with one "<=" or "<"
 // comparison. Anything else, such as Version == or a compound expression, is left to
 // a person, because turning it into a boundary would be a guess about what the entry
 // was for.
-func upperBound(constraint string) (string, bool) {
+func lowerBound(constraint string) (string, bool) {
 	s := strings.TrimSpace(constraint)
 	inner, ok := strings.CutPrefix(s, "semver(")
 	if !ok {
@@ -81,13 +88,19 @@ func upperBound(constraint string) (string, bool) {
 		// position and rewriting it would change what it means.
 		return "", false
 	}
-	for _, op := range []string{"<=", "<"} {
-		if v, ok := strings.CutPrefix(inner, op); ok {
+	for _, op := range []struct {
+		upper string
+		lower string
+	}{
+		{upper: "<=", lower: "> "},
+		{upper: "<", lower: ">= "},
+	} {
+		if v, ok := strings.CutPrefix(inner, op.upper); ok {
 			v = strings.TrimSpace(v)
 			if v == "" {
 				return "", false
 			}
-			return v, true
+			return op.lower + v, true
 		}
 	}
 	return "", false

@@ -104,3 +104,22 @@ func TestReverseVersionOverrides_range(t *testing.T) {
 		t.Errorf("the unconverted constraints are wrong (-want +got):\n%s", diff)
 	}
 }
+
+// The bounds have to meet exactly. A "<" entry excludes the version on its boundary,
+// so the entry above it has to include it; suzuki-shunsuke/tfcmt is the case in
+// aqua-registry, where v4.14.0 belongs to the entry above "< 4.14.0".
+func TestReverseVersionOverrides_exclusiveBound(t *testing.T) {
+	t.Parallel()
+	got, unconverted := migrate.ReverseVersionOverrides(overrides(
+		`semver("< 4.14.0")`,
+		`semver("<= 4.14.12")`,
+		`"true"`,
+	))
+	want := []string{`semver("> 4.14.12")`, `semver(">= 4.14.0")`, `semver("< 4.14.0")`}
+	if diff := cmp.Diff(want, constraints(got)); diff != "" {
+		t.Errorf("the constraints are wrong (-want +got):\n%s", diff)
+	}
+	if len(unconverted) != 0 {
+		t.Errorf("got %v as unconverted, want none", unconverted)
+	}
+}

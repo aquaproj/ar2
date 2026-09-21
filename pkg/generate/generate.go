@@ -12,6 +12,7 @@ import (
 	aquaconfig "github.com/aquaproj/aqua/v2/pkg/config"
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
+	"github.com/aquaproj/aqua/v2/pkg/g2"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -30,6 +31,11 @@ type Input struct {
 	// the signing configuration. It may be nil for a package aqua-registry doesn't
 	// have yet.
 	Base *aquaregistry.PackageInfo
+	// Config is the package's definition on its aqua-registry-g2 branch. When it is
+	// set it replaces Base and Scaffold, because it is what those were converted
+	// into: aqua-registry is where a package's definition comes from until
+	// aqua-registry-g2 has one of its own, and after that it is no longer consulted.
+	Config *g2.Config
 }
 
 // Generator builds registry.json from a release.
@@ -49,6 +55,10 @@ func New(gh genrgst.RepositoriesService) *Generator {
 // the registry. The inferred PackageInfo is then resolved for each os/arch the same
 // way aqua resolves it at install time, so the static result installs identically.
 func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *Input) (*Registry, error) {
+	input, err := useConfig(logger, input)
+	if err != nil {
+		return nil, err
+	}
 	base, err := resolveBase(logger, input)
 	if err != nil {
 		return nil, err
@@ -70,6 +80,39 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return nil, err
 	}
 	return resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, digests)
+}
+
+// useConfig replaces the aqua-registry definition with aqua-registry-g2's own when
+// the package has one.
+//
+// The two say the same things; g2's is what aqua-registry's was converted into, minus
+// what a release is read for. Preferring it is what makes the conversion take effect:
+// the filters it carries are what decide which assets are considered at all, and a
+// correction made to it would otherwise never be used.
+//
+// Base is already resolved for the version by resolveBase, so the definition is
+// handed over in the same shape.
+func useConfig(logger *slog.Logger, input *Input) (*Input, error) {
+	if input.Config == nil {
+		return input, nil
+	}
+	pkgInfo, err := input.Config.SetVersion(logger, input.Version)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the package definition for the version: %w", err)
+	}
+	// SetVersion has applied the overrides, so resolveBase must not apply them
+	// again.
+	pkgInfo.VersionConstraints = ""
+	pkgInfo.VersionOverrides = nil
+
+	replaced := *input
+	replaced.Base = pkgInfo
+	replaced.Scaffold = &genrgst.RawConfig{
+		AllAssetsFilter: input.Config.AllAssetsFilter,
+		VersionFilter:   pkgInfo.VersionFilter,
+		VersionPrefix:   pkgInfo.VersionPrefix,
+	}
+	return &replaced, nil
 }
 
 // resolveBase applies the version_overrides of aqua-registry's definition, so that
