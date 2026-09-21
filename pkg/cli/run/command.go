@@ -147,10 +147,15 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, a
 		return fmt.Errorf("generate registry.json: %w", err)
 	}
 
-	if args.Verify {
-		if err := verifyAssets(ctx, logger, version, reg); err != nil {
-			return err
-		}
+	// Assets without a digest are hashed whether or not --verify is set: a
+	// registry.json missing a checksum would defeat the lock file.
+	needsReview, err := verify.New(http.DefaultClient).Fill(ctx, logger.Logger, version, reg, args.Verify)
+	if err != nil {
+		return fmt.Errorf("complete registry.json: %w", err)
+	}
+	if needsReview {
+		// The caller creating a pull request has to keep it out of auto-merge.
+		logger.Warn("registry.json needs review: files were relocated or couldn't be found")
 	}
 
 	return write(args.Output, reg)
@@ -170,38 +175,6 @@ func baseDefinition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.C
 		logger.Warn("aqua-registry has no definition of the package", "package", pkgName)
 	}
 	return base, nil
-}
-
-// verifyAssets extracts every asset and resolves its files against the archive.
-//
-// It downloads each asset, so it is off by default: generation alone needs no
-// download at all when the release reports digests.
-func verifyAssets(ctx context.Context, logger *slogutil.Logger, version string, reg *generate.Registry) error {
-	v := verify.New(http.DefaultClient)
-	needsReview := false
-	for _, asset := range reg.Assets {
-		result, err := v.Verify(ctx, logger.Logger, version, asset)
-		if err != nil {
-			return fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
-		}
-		asset.Files = result.Files
-		if asset.Checksum == "" {
-			asset.Checksum = result.Checksum
-			asset.ChecksumAlgorithm = "sha256"
-		} else if asset.Checksum != result.Checksum {
-			return fmt.Errorf("the digest of %s doesn't match the downloaded asset", asset.Asset)
-		}
-		if result.NeedsReview {
-			needsReview = true
-			logger.Warn("the files of this asset don't match the archive",
-				"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
-		}
-	}
-	if needsReview {
-		// The caller creating a pull request has to keep it out of auto-merge.
-		logger.Warn("registry.json needs review: files were relocated or couldn't be found")
-	}
-	return nil
 }
 
 // write writes registry.json to path, or to standard output when path is empty.

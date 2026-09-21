@@ -63,6 +63,37 @@ type Result struct {
 	Unresolved []string
 }
 
+// Checksum downloads the asset and returns its SHA256, without extracting it.
+//
+// It is used for a release published before 2025-06-03, when GitHub started
+// reporting a digest for release assets. Those digests are not backfilled, so the
+// only way to get a checksum for an older release is to hash the bytes. A
+// registry.json without a checksum would defeat the point of the lock file, so this
+// isn't optional the way extracting is.
+func (v *Verifier) Checksum(ctx context.Context, logger *slog.Logger, version string, asset *generate.Asset) (string, error) {
+	url, err := downloadURL(version, asset)
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp("", "ar2-checksum")
+	if err != nil {
+		return "", fmt.Errorf("create a temporary directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	logger.Debug("downloading an asset to hash it", "url", url)
+	return v.download(ctx, url, filepath.Join(dir, assetFileName(url, asset)))
+}
+
+// assetFileName is what the downloaded asset is called on disk. An http package has
+// no asset name, so the URL supplies one.
+func assetFileName(url string, asset *generate.Asset) string {
+	if asset.Asset != "" {
+		return filepath.Base(asset.Asset)
+	}
+	return filepath.Base(url)
+}
+
 // Verify downloads the asset, extracts it, and resolves its files against the
 // archive's actual contents.
 func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version string, asset *generate.Asset) (*Result, error) {
@@ -77,11 +108,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version stri
 	}
 	defer os.RemoveAll(dir)
 
-	name := asset.Asset
-	if name == "" {
-		name = filepath.Base(url)
-	}
-	path := filepath.Join(dir, filepath.Base(name))
+	path := filepath.Join(dir, assetFileName(url, asset))
 	logger.Debug("downloading an asset", "url", url)
 	checksum, err := v.download(ctx, url, path)
 	if err != nil {
@@ -91,7 +118,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version stri
 	dest := filepath.Join(dir, "extracted")
 	if err := v.unarchiver.Unarchive(ctx, logger, &unarchive.File{
 		Body:     &downloadedFile{path: path},
-		Filename: name,
+		Filename: asset.Asset,
 		Type:     asset.Format,
 	}, dest); err != nil {
 		return nil, fmt.Errorf("extract the asset: %w", err)
