@@ -1,6 +1,31 @@
 {
   "checksums": [
     {
+      "id": "github_release/github.com/apple/pkl/0.32.1/pkl-linux-aarch64",
+      "checksum": "A76D2DD47DA435A8F911B0347373F47C7E59EA54FB75FF846D20B8DF10DBA058",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/apple/pkl/0.32.1/pkl-linux-amd64",
+      "checksum": "3180B62DA95C0CAD1D904E9BB6C5F4A8F9032413C21E53194BB91FF1EE5F3211",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/apple/pkl/0.32.1/pkl-macos-aarch64",
+      "checksum": "563EB51C9A20B16A3625464ED745C675ED9750381F2126722696A0D7CAC1D9D3",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/apple/pkl/0.32.1/pkl-macos-amd64",
+      "checksum": "5B74B903234047960144F66F2CEBDD12D267D9B98E8155ED91D2AE5ED27E2D1F",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/apple/pkl/0.32.1/pkl-windows-amd64.exe",
+      "checksum": "8550A00FCF027335E42C5E2CD553B88E98845408CB1880B3E3D1860CAF46D22A",
+      "algorithm": "sha256"
+    },
+    {
       "id": "github_release/github.com/crate-ci/typos/v1.50.2/typos-v1.50.2-aarch64-apple-darwin.tar.gz",
       "checksum": "70D61E9D682034133F0AA56F5A02BAE0DE168495F3CCE62A87054AA7186C1901",
       "algorithm": "sha256"
@@ -53,6 +78,31 @@
     {
       "id": "github_release/github.com/golangci/golangci-lint/v2.13.2/golangci-lint-2.13.2-windows-arm64.zip",
       "checksum": "2DBFFBD1225D41AC5740F0B478A43B6517F3E3F702FE0AB3AEC470BD6EC8E263",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/jdx/hk/v2.0.1/hk-aarch64-apple-darwin.tar.gz",
+      "checksum": "6EC393F898F562F76C4839A910356B4AFEC6740EFF23F18EBDF8CF41C793A461",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/jdx/hk/v2.0.1/hk-aarch64-pc-windows-msvc.zip",
+      "checksum": "4243694DAC131B519F65FDACF7453684DD116F97053FED5430FAE30DF7204DD4",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/jdx/hk/v2.0.1/hk-aarch64-unknown-linux-gnu.tar.gz",
+      "checksum": "8A28F2737914BBFFA8DD16F39A2FC65D85E9A52261789CF6A1AFFD6C6762FBC1",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/jdx/hk/v2.0.1/hk-x86_64-pc-windows-msvc.zip",
+      "checksum": "B3CB8AB5958393FAACEFABFB3A402060EB256B1FDA8E1F83C74C3FC877EBFF8F",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/jdx/hk/v2.0.1/hk-x86_64-unknown-linux-gnu.tar.gz",
+      "checksum": "F14D0290A07F82911F32EA5E4A91DD80D90ABB852488912B1ADE9B240F70D615",
       "algorithm": "sha256"
     },
     {
