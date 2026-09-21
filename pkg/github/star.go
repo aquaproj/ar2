@@ -54,13 +54,21 @@ func NewClient(httpClient *http.Client) *Client {
 // initialized. The reason is returned so the caller can say more than that it
 // failed: a deleted repository and an organization refusing the request look the
 // same from here otherwise.
+//
+// A batch that fails outright is treated the same way. Returning nothing would throw
+// away every count already read, and building the state from scratch asks for more
+// than two thousand of them in 47 batches: one failing request would leave every
+// package looking equally unused and the run processing them in name order.
 func (c *Client) GetStars(ctx context.Context, repos []Repo) (map[string]int, map[string]string, error) {
 	stars := make(map[string]int, len(repos))
 	reasons := map[string]string{}
 	for start := 0; start < len(repos); start += BatchSize {
 		end := min(start+BatchSize, len(repos))
-		if err := c.getStars(ctx, repos[start:end], stars, reasons); err != nil {
-			return nil, nil, err
+		batch := repos[start:end]
+		if err := c.getStars(ctx, batch, stars, reasons); err != nil {
+			for _, repo := range batch {
+				reasons[repo.String()] = err.Error()
+			}
 		}
 	}
 	return stars, reasons, nil

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,5 +97,48 @@ func TestClient_GetStars_resourceLimits(t *testing.T) {
 	// deleted repository from an organization refusing the request.
 	if got := reasons["o/missing"]; got != "NOT_FOUND" {
 		t.Errorf("the reason is %q, want NOT_FOUND", got)
+	}
+}
+
+// TestClient_GetStars_batchFails checks that a batch which fails outright doesn't
+// take the counts already read with it.
+//
+// Building the state from scratch asks for more than two thousand counts in 47
+// batches. Returning nothing on the first failure left every package looking equally
+// unused, so the run processed them in name order instead of by how many people use
+// them.
+func TestClient_GetStars_batchFails(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"r0":{"stargazerCount":7}}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.Client())
+	c.endpoint = srv.URL
+	repos := make([]Repo, 0, BatchSize+1)
+	for i := range BatchSize + 1 {
+		repos = append(repos, Repo{Owner: "o", Name: strconv.Itoa(i)})
+	}
+
+	stars, reasons, err := c.GetStars(t.Context(), repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first batch answered for its first alias, so that count survives.
+	if stars["o/0"] != 7 {
+		t.Errorf("the count read before the failure should survive, got %v", stars["o/0"])
+	}
+	// The repository in the failed batch is reported rather than silently absent.
+	failed := repos[BatchSize].String()
+	if reasons[failed] == "" {
+		t.Errorf("a repository in a failed batch should carry a reason, got none for %s", failed)
 	}
 }

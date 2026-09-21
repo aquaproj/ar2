@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -35,14 +36,14 @@ func (c *Controller) SyncState(ctx context.Context, logger *slog.Logger, s *stat
 		}
 		repos = append(repos, github.Repo{Owner: pkg.RepoOwner, Name: pkg.RepoName})
 	}
+	// A repository whose count can't be read is reported rather than fatal: the
+	// package is added without one, and being processed last is better than not
+	// being processed.
 	stars, reasons, err := c.graphql.GetStars(ctx, repos)
 	if err != nil {
-		// The packages are added without a star count rather than not at all: being
-		// processed last is better than not being processed.
-		logger.Warn("failed to get the star counts of the new packages", "error", err.Error())
-	} else {
-		c.graphql.FillForbiddenStars(ctx, stars, reasons)
+		return false, fmt.Errorf("get the star counts of the new packages: %w", err)
 	}
+	c.graphql.FillForbiddenStars(ctx, stars, reasons)
 
 	for name, pkg := range added {
 		if repo := pkg.RepoOwner + "/" + pkg.RepoName; pkg.RepoOwner != "" {
