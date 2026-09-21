@@ -94,18 +94,18 @@ func (c *Client) EnsurePackageBranch(ctx context.Context, pkgName string) (strin
 		Type:    new(blobType),
 		Content: new(readmeContent(pkgName)),
 	})
-	tree, _, err := c.gh.Git.CreateTree(ctx, c.owner, c.repo, "", entries)
+	tree, _, err := c.branchGH.Git.CreateTree(ctx, c.owner, c.repo, "", entries)
 	if err != nil {
 		return "", fmt.Errorf("create the tree of a package branch: %w", err)
 	}
-	commit, _, err := c.gh.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
+	commit, _, err := c.branchGH.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
 		Message: new("chore: create the branch of " + pkgName),
 		Tree:    tree,
 	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("create the first commit of a package branch: %w", err)
 	}
-	if _, _, err := c.gh.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
+	if _, _, err := c.branchGH.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
 		Ref: "refs/heads/" + branch,
 		SHA: commit.GetSHA(),
 	}); err != nil {

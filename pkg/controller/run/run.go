@@ -79,15 +79,21 @@ type Input struct {
 //
 // It returns the number generated. Nothing is recorded: the next run asks
 // aqua-registry-g2 what it holds, so whatever didn't make it in is picked up again.
+//
+// The limit bounds versions attempted, not versions generated. Counting only what
+// succeeded meant a package that fails for every version — a jar with no platform in
+// its name, say — consumed no budget, so the run worked through all of its versions
+// and then through every other package, spending an entire run's API calls on
+// failures.
 func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input) (int, error) {
 	inFlight, err := c.g2.PackagesInFlight(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
 
-	generated := 0
+	generated, attempted := 0, 0
 	for _, candidate := range order(input.State) {
-		if generated >= input.Limit {
+		if attempted >= input.Limit {
 			return generated, nil
 		}
 		if _, ok := inFlight[g2.HeadBranchName(candidate.Name)]; ok {
@@ -97,7 +103,14 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 			logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
 			continue
 		}
-		n, err := c.runPackage(ctx, logger, input, candidate, input.Limit-generated)
+		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted)
+		if err != nil && tried == 0 {
+			// A package that failed before reaching any version still cost API calls
+			// and still has to move the run forward, or a failure every package
+			// shares walks the whole registry.
+			tried = 1
+		}
+		attempted += tried
 		if err != nil {
 			if g2.ErrNoTemplate(err) {
 				// Every package would fail the same way, so the run stops instead of
@@ -116,35 +129,37 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 
 // runPackage generates the missing versions of one package, newest first, up to
 // budget.
-func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int) (int, error) {
+// runPackage generates the missing versions of one package, newest first, up to
+// budget. It returns how many were generated and how many were attempted.
+func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int) (int, int, error) {
 	pkg := candidate.Package
 	if pkg.RepoOwner == "" || pkg.RepoName == "" {
 		// Versions can only be listed for a GitHub repository. Packages without one
 		// need another source and aren't handled yet.
-		return 0, nil
+		return 0, 0, nil
 	}
 	versions, err := c.versions(ctx, logger, pkg, input.PkgInfos[candidate.Name])
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	existing, err := c.g2.Versions(ctx, candidate.Name)
 	if err != nil {
-		return 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
+		return 0, 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
 	}
 
 	budget = limitBudget(budget, existing)
 
-	generated := c.generateVersions(ctx, logger, input, candidate.Name, versions, existing, budget)
+	generated, attempted := c.generateVersions(ctx, logger, input, candidate.Name, versions, existing, budget)
 	if len(generated) == 0 {
-		return 0, nil
+		return 0, attempted, nil
 	}
 	if input.SkipPR {
-		return len(generated), writeAll(input.OutputDir, candidate.Name, generated)
+		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
 	if err := c.openPullRequest(ctx, logger, candidate.Name, generated); err != nil {
-		return 0, err
+		return 0, attempted, err
 	}
-	return len(generated), nil
+	return len(generated), attempted, nil
 }
 
 // limitBudget limits how much of the run's remaining budget one package may take.
@@ -181,15 +196,17 @@ const breadthDepth = 5
 
 // generateVersions generates the versions the repository is missing, newest first,
 // up to budget.
-func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []string, existing map[string]struct{}, budget int) []*version {
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []string, existing map[string]struct{}, budget int) ([]*version, int) {
 	generated := make([]*version, 0, budget)
+	attempted := 0
 	for _, tag := range versions {
-		if len(generated) >= budget {
-			return generated
+		if attempted >= budget {
+			return generated, attempted
 		}
 		if _, ok := existing[tag]; ok {
 			continue
 		}
+		attempted++
 		v, err := c.generate(ctx, logger, input, pkgName, tag)
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
@@ -200,7 +217,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		}
 		generated = append(generated, v)
 	}
-	return generated
+	return generated, attempted
 }
 
 // generate builds registry.json for one package version and completes it.

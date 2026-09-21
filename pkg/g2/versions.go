@@ -12,16 +12,29 @@ import (
 // package's branch.
 const VersionDir = "versions"
 
-// Client reads aqua-registry-g2.
+// Client reads and writes aqua-registry-g2.
 type Client struct {
 	gh    *gogithub.Client
 	owner string
 	repo  string
+	// branchGH creates the package branches. It is separate because creating one
+	// has to get past the ruleset requiring status checks, which a brand new branch
+	// can't have, while everything else must not.
+	//
+	// The token behind it is a GitHub App installation token whose app is listed as
+	// a bypass actor for that ruleset and holds no pull-requests permission. It
+	// therefore cannot open or merge a pull request, so the bypass can't be turned
+	// into a way to land an unchecked change. When it isn't configured, branches are
+	// created with the ordinary client, which works wherever no such ruleset exists.
+	branchGH *gogithub.Client
 }
 
-// New creates a Client.
-func New(gh *gogithub.Client, owner, repo string) *Client {
-	return &Client{gh: gh, owner: owner, repo: repo}
+// New creates a Client. branchGH may be nil.
+func New(gh, branchGH *gogithub.Client, owner, repo string) *Client {
+	if branchGH == nil {
+		branchGH = gh
+	}
+	return &Client{gh: gh, branchGH: branchGH, owner: owner, repo: repo}
 }
 
 // Versions returns the versions of the package whose registry.json is in the

@@ -35,7 +35,11 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		return fmt.Errorf("get the aqua-registry definitions: %w", err)
 	}
 
-	c := ctrl.New(gh, generate.New(gh.Repositories), g2.New(gh, args.G2Owner, args.G2Repo),
+	branchGH, err := branchClient()
+	if err != nil {
+		return err
+	}
+	c := ctrl.New(gh, generate.New(gh.Repositories), g2.New(gh, branchGH, args.G2Owner, args.G2Repo),
 		github.NewClient(httpClient), verify.New(http.DefaultClient))
 
 	// aqua-registry gains packages continuously, and one the state doesn't know
@@ -95,6 +99,30 @@ func readState(ctx context.Context, logger *slogutil.Logger, args *Args) (*state
 	// has is new to it, so the sync that follows builds the whole thing.
 	logger.Info("the container registry holds no state; building it from scratch")
 	return state.New(), nil
+}
+
+// branchTokenEnv holds the token that creates the package branches.
+//
+// Creating one has to get past the ruleset requiring status checks, which a brand
+// new branch can't have. The token belongs to a GitHub App listed as a bypass actor
+// for that ruleset and holding no pull-requests permission, so it can't open or
+// merge a pull request and the bypass can't become a way to land an unchecked
+// change. Without it, branches are created with the ordinary token, which works
+// wherever no such ruleset exists.
+const branchTokenEnv = "AR2_BRANCH_TOKEN" //nolint:gosec // the name of an environment variable, not a credential
+
+// branchClient returns the client that creates package branches, or nil to use the
+// ordinary one.
+func branchClient() (*gogithub.Client, error) {
+	token := os.Getenv(branchTokenEnv)
+	if token == "" {
+		return nil, nil //nolint:nilnil
+	}
+	gh, err := gogithub.NewClient(gogithub.WithAuthToken(token))
+	if err != nil {
+		return nil, fmt.Errorf("create a GitHub client for creating branches: %w", err)
+	}
+	return gh, nil
 }
 
 // writeState stores the state where it was read from.
