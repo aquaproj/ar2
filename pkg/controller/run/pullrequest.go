@@ -17,6 +17,9 @@ type version struct {
 	Version     string
 	Registry    *generate.Registry
 	NeedsReview bool
+	// LostSigning names what this version can no longer be verified with that the
+	// version before it could, as "<environment>: <kind>".
+	LostSigning []string
 }
 
 // openPullRequest commits every version generated for a package and opens one pull
@@ -159,6 +162,17 @@ func (c *Controller) addToSummary(pkgName string, versions []*version) error {
 	return c.summary.Add(pkgName, m) //nolint:wrapcheck
 }
 
+// lostLines describes what each version stopped being verifiable with.
+func lostLines(versions []*version) []string {
+	var lines []string
+	for _, v := range versions {
+		for _, lost := range v.LostSigning {
+			lines = append(lines, v.Version+" "+lost)
+		}
+	}
+	return lines
+}
+
 func prTitle(pkgName string, versions []*version) string {
 	if len(versions) == 1 {
 		return fmt.Sprintf("feat(%s): add %s", pkgName, versions[0].Version)
@@ -176,9 +190,18 @@ func prBody(versions []*version, needsReview bool) string {
 		}
 		b.WriteString("\n")
 	}
+	if lost := lostLines(versions); len(lost) > 0 {
+		b.WriteString("\nThese versions can be verified with less than the version before them:\n\n")
+		for _, line := range lost {
+			b.WriteString("- " + line + "\n")
+		}
+		b.WriteString("\nA release that stops carrying its signatures is what an attacker publishing one " +
+			"would look like from here, so this has to be looked at before it merges.\n")
+	}
 	if needsReview {
-		b.WriteString("\nAuto-merge is off. Either `files[].src` didn't match the archive and was relocated by name, " +
-			"which is a guess, or the archive couldn't be checked at all. See the run's log.\n")
+		b.WriteString("\nAuto-merge is off. Either a version lost the signing the one before it had, " +
+			"or `files[].src` didn't match the archive and was relocated by name, which is a guess, " +
+			"or the archive couldn't be checked at all. See the run's log.\n")
 	}
 	return b.String()
 }

@@ -31,6 +31,12 @@ func (f *fakeRegistry) EnsurePackageBranch(_ context.Context, _ string) (string,
 	return "base-sha", nil
 }
 
+// Version is never asked for: these tests generate for a package the repository
+// holds nothing of, so there is no earlier version to compare the signing against.
+func (f *fakeRegistry) Version(_ context.Context, _, _ string) (*aquag2.Registry, error) {
+	return nil, nil //nolint:nilnil
+}
+
 // Config is never asked for: these tests pass the definition in, so that they see
 // only the generated files.
 func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, error) {

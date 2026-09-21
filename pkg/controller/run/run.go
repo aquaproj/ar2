@@ -36,6 +36,7 @@ type Registry interface {
 	Versions(ctx context.Context, pkgName string) (map[string]struct{}, error)
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
@@ -176,6 +177,9 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
+
+	c.reviewLostSigning(ctx, logger, candidate.Name, generated, versions, existing)
+
 	if input.SkipPR {
 		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
@@ -183,6 +187,23 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil
+}
+
+// reviewLostSigning leaves for review any version that can be verified with less
+// than the one before it.
+//
+// The asset names and the checksums of a release an attacker published look no
+// different from any other; what is missing is the signature. Nothing else in the
+// generated file would say so.
+func (c *Controller) reviewLostSigning(ctx context.Context, logger *slog.Logger, pkgName string, generated []*version, versions []string, existing map[string]struct{}) {
+	baseline, ok := c.signingBaseline(ctx, logger, pkgName, baselineVersion(versions, existing))
+	if !ok {
+		for _, v := range generated {
+			v.NeedsReview = true
+		}
+		return
+	}
+	checkSigning(logger, pkgName, generated, baseline)
 }
 
 // limitBudget limits how much of the run's remaining budget one package may take.
