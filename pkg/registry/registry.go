@@ -12,7 +12,7 @@ import (
 	"net/url"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"gopkg.in/yaml.v3"
 )
 
