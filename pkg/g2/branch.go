@@ -5,18 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	gogithub "github.com/google/go-github/v92/github"
 )
 
 // TemplateDir is the directory on main holding the files a new package branch starts
-// with.
+// with. Its contents are copied to the branch at the same paths, so a workflow lives
+// at templates/.github/workflows/ and lands at .github/workflows/.
 //
 // A package branch needs the CI workflow before a pull request into it can be
 // checked, because a pull_request workflow is read from the branch the pull request
 // targets. The files live on main so that changing them changes what every new
 // branch gets.
-const TemplateDir = "templates/pkg"
+const TemplateDir = "templates"
 
 // errNoTemplate stops a package branch from being created without the workflow that
 // checks pull requests into it. A branch ruleset requiring status checks is what
@@ -106,27 +108,29 @@ func (c *Client) EnsurePackageBranch(ctx context.Context, pkgName string) (strin
 }
 
 // templateEntries returns the files a new package branch starts with, read from main.
+//
+// The whole subtree is fetched in one request rather than walking directories, and
+// each path is kept as it is under TemplateDir. Mapping the paths here instead would
+// put the layout of a package branch somewhere only ar2 knows about.
 func (c *Client) templateEntries(ctx context.Context) ([]*gogithub.TreeEntry, error) {
-	_, contents, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, TemplateDir, nil)
+	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, "HEAD", true)
 	if err != nil {
 		if refNotFound(resp) {
 			return nil, errNoTemplate
 		}
-		return nil, fmt.Errorf("list the template files: %w", err)
+		return nil, fmt.Errorf("get the tree of the default branch: %w", err)
 	}
-
-	entries := make([]*gogithub.TreeEntry, 0, len(contents))
-	for _, content := range contents {
-		if content.GetType() != "file" {
+	prefix := TemplateDir + "/"
+	entries := make([]*gogithub.TreeEntry, 0, len(tree.Entries))
+	for _, entry := range tree.Entries {
+		if entry.GetType() != blobType || !strings.HasPrefix(entry.GetPath(), prefix) {
 			continue
 		}
 		entries = append(entries, &gogithub.TreeEntry{
-			// The template's own directory is stripped: the files sit at the root of
-			// the package branch, where a workflow has to be to run.
-			Path: new(".github/workflows/" + content.GetName()),
-			Mode: new("100644"),
-			Type: new("blob"),
-			SHA:  content.SHA,
+			Path: new(strings.TrimPrefix(entry.GetPath(), prefix)),
+			Mode: entry.Mode,
+			Type: entry.Type,
+			SHA:  entry.SHA,
 		})
 	}
 	if len(entries) == 0 {

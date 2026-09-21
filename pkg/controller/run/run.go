@@ -14,6 +14,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/state"
+	"github.com/szksh-lab-2/ar2/pkg/summary"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
@@ -24,6 +25,7 @@ type Controller struct {
 	g2        Registry
 	graphql   AutoMerger
 	verifier  *verify.Verifier
+	summary   *summary.Writer
 }
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
@@ -43,7 +45,10 @@ type AutoMerger interface {
 
 // New creates a Controller.
 func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql AutoMerger, verifier *verify.Verifier) *Controller {
-	return &Controller{gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier}
+	return &Controller{
+		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
+		summary: summary.New(),
+	}
 }
 
 // Input holds the parameters of a loop run.
@@ -228,9 +233,7 @@ func write(dir, pkgName, version string, reg *generate.Registry) error {
 		return fmt.Errorf("create registry.json: %w", err)
 	}
 	defer f.Close()
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(reg); err != nil {
+	if err := json.NewEncoder(f).Encode(reg); err != nil {
 		return fmt.Errorf("write registry.json: %w", err)
 	}
 	return nil

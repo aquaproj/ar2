@@ -191,9 +191,7 @@ func write(path string, reg *generate.Registry) error {
 		defer f.Close()
 		out = f
 	}
-	encoder := json.NewEncoder(out)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(reg); err != nil {
+	if err := json.NewEncoder(out).Encode(reg); err != nil {
 		return fmt.Errorf("write registry.json: %w", err)
 	}
 	return nil
