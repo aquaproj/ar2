@@ -19,13 +19,10 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	}
 	p := inferred.Copy()
 
-	// files: aqua gr guesses the executable name from the package name, which is
-	// wrong whenever they differ (cli/cli ships "gh"), and it never knows the path
-	// inside the archive. registry.yaml has both, as templates that resolve per
-	// environment.
-	if len(base.Files) > 0 {
-		p.Files = base.Files
-	}
+	// files is not merged here. registry.yaml can set it in an override, so it has
+	// to be resolved per environment rather than copied once: cli/cli's Windows
+	// override puts the executable at bin/gh.exe while every other platform has it
+	// under a versioned directory. resolveOne takes it from the resolved base.
 
 	// Overrides carrying variants describe builds that differ by something the
 	// release doesn't express, such as musl vs glibc. They go first because the

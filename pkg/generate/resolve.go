@@ -16,10 +16,10 @@ import (
 //
 // Each environment is resolved through aqua's own Override and RenderAsset, so the
 // static result matches what aqua would compute at install time.
-func resolve(logger *slog.Logger, pkgInfo *aquaregistry.PackageInfo, version string, digests map[string]string) (*Registry, error) {
+func resolve(logger *slog.Logger, pkgInfo, base *aquaregistry.PackageInfo, version string, digests map[string]string) (*Registry, error) {
 	reg := &Registry{}
 	for _, rt := range expandByVariants(pkgInfo, baseRuntimes()) {
-		asset, err := resolveOne(logger, pkgInfo, version, rt, digests)
+		asset, err := resolveOne(logger, pkgInfo, base, version, rt, digests)
 		if err != nil {
 			return nil, err
 		}
@@ -36,7 +36,7 @@ func resolve(logger *slog.Logger, pkgInfo *aquaregistry.PackageInfo, version str
 
 // resolveOne resolves a single environment. It returns nil when the package doesn't
 // support the environment or resolves to no asset there.
-func resolveOne(logger *slog.Logger, pkgInfo *aquaregistry.PackageInfo, version string, rt *aquaruntime.Runtime, digests map[string]string) (*Asset, error) {
+func resolveOne(logger *slog.Logger, pkgInfo, base *aquaregistry.PackageInfo, version string, rt *aquaruntime.Runtime, digests map[string]string) (*Asset, error) {
 	if !pkgInfo.CheckSupportedEnvs(rt.GOOS, rt.GOARCH, rt.Env()) {
 		return nil, nil //nolint:nilnil
 	}
@@ -56,15 +56,16 @@ func resolveOne(logger *slog.Logger, pkgInfo *aquaregistry.PackageInfo, version 
 	if err != nil {
 		return nil, fmt.Errorf("render the asset name for %s: %w", rt.Env(), err)
 	}
-	var url string
-	if info.Type == aquaregistry.PkgInfoTypeHTTP {
-		url, err = pkg.RenderURL(rt)
-		if err != nil {
-			return nil, fmt.Errorf("render the URL for %s: %w", rt.Env(), err)
-		}
+	url, err := renderURL(pkg, info, rt)
+	if err != nil {
+		return nil, err
 	}
 	if assetName == "" && url == "" {
 		return nil, nil //nolint:nilnil
+	}
+
+	if err := setBaseFiles(logger, info, base, version, rt); err != nil {
+		return nil, err
 	}
 
 	files, err := renderFiles(pkg, info, rt)
@@ -104,6 +105,37 @@ func setSigning(a *Asset, info *aquaregistry.PackageInfo) {
 	if info.GitHubArtifactAttestations != nil {
 		a.GitHubArtifactAttestations = info.GitHubArtifactAttestations
 	}
+}
+
+// renderURL resolves the download URL of an http package. Other types are
+// identified by their asset name instead, so they have no URL to render.
+func renderURL(pkg *aquaconfig.Package, info *aquaregistry.PackageInfo, rt *aquaruntime.Runtime) (string, error) {
+	if info.Type != aquaregistry.PkgInfoTypeHTTP {
+		return "", nil
+	}
+	url, err := pkg.RenderURL(rt)
+	if err != nil {
+		return "", fmt.Errorf("render the URL for %s: %w", rt.Env(), err)
+	}
+	return url, nil
+}
+
+// setBaseFiles takes files from aqua-registry's definition, resolved for this
+// environment: an override can change where the executable sits, as cli/cli's
+// Windows build does. The asset and the format still come from the inference, so an
+// upstream renaming is followed even while files is taken from the registry.
+func setBaseFiles(logger *slog.Logger, info, base *aquaregistry.PackageInfo, version string, rt *aquaruntime.Runtime) error {
+	if base == nil {
+		return nil
+	}
+	baseInfo, err := base.Copy().Override(logger, version, rt)
+	if err != nil {
+		return fmt.Errorf("resolve the aqua-registry definition for %s: %w", rt.Env(), err)
+	}
+	if f := baseInfo.GetFiles(); len(f) > 0 {
+		info.Files = f
+	}
+	return nil
 }
 
 // renderFiles resolves the templates in files[].src for the environment.

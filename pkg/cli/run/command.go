@@ -5,15 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
+	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
 // Args holds the flag and argument values of the run command.
@@ -24,6 +27,7 @@ type Args struct {
 	SkipPR      bool
 	Output      string
 	RegistryRef string
+	Verify      bool
 }
 
 // New creates the 'ar2 run' command.
@@ -52,6 +56,7 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.BoolVar(&args.SkipPR, "skip-pr", false, "generate registry.json without creating a branch, a commit, or a pull request")
 	fs.StringVar(&args.Output, "output", "", "write registry.json to this file instead of standard output")
 	fs.StringVar(&args.RegistryRef, "registry-ref", "main", "the aqua-registry ref the package definition is read from")
+	fs.BoolVar(&args.Verify, "verify", false, "download and extract every asset to check that files[].src matches the archive")
 	return cmd
 }
 
@@ -78,16 +83,9 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
 
-	// aqua-registry's definition supplies what a release can't express: files, libc
-	// variants, and the signing configuration. A package aqua-registry doesn't have
-	// yet is generated from the release alone.
-	pkgInfos, err := registry.FetchAqua(ctx, gh, args.RegistryRef)
+	base, err := baseDefinition(ctx, logger, gh, args.RegistryRef, pkgName)
 	if err != nil {
-		return fmt.Errorf("get the aqua-registry definitions: %w", err)
-	}
-	base, ok := pkgInfos[pkgName]
-	if !ok {
-		logger.Warn("aqua-registry has no definition of the package", "package", pkgName)
+		return err
 	}
 
 	reg, err := generate.New(gh.Repositories).Generate(ctx, logger.Logger, &generate.Input{
@@ -99,7 +97,61 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return fmt.Errorf("generate registry.json: %w", err)
 	}
 
+	if args.Verify {
+		if err := verifyAssets(ctx, logger, version, reg); err != nil {
+			return err
+		}
+	}
+
 	return write(args.Output, reg)
+}
+
+// baseDefinition returns aqua-registry's definition of the package.
+// It supplies what a release can't express: files, libc variants, and the signing
+// configuration. A package aqua-registry doesn't have yet is generated from the
+// release alone.
+func baseDefinition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, ref, pkgName string) (*aquaregistry.PackageInfo, error) {
+	pkgInfos, err := registry.FetchAqua(ctx, gh, ref)
+	if err != nil {
+		return nil, fmt.Errorf("get the aqua-registry definitions: %w", err)
+	}
+	base, ok := pkgInfos[pkgName]
+	if !ok {
+		logger.Warn("aqua-registry has no definition of the package", "package", pkgName)
+	}
+	return base, nil
+}
+
+// verifyAssets extracts every asset and resolves its files against the archive.
+//
+// It downloads each asset, so it is off by default: generation alone needs no
+// download at all when the release reports digests.
+func verifyAssets(ctx context.Context, logger *slogutil.Logger, version string, reg *generate.Registry) error {
+	v := verify.New(http.DefaultClient)
+	needsReview := false
+	for _, asset := range reg.Assets {
+		result, err := v.Verify(ctx, logger.Logger, version, asset)
+		if err != nil {
+			return fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
+		}
+		asset.Files = result.Files
+		if asset.Checksum == "" {
+			asset.Checksum = result.Checksum
+			asset.ChecksumAlgorithm = "sha256"
+		} else if asset.Checksum != result.Checksum {
+			return fmt.Errorf("the digest of %s doesn't match the downloaded asset", asset.Asset)
+		}
+		if result.NeedsReview {
+			needsReview = true
+			logger.Warn("the files of this asset don't match the archive",
+				"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
+		}
+	}
+	if needsReview {
+		// The caller creating a pull request has to keep it out of auto-merge.
+		logger.Warn("registry.json needs review: files were relocated or couldn't be found")
+	}
+	return nil
 }
 
 // write writes registry.json to path, or to standard output when path is empty.
