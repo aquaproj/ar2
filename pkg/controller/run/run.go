@@ -107,7 +107,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		// need another source and aren't handled yet.
 		return 0, nil
 	}
-	versions, err := c.versions(ctx, pkg)
+	versions, err := c.versions(ctx, logger, pkg, input.PkgInfos[candidate.Name])
 	if err != nil {
 		return 0, err
 	}
@@ -145,29 +145,6 @@ func limitBudget(budget int, existing map[string]struct{}) int {
 	}
 	return budget
 }
-
-// versions lists the package's releases, newest first.
-func (c *Controller) versions(ctx context.Context, pkg *state.Package) ([]string, error) {
-	// One page is enough: a run works on the newest versions, and the older ones are
-	// reached by later runs as the newest ones get recorded.
-	releases, _, err := c.gh.Repositories.ListReleases(ctx, pkg.RepoOwner, pkg.RepoName, &gogithub.ListOptions{
-		PerPage: releasesPerPage,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list releases: %w", err)
-	}
-	versions := make([]string, 0, len(releases))
-	for _, release := range releases {
-		if release.GetDraft() || release.GetPrerelease() {
-			continue
-		}
-		versions = append(versions, release.GetTagName())
-	}
-	return versions, nil
-}
-
-// releasesPerPage is how many releases are looked at per package in one run.
-const releasesPerPage = 100
 
 // breadthDepth is how many versions a package that has none yet gets before the run
 // moves on to the next package.
