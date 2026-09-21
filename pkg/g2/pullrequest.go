@@ -47,3 +47,18 @@ func (c *Client) PackagesInFlight(ctx context.Context) (map[string]struct{}, err
 		opts.Page = resp.NextPage
 	}
 }
+
+// CreatePullRequest opens a pull request from the package's head branch into its
+// package branch.
+func (c *Client) CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error) {
+	pr, _, err := c.gh.PullRequests.Create(ctx, c.owner, c.repo, gogithub.CreatePullRequest{
+		Title: new(title),
+		Body:  new(body),
+		Head:  HeadBranchName(pkgName),
+		Base:  BranchName(pkgName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create a pull request: %w", err)
+	}
+	return pr, nil
+}

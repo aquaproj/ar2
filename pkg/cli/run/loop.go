@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	gogithub "github.com/google/go-github/v92/github"
@@ -10,14 +11,16 @@ import (
 	ctrl "github.com/szksh-lab-2/ar2/pkg/controller/run"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/szksh-lab-2/ar2/pkg/github"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
 	"github.com/szksh-lab-2/ar2/pkg/state"
+	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
 // loop works through aqua-registry in the order the state gives, generating up to
 // --limit package versions.
-func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args) error {
-	if args.OutputDir == "" {
+func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args) error {
+	if args.SkipPR && args.OutputDir == "" {
 		return errOutputDirRequired
 	}
 	s, err := readState(ctx, logger, args)
@@ -32,13 +35,16 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, arg
 	}
 
 	logger.Info("generating registry.json", "limit", args.Limit, "output_dir", args.OutputDir)
-	generated, err := ctrl.New(gh, generate.New(gh.Repositories), g2.New(gh, args.G2Owner, args.G2Repo)).
-		Run(ctx, logger.Logger, &ctrl.Input{
-			Limit:     args.Limit,
-			OutputDir: args.OutputDir,
-			State:     s,
-			PkgInfos:  pkgInfos,
-		})
+	c := ctrl.New(gh, generate.New(gh.Repositories), g2.New(gh, args.G2Owner, args.G2Repo),
+		github.NewClient(httpClient), verify.New(http.DefaultClient))
+	generated, err := c.Run(ctx, logger.Logger, &ctrl.Input{
+		Limit:     args.Limit,
+		OutputDir: args.OutputDir,
+		SkipPR:    args.SkipPR,
+		Verify:    args.Verify,
+		State:     s,
+		PkgInfos:  pkgInfos,
+	})
 	if err != nil {
 		return fmt.Errorf("generate registry.json: %w", err)
 	}

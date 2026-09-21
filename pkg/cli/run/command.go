@@ -18,6 +18,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/registry"
 	"github.com/szksh-lab-2/ar2/pkg/state"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
+	"golang.org/x/oauth2"
 )
 
 // Args holds the flag and argument values of the run command.
@@ -106,11 +107,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	if !args.SkipPR {
-		// Creating the branch, the commit, and the pull request isn't implemented yet.
-		return errSkipPRRequired
-	}
-
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
 		return errTokenRequired
@@ -119,9 +115,16 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
 
 	if args.Target == "" {
-		return loop(ctx, logger, gh, args)
+		return loop(ctx, logger, gh, httpClient, args)
+	}
+	// One package and version is generated without touching the repository: it is
+	// the form used while working on a package, and a pull request for a single
+	// version is what the loop makes anyway.
+	if !args.SkipPR {
+		return errSkipPRRequired
 	}
 	return single(ctx, logger, gh, args)
 }

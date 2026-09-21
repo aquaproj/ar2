@@ -14,6 +14,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/state"
+	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
 // Controller runs the loop.
@@ -21,25 +22,42 @@ type Controller struct {
 	gh        *gogithub.Client
 	generator *generate.Generator
 	g2        Registry
+	graphql   AutoMerger
+	verifier  *verify.Verifier
 }
 
-// Registry reports what aqua-registry-g2 already holds or is about to hold.
+// Registry is aqua-registry-g2: what it holds, and how work is added to it.
 type Registry interface {
 	Versions(ctx context.Context, pkgName string) (map[string]struct{}, error)
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
+	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
+}
+
+// AutoMerger turns on auto-merge, which is what makes CI the gate: a pull request
+// merges itself once the checks pass and stays open when they don't.
+type AutoMerger interface {
+	EnableAutoMerge(ctx context.Context, pullRequestID string) error
 }
 
 // New creates a Controller.
-func New(gh *gogithub.Client, generator *generate.Generator, g2 Registry) *Controller {
-	return &Controller{gh: gh, generator: generator, g2: g2}
+func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql AutoMerger, verifier *verify.Verifier) *Controller {
+	return &Controller{gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier}
 }
 
 // Input holds the parameters of a loop run.
 type Input struct {
 	// Limit bounds how many package versions are generated in one run.
 	Limit int
-	// OutputDir is where registry.json files are written.
+	// OutputDir is where registry.json files are written. When it is empty the
+	// result goes into a pull request instead.
 	OutputDir string
+	// SkipPR writes the files out without creating a branch, a commit, or a pull
+	// request.
+	SkipPR bool
+	// Verify extracts every asset to check files[].src against the archive.
+	Verify bool
 	// State is the state to read the order from and record progress into.
 	State *state.State
 	// PkgInfos are aqua-registry's definitions, keyed by package name.
@@ -100,24 +118,17 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 
 	budget = limitBudget(budget, existing)
 
-	generated := 0
-	for _, version := range versions {
-		if generated >= budget {
-			return generated, nil
-		}
-		if _, ok := existing[version]; ok {
-			continue
-		}
-		if err := c.generate(ctx, logger, input, candidate.Name, version); err != nil {
-			// A single version failing is normal: a release can have no assets at
-			// all. The next run sees the version still missing and tries again.
-			logger.Warn("failed to generate registry.json",
-				"package", candidate.Name, "version", version, "error", err.Error())
-			continue
-		}
-		generated++
+	generated := c.generateVersions(ctx, logger, input, candidate.Name, versions, existing, budget)
+	if len(generated) == 0 {
+		return 0, nil
 	}
-	return generated, nil
+	if input.SkipPR {
+		return len(generated), writeAll(input.OutputDir, candidate.Name, generated)
+	}
+	if err := c.openPullRequest(ctx, logger, candidate.Name, generated); err != nil {
+		return 0, err
+	}
+	return len(generated), nil
 }
 
 // limitBudget limits how much of the run's remaining budget one package may take.
@@ -175,17 +186,55 @@ const releasesPerPage = 100
 // that is about 6% more API calls, roughly an hour.
 const breadthDepth = 5
 
-// generate builds registry.json for one package version and writes it out.
-func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, pkgName, version string) error {
+// generateVersions generates the versions the repository is missing, newest first,
+// up to budget.
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []string, existing map[string]struct{}, budget int) []*version {
+	generated := make([]*version, 0, budget)
+	for _, tag := range versions {
+		if len(generated) >= budget {
+			return generated
+		}
+		if _, ok := existing[tag]; ok {
+			continue
+		}
+		v, err := c.generate(ctx, logger, input, pkgName, tag)
+		if err != nil {
+			// A single version failing is normal: a release can have no assets at
+			// all. The next run sees the version still missing and tries again.
+			logger.Warn("failed to generate registry.json",
+				"package", pkgName, "version", tag, "error", err.Error())
+			continue
+		}
+		generated = append(generated, v)
+	}
+	return generated
+}
+
+// generate builds registry.json for one package version and completes it.
+func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, pkgName, tag string) (*version, error) {
 	reg, err := c.generator.Generate(ctx, logger, &generate.Input{
 		PkgName: pkgName,
-		Version: version,
+		Version: tag,
 		Base:    input.PkgInfos[pkgName],
 	})
 	if err != nil {
-		return fmt.Errorf("generate registry.json: %w", err)
+		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
-	return write(input.OutputDir, pkgName, version, reg)
+	needsReview, err := c.verifier.Fill(ctx, logger, tag, reg, input.Verify)
+	if err != nil {
+		return nil, fmt.Errorf("complete registry.json: %w", err)
+	}
+	return &version{Version: tag, Registry: reg, NeedsReview: needsReview}, nil
+}
+
+// writeAll writes the generated files out instead of opening a pull request.
+func writeAll(dir, pkgName string, versions []*version) error {
+	for _, v := range versions {
+		if err := write(dir, pkgName, v.Version, v.Registry); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // write stores registry.json at the path it has on the package's branch.
