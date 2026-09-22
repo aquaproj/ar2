@@ -153,3 +153,25 @@ func TestReverseVersionOverrides_compoundExpression(t *testing.T) {
 		t.Errorf("the expression was rewritten: %v", constraints(got))
 	}
 }
+
+// A package whose constraints can't all be read keeps the order it has.
+//
+// g2 reads its entries the way v1 does — in order, first match wins — so the order
+// v1 already has is the one that answers the same. containers/conmon excludes
+// versions from a range with an or, and both lifting that out of the chain and
+// giving it a bound answered for versions written about elsewhere.
+func TestReverseVersionOverrides_keepsOrderWhenUnreadable(t *testing.T) {
+	t.Parallel()
+	in := []string{
+		`semver("<= 2.0.19")`,
+		`semver("<= 2.0.23") || Version == "v2.0.25"`,
+		`"true"`,
+	}
+	got, unconverted := migrate.ReverseVersionOverrides(overrides(in...))
+	if diff := cmp.Diff(in, constraints(got)); diff != "" {
+		t.Errorf("the entries were reordered (-want +got):\n%s", diff)
+	}
+	if len(unconverted) == 0 {
+		t.Error("the constraint that couldn't be read wasn't reported")
+	}
+}

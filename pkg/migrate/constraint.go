@@ -47,6 +47,18 @@ func ReverseVersionOverrides(overrides []*aquaregistry.VersionOverride) ([]*aqua
 		return nil, nil
 	}
 	pinned, bounded, unconverted := partition(overrides)
+	if len(unconverted) > 0 {
+		// Something here is neither a bound nor a name, so where it sits is what it
+		// meant and nothing can be derived about it. g2 reads its entries the way v1
+		// does — in order, first match wins — so the order it already has is the one
+		// that answers the same, and an entry every version matches goes on the end
+		// in place of the top level v1 fell back to.
+		//
+		// Reordering these was worth trying and wasn't close. containers/conmon
+		// excludes versions from a range with an or, and both lifting that out and
+		// giving it a bound answered for versions written about elsewhere.
+		return inOriginalOrder(overrides), unconverted
+	}
 
 	reversed := make([]*aquaregistry.VersionOverride, 0, len(overrides))
 	reversed = append(reversed, pinned...)
@@ -62,6 +74,16 @@ func ReverseVersionOverrides(overrides []*aquaregistry.VersionOverride) ([]*aqua
 		reversed = append(reversed, &vo)
 	}
 	return reversed, unconverted
+}
+
+// inOriginalOrder returns the entries as they are, which is what v1 meant by them.
+func inOriginalOrder(overrides []*aquaregistry.VersionOverride) []*aquaregistry.VersionOverride {
+	out := make([]*aquaregistry.VersionOverride, 0, len(overrides))
+	for _, vo := range overrides {
+		copied := *vo
+		out = append(out, &copied)
+	}
+	return out
 }
 
 // partition splits the entries into the ones that name versions and the ones that
