@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/aquaproj/aqua/v2 v2.63.1-0.20260922103653-9d341ef47c87
+	github.com/expr-lang/expr v1.17.8
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v92 v92.0.0
 	github.com/opencontainers/image-spec v1.1.1
@@ -11,6 +12,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/suzuki-shunsuke/cobra-util v0.0.4
 	github.com/suzuki-shunsuke/go-osenv v0.1.0
+	github.com/suzuki-shunsuke/slog-error v0.2.2
 	github.com/suzuki-shunsuke/slog-util v0.3.2
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/oauth2 v0.37.0
@@ -34,7 +36,6 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
-	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/forPelevin/gomoji v1.4.1 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.9.0 // indirect
@@ -83,7 +84,6 @@ require (
 	github.com/suzuki-shunsuke/go-github-device-flow v0.0.2 // indirect
 	github.com/suzuki-shunsuke/go-retryablehttp v0.7.8-2 // indirect
 	github.com/suzuki-shunsuke/go-revoke-github-access-token v0.0.2 // indirect
-	github.com/suzuki-shunsuke/slog-error v0.2.2 // indirect
 	github.com/suzuki-shunsuke/urfave-cli-v3-util v0.2.3 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/urfave/cli/v3 v3.12.0 // indirect
