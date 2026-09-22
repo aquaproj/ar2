@@ -16,7 +16,7 @@ func TestBuildQuery(t *testing.T) {
 	query, vars := buildQuery([]Repo{
 		{Owner: "cli", Name: "cli"},
 		{Owner: "aquaproj", Name: "aqua"},
-	})
+	}, starCount)
 	for _, s := range []string{
 		"query($r0o: String!, $r0n: String!, $r1o: String!, $r1n: String!)",
 		"r0: repository(owner: $r0o, name: $r0n) { stargazerCount }",
