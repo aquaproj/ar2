@@ -36,7 +36,7 @@ type Controller struct {
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
 type Registry interface {
-	Versions(ctx context.Context, pkgName string) (map[string]struct{}, error)
+	Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error)
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
 	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
@@ -169,7 +169,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if err != nil {
 		return 0, 0, err
 	}
-	existing, err := c.g2.Versions(ctx, candidate.Name)
+	existing, err := c.g2.Versions(ctx, logger, candidate.Name)
 	if err != nil {
 		return 0, 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
 	}

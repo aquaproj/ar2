@@ -2,9 +2,11 @@ package g2
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
+	"log/slog"
 
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 )
 
@@ -58,23 +60,24 @@ func New(gh, branchGH, prGH *gogithub.Client, owner, repo string) *Client {
 // produced. A pull request that fails CI is never merged, and a record of "already
 // generated" would stop it from ever being retried — exactly for the packages that
 // need attention. Asking the repository makes a run idempotent instead.
-func (c *Client) Versions(ctx context.Context, pkgName string) (map[string]struct{}, error) {
-	_, contents, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, VersionDir,
-		&gogithub.RepositoryContentGetOptions{Ref: BranchName(pkgName)})
+//
+// The listing is aqua's own, which reads the branch through the Git Data API. The
+// Contents API stops at 1,000 entries in a directory and says so only by returning
+// fewer, so a package with more versions than that would have looked as though the
+// ones it didn't return were missing, and been generated again on every run.
+func (c *Client) Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error) {
+	versions, err := aquag2.NewVersionLister(c.gh.Git, c.owner, c.repo).List(ctx, logger, pkgName)
 	if err != nil {
 		// A package with no generated version yet has no branch, and a brand new
 		// repository has none at all. Either way there is nothing to skip.
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
+		if errors.Is(err, aquag2.ErrNoPackageBranch) {
 			return map[string]struct{}{}, nil
 		}
 		return nil, fmt.Errorf("list the versions of the package: %w", err)
 	}
-	versions := make(map[string]struct{}, len(contents))
-	for _, content := range contents {
-		if content.GetType() != "dir" {
-			continue
-		}
-		versions[content.GetName()] = struct{}{}
+	out := make(map[string]struct{}, len(versions))
+	for _, v := range versions {
+		out[v] = struct{}{}
 	}
-	return versions, nil
+	return out, nil
 }
