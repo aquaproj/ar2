@@ -154,3 +154,53 @@ func TestConfig_format(t *testing.T) {
 		})
 	}
 }
+
+// A list of overrides that all say nothing is the same thing said many times.
+//
+// Arriven/db1000n's ten overrides turned into ten bare constraints once what a
+// release can be read for was taken out of them: a file telling a reader there are
+// ten cases to think about and then describing none of them.
+func TestConfig_allOverridesEmpty(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "Arriven",
+		RepoName:           "db1000n",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `Version == "v0.5.15"`, Asset: "db1000n-{{.Version}}.tar.gz", Format: "tar.gz"},
+			{VersionConstraints: `semver("<= 0.7.0")`, Asset: "db1000n_{{.Version}}.tar.gz", Format: "tar.gz"},
+		},
+	}, nil)
+
+	if len(cfg.VersionOverrides) != 1 {
+		t.Fatalf("got %d overrides, want the one that catches everything:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
+	}
+	if got := cfg.VersionOverrides[0].VersionConstraints; got != `"true"` {
+		t.Errorf("the constraint is %q, want the one that always matches", got)
+	}
+}
+
+// An empty override among others that aren't is doing something: it says these
+// versions take nothing, and dropping it would let them fall through to an older
+// entry that does carry fields.
+func TestConfig_someOverridesEmpty(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "cli",
+		RepoName:           "cli",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver("< 2.0.0")`, Asset: "gh_{{.Version}}.tar.gz", Format: "tar.gz"},
+			{
+				VersionConstraints: `semver(">= 2.0.0")`, Asset: "gh_{{.Version}}.tar.gz", Format: "tar.gz",
+				Replacements: aquaregistry.Replacements{"darwin": "macOS"},
+			},
+		},
+	}, nil)
+
+	if len(cfg.VersionOverrides) != 2 {
+		t.Fatalf("got %d overrides, want both:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
+	}
+}

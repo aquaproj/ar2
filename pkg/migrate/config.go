@@ -1,6 +1,8 @@
 package migrate
 
 import (
+	"reflect"
+
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	"github.com/aquaproj/aqua/v2/pkg/g2"
@@ -22,10 +24,16 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 	// The trimmed overrides, not the source ones: reversing the originals would put
 	// back everything the trim just took out.
 	overrides, unconverted := ReverseVersionOverrides(pkgInfo.VersionOverrides)
-	if len(overrides) == 0 {
+	if len(overrides) == 0 || allEmpty(overrides) {
 		// A package whose definition is entirely at the top level still needs an
 		// override, because that is where g2 looks. An empty one inherits the whole
 		// base, which is what the top level meant on its own.
+		//
+		// A list whose entries all say nothing is the same thing said many times.
+		// Arriven/db1000n's ten overrides turned into ten bare constraints once
+		// what a release can be read for was taken out of them, which is a file
+		// that tells a reader there are ten cases to think about and then describes
+		// none of them.
 		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: `"true"`}}
 	}
 	pkgInfo.VersionOverrides = overrides
@@ -52,4 +60,30 @@ func applyScaffold(cfg *g2.Config, scaffold *genrgst.RawConfig) {
 	if cfg.VersionPrefix == "" {
 		cfg.VersionPrefix = scaffold.VersionPrefix
 	}
+}
+
+// allEmpty reports whether every override says nothing beyond which versions it is
+// for.
+//
+// Only every one of them. An empty override among others that aren't is doing
+// something: it says these versions take nothing, and dropping it would let them
+// fall through to an older entry that does carry fields.
+func allEmpty(overrides []*aquaregistry.VersionOverride) bool {
+	for _, vo := range overrides {
+		if !emptyOverride(vo) {
+			return false
+		}
+	}
+	return true
+}
+
+// emptyOverride reports whether an override carries anything but its constraint.
+//
+// It is compared against a zero value rather than checked field by field, so that a
+// field added to the definition later counts without anyone remembering to add it
+// here.
+func emptyOverride(vo *aquaregistry.VersionOverride) bool {
+	rest := *vo
+	rest.VersionConstraints = ""
+	return reflect.DeepEqual(rest, aquaregistry.VersionOverride{})
 }
