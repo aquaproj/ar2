@@ -235,3 +235,58 @@ func TestConfig_catchAllEvaluates(t *testing.T) {
 		t.Error("the catch-all constraint didn't match")
 	}
 }
+
+// v1 evaluates the top level before any override and uses it when it matches, so a
+// top level with a real constraint is a candidate like any other.
+//
+// BurntSushi/xsv bounds its top level at ">= 0.10.3" and keeps musl in an override
+// for everything from 0.10.0. Dropping the top level sent 0.10.3 to that override,
+// which looks for a musl build the newer releases don't have.
+func TestConfig_topLevelIsACandidate(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "BurntSushi",
+		RepoName:           "xsv",
+		VersionConstraints: `semver(">= 0.10.3")`,
+		Replacements:       aquaregistry.Replacements{"linux": "unknown-linux-musl"},
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver(">= 0.10.0")`, Replacements: aquaregistry.Replacements{"linux": "unknown-linux-gnu"}},
+			{VersionConstraints: `semver("< 0.10.0")`, Replacements: aquaregistry.Replacements{"linux": "linux"}},
+		},
+	}, nil)
+
+	if got := cfg.VersionOverrides[0].VersionConstraints; got != `semver(">= 0.10.3")` {
+		t.Fatalf("the first entry is %q, want the top level's own constraint", got)
+	}
+	// It carries nothing, because an override inherits the base, which is what the
+	// top level was.
+	resolved, err := cfg.SetVersion(slog.New(slog.DiscardHandler), "v0.10.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Replacements["linux"]; got != "unknown-linux-musl" {
+		t.Errorf("0.10.3 resolved to %q, want the top level's", got)
+	}
+}
+
+// A top level constrained to "false" is v1 saying it is not a candidate, which is
+// what g2 means by having no top level at all.
+func TestConfig_topLevelFalse(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "Arriven",
+		RepoName:           "db1000n",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver("<= 1.0.0")`, Files: []*aquaregistry.File{{Name: "old"}}},
+			{VersionConstraints: "true", Files: []*aquaregistry.File{{Name: "new"}}},
+		},
+	}, nil)
+	for _, vo := range cfg.VersionOverrides {
+		if vo.VersionConstraints == "false" {
+			t.Errorf("the top level came back as a candidate:\n%+v", cfg.VersionOverrides)
+		}
+	}
+}

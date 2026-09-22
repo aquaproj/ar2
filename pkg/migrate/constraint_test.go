@@ -72,23 +72,27 @@ func TestReverseVersionOverrides_pair(t *testing.T) {
 	}
 }
 
-// A constraint that isn't a semver bound is left alone and reported. What it meant by
-// sitting where it did can't be derived, so a person has to look.
-func TestReverseVersionOverrides_notABound(t *testing.T) {
+// An entry that names a version goes first, where matching one version means
+// answering for that version and nothing else.
+//
+// Reversed into the chain it sank below the ranges, which then answered for the very
+// version it was written for. It also left the entry above it without a bound, so
+// that one kept the bound it had from above and swallowed everything below.
+func TestReverseVersionOverrides_namesAVersion(t *testing.T) {
 	t.Parallel()
 	got, unconverted := migrate.ReverseVersionOverrides(overrides(
 		`Version == "v2.7.0"`,
 		`semver("<= 3.0.0")`,
 		`"true"`,
 	))
-	// The entry above the one that can't be read keeps its own constraint, so it
-	// now matches v2.7.0 as well. That is why it is reported.
-	want := []string{`semver("> 3.0.0")`, `semver("<= 3.0.0")`, `Version == "v2.7.0"`}
+	want := []string{`Version == "v2.7.0"`, `semver("> 3.0.0")`, `semver("<= 3.0.0")`}
 	if diff := cmp.Diff(want, constraints(got)); diff != "" {
 		t.Errorf("the constraints are wrong (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff([]string{`Version == "v2.7.0"`}, unconverted); diff != "" {
-		t.Errorf("the unconverted constraints are wrong (-want +got):\n%s", diff)
+	// Nothing is left for a person: naming a version says what it answers for
+	// wherever it sits.
+	if len(unconverted) != 0 {
+		t.Errorf("got %v as unconverted, want none", unconverted)
 	}
 }
 

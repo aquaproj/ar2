@@ -2,11 +2,33 @@ package migrate
 
 import (
 	"reflect"
+	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	"github.com/aquaproj/aqua/v2/pkg/g2"
 )
+
+// topLevelFirst puts v1's top level back as the entry it was.
+//
+// v1 evaluates the top level before any override and uses it when it matches, so a
+// top level with a real constraint is a candidate like any other and has to be one
+// here too. BurntSushi/xsv bounds its top level at ">= 0.10.3" and keeps musl in an
+// override for everything from 0.10.0; without this, 0.10.3 took the override and
+// looked for a musl build that the newer releases don't have.
+//
+// The entry carries nothing but the constraint, because an override inherits the
+// base, which is what the top level was.
+//
+// A top level constrained to "false" is v1 saying it is not a candidate, which is
+// what g2 means by having no top level at all.
+func topLevelFirst(constraint string, overrides []*aquaregistry.VersionOverride) []*aquaregistry.VersionOverride {
+	c := strings.TrimSpace(constraint)
+	if c == "" || c == "false" || c == `"false"` {
+		return overrides
+	}
+	return append([]*aquaregistry.VersionOverride{{VersionConstraints: c}}, overrides...)
+}
 
 // catchAll is the constraint of an override that every version matches.
 //
@@ -44,7 +66,7 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 		// none of them.
 		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
 	}
-	pkgInfo.VersionOverrides = overrides
+	pkgInfo.VersionOverrides = topLevelFirst(base.VersionConstraints, overrides)
 
 	cfg := &g2.Config{PackageInfo: pkgInfo}
 	applyScaffold(cfg, scaffold)

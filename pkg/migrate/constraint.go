@@ -24,35 +24,92 @@ import (
 // takes the bound of the entry below it as its own lower bound, which is the boundary
 // v1 expressed by position.
 //
-// The catch-all at the end of a v1 list becomes the first entry and gains a lower
-// bound in the same way, so it is evaluated like any other. g2 also falls back to the
-// first entry when nothing matches, which is what answers a version that isn't a
-// semver at all.
+// An entry that names versions instead of bounding them — Version == "v0.5.15", or
+// semver("= 0.5.0") — is not part of that chain. It can't give the entry above it a
+// bound, and reversed it sinks below the ranges, which then answer for the very
+// version it was written for: Aloxaf/silicon's v0.5.0 took the entry meant for
+// everything newer and looked for pc-windows-gnu instead of pc-windows-msvc.
 //
-// Entries whose constraint isn't a semver bound are returned in place with their
-// constraint untouched, and named in the second return value: what they meant by
-// their position can't be derived, so a person has to look.
+// So those entries are lifted out and put first, where matching one version means
+// answering for that version and nothing else. What is left is a chain of bounds with
+// no gaps in it, which is what the derivation needs.
+//
+// The catch-all at the end of a v1 list becomes the first of the ranges and gains a
+// lower bound in the same way, so it is evaluated like any other. g2 also falls back
+// to the first entry when nothing matches, which is what answers a version that isn't
+// a semver at all.
+//
+// The second return value names the constraints that were lifted out without naming
+// a version — a compound range, say. Those matched more than one version, so where
+// they sit changes what they answer for, and a person has to look.
 func ReverseVersionOverrides(overrides []*aquaregistry.VersionOverride) ([]*aquaregistry.VersionOverride, []string) {
 	if len(overrides) == 0 {
 		return nil, nil
 	}
+	pinned, bounded, unconverted := partition(overrides)
+
 	reversed := make([]*aquaregistry.VersionOverride, 0, len(overrides))
-	unconverted := []string{}
-	for i, override := range slices.Backward(overrides) {
+	reversed = append(reversed, pinned...)
+	for i, override := range slices.Backward(bounded) {
 		vo := *override
 		// The oldest entry keeps its constraint: nothing sits below it, so its
 		// upper bound is the whole boundary.
 		if i > 0 {
-			lower, ok := lowerBound(overrides[i-1].VersionConstraints)
-			if !ok {
-				unconverted = append(unconverted, overrides[i-1].VersionConstraints)
-			} else {
+			if lower, ok := lowerBound(bounded[i-1].VersionConstraints); ok {
 				vo.VersionConstraints = fmt.Sprintf("semver(%q)", lower)
 			}
 		}
 		reversed = append(reversed, &vo)
 	}
 	return reversed, unconverted
+}
+
+// partition splits the entries into the ones that name versions and the ones that
+// bound them.
+//
+// An entry belongs to the chain only if the entry above it can take a bound from it.
+// Anything else has to come out, or the entry above keeps the bound it had from
+// above and swallows everything below it.
+func partition(overrides []*aquaregistry.VersionOverride) (pinned, bounded []*aquaregistry.VersionOverride, unconverted []string) {
+	unconverted = []string{}
+	// The newest entry is v1's catch-all and becomes g2's first. Nothing above it
+	// takes a bound from it, so it stays in the chain whatever its constraint says.
+	last := len(overrides) - 1
+	for i, vo := range overrides {
+		if i == last {
+			continue
+		}
+		if _, ok := lowerBound(vo.VersionConstraints); ok {
+			bounded = append(bounded, vo)
+			continue
+		}
+		pinned = append(pinned, vo)
+		if !namesAVersion(vo.VersionConstraints) {
+			unconverted = append(unconverted, vo.VersionConstraints)
+		}
+	}
+	bounded = append(bounded, overrides[last])
+	return pinned, bounded, unconverted
+}
+
+// namesAVersion reports whether a constraint matches one version rather than a range
+// of them.
+//
+// Those are the ones that can be lifted to the top without changing what anything
+// else answers for: whatever else matches that version, this was written for it.
+func namesAVersion(constraint string) bool {
+	s := strings.TrimSpace(constraint)
+	if strings.HasPrefix(s, "Version ==") || strings.HasPrefix(s, "Version==") {
+		return true
+	}
+	inner, ok := strings.CutPrefix(s, "semver(")
+	if !ok {
+		return false
+	}
+	inner = strings.TrimSpace(strings.TrimSuffix(inner, ")"))
+	inner = strings.Trim(inner, `"`)
+	return strings.HasPrefix(strings.TrimSpace(inner), "=") &&
+		!strings.HasPrefix(strings.TrimSpace(inner), "==")
 }
 
 // lowerBound turns the bound an entry has from above into the bound the entry above
