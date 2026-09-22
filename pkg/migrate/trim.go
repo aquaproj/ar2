@@ -59,24 +59,11 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		Vars:    pkgInfo.Vars,
 		Build:   pkgInfo.Build,
 	}
-	if NeedsSpelling(pkgInfo) {
-		// The asset names don't say which environments the package is built for,
-		// because aqua gr can't read them, so the definition has to keep saying it.
-		trimmed.SupportedEnvs = pkgInfo.SupportedEnvs
-	}
 	trimmed.VersionOverrides = make([]*aquaregistry.VersionOverride, 0, len(pkgInfo.VersionOverrides))
 	for _, vo := range pkgInfo.VersionOverrides {
 		trimmed.VersionOverrides = append(trimmed.VersionOverrides, trimOverride(vo, pkgInfo.Asset))
 	}
 	return trimmed
-}
-
-// supportedEnvs keeps an override's environments only when its spellings need them.
-func supportedEnvs(vo *aquaregistry.VersionOverride) aquaregistry.SupportedEnvs {
-	if unreadable(vo.Replacements) {
-		return vo.SupportedEnvs
-	}
-	return nil
 }
 
 func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquaregistry.VersionOverride {
@@ -98,7 +85,6 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		Minisign:                   vo.Minisign,
 		GitHubArtifactAttestations: Attestations(vo.GitHubArtifactAttestations),
 		Checksum:                   signedChecksum(vo.Checksum),
-		SupportedEnvs:              supportedEnvs(vo),
 
 		Format:       correctedFormat(asset, vo.Format),
 		Replacements: vo.Replacements,

@@ -79,10 +79,6 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	if err != nil {
 		return nil, err
 	}
-	// Before merging, because what it puts back is an environment aqua gr read no
-	// asset for and the merge has nothing to say about one.
-	recoverEnvs(logger, inferred, base, rel.names, input.Version)
-
 	reg, err := resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, rel.digests)
 	if err != nil {
 		return nil, err
