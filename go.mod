@@ -12,6 +12,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/suzuki-shunsuke/cobra-util v0.0.4
 	github.com/suzuki-shunsuke/go-osenv v0.1.0
+	github.com/suzuki-shunsuke/slog-error v0.2.2
 	github.com/suzuki-shunsuke/slog-util v0.3.2
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/oauth2 v0.37.0
@@ -83,7 +84,6 @@ require (
 	github.com/suzuki-shunsuke/go-github-device-flow v0.0.2 // indirect
 	github.com/suzuki-shunsuke/go-retryablehttp v0.7.8-2 // indirect
 	github.com/suzuki-shunsuke/go-revoke-github-access-token v0.0.2 // indirect
-	github.com/suzuki-shunsuke/slog-error v0.2.2 // indirect
 	github.com/suzuki-shunsuke/urfave-cli-v3-util v0.2.3 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/urfave/cli/v3 v3.12.0 // indirect
