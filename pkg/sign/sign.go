@@ -30,7 +30,10 @@ import (
 
 // Verifier runs the signature verifications an entry asks for.
 type Verifier struct {
-	httpClient    *http.Client
+	httpClient *http.Client
+	// gh is the GitHub CLI that checks attestations, or empty when there is none
+	// to run.
+	gh            string
 	cosign        *cosign.Verifier
 	slsa          *slsa.Verifier
 	minisign      *minisign.Verifier
@@ -63,6 +66,7 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	}
 	return &Verifier{
 		httpClient:    httpClient,
+		gh:            ghPath(ctx),
 		cosign:        cosign.NewVerifier(exe, dl, param),
 		slsa:          slsa.New(dl, slsa.NewExecutor(exe, param)),
 		minisign:      minisign.New(dl, minisignExe),
@@ -136,12 +140,7 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 		}
 	}
 	if asset.GitHubArtifactAttestations.GetEnabled() {
-		if err := v.ghattestation.Verify(ctx, logger, &ghattestation.ParamVerify{
-			ArtifactPath:   path,
-			Repository:     asset.RepoOwner + "/" + asset.RepoName,
-			SignerWorkflow: asset.GitHubArtifactAttestations.SignerWorkflow2,
-			PredicateType:  asset.GitHubArtifactAttestations.PredicateType,
-		}); err != nil {
+		if err := v.attestation(ctx, logger, asset, path); err != nil {
 			asset.GitHubArtifactAttestations = nil
 			drop("github_artifact_attestations", err)
 		}
@@ -172,4 +171,31 @@ func assetPackage(pkgName, version string, asset *generate.Asset) *config.Packag
 		Package:     &aqua.Package{Name: pkgName, Version: version},
 		PackageInfo: entry.PackageInfo(),
 	}
+}
+
+// attestation checks the artifact's attestation, and records which workflow signed
+// it when the definition doesn't say.
+//
+// Both are one run of the GitHub CLI. Asking who signed costs about ten seconds, so
+// it is paid once for a package being taken over rather than for every version after
+// it; once the definition names the workflow, the check is made against that name.
+func (v *Verifier) attestation(ctx context.Context, logger *slog.Logger, asset *generate.Asset, path string) error {
+	repo := asset.RepoOwner + "/" + asset.RepoName
+	if asset.GitHubArtifactAttestations.SignerWorkflow() != "" {
+		return v.ghattestation.Verify(ctx, logger, &ghattestation.ParamVerify{ //nolint:wrapcheck // the caller says what it was checking
+			ArtifactPath:   path,
+			Repository:     repo,
+			SignerWorkflow: asset.GitHubArtifactAttestations.SignerWorkflow(),
+			PredicateType:  asset.GitHubArtifactAttestations.PredicateType,
+		})
+	}
+
+	signer, err := v.attestationSigner(ctx, repo, path)
+	if err != nil {
+		return err
+	}
+	logger.Debug("read which workflow signed the attestation",
+		"os", asset.OS, "arch", asset.Arch, "signer_workflow", signer)
+	asset.GitHubArtifactAttestations.SignerWorkflow2 = signer
+	return nil
 }

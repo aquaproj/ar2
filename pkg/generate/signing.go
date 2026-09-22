@@ -2,6 +2,7 @@ package generate
 
 import (
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
+	"github.com/szksh-lab-2/ar2/pkg/migrate"
 )
 
 // inferSigning records, per environment, how the release signs that asset.
@@ -26,6 +27,9 @@ func inferSigning(pkgName string, reg *Registry, assetNames map[string]struct{})
 		return err
 	}
 	for _, asset := range reg.Assets {
+		// The definition may name the signing workflow by the spelling aqua has
+		// deprecated. A file being generated now writes the one aqua reads first.
+		asset.GitHubArtifactAttestations = migrate.Attestations(asset.GitHubArtifactAttestations)
 		if asset.Asset == "" || asset.Cosign != nil {
 			continue
 		}

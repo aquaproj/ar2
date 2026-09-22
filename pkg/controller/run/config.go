@@ -110,16 +110,36 @@ func marshalConfig(cfg *aquag2.Config) (string, error) {
 // who knows the package, and this would only replace it with whatever signed the
 // release ar2 happened to look at.
 func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions []*version) {
-	if cfg == nil || cfg.PackageInfo == nil || cfg.Cosign.GetEnabled() {
+	if cfg == nil || cfg.PackageInfo == nil {
 		return
 	}
-	signer := observedSigner(versions)
-	if signer == nil {
-		return
+	if !cfg.Cosign.GetEnabled() {
+		if signer := observedSigner(versions); signer != nil {
+			logger.Info("recording who signs the package", "package", pkgName,
+				"identity", identityOf(signer.Opts))
+			cfg.Cosign = signer
+		}
 	}
-	logger.Info("recording who signs the package", "package", pkgName,
-		"identity", identityOf(signer.Opts))
-	cfg.Cosign = signer
+	if cfg.GitHubArtifactAttestations.SignerWorkflow() == "" {
+		if attested := observedAttestation(versions); attested != nil {
+			logger.Info("recording which workflow attests the package", "package", pkgName,
+				"signer_workflow", attested.SignerWorkflow())
+			cfg.GitHubArtifactAttestations = attested
+		}
+	}
+}
+
+// observedAttestation returns the attestation configuration the generated files
+// ended up with, once the workflow that signs has been read off one.
+func observedAttestation(versions []*version) *aquaregistry.GitHubArtifactAttestations {
+	for _, v := range versions {
+		for _, asset := range v.Registry.Assets {
+			if asset.GitHubArtifactAttestations.SignerWorkflow() != "" {
+				return asset.GitHubArtifactAttestations
+			}
+		}
+	}
+	return nil
 }
 
 // observedSigner returns the cosign configuration the generated files ended up with.

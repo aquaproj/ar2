@@ -47,7 +47,7 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		Cosign:                     pkgInfo.Cosign,
 		SLSAProvenance:             pkgInfo.SLSAProvenance,
 		Minisign:                   pkgInfo.Minisign,
-		GitHubArtifactAttestations: pkgInfo.GitHubArtifactAttestations,
+		GitHubArtifactAttestations: Attestations(pkgInfo.GitHubArtifactAttestations),
 		Checksum:                   signedChecksum(pkgInfo.Checksum),
 
 		Format:       correctedFormat(pkgInfo.Asset, pkgInfo.Format),
@@ -83,7 +83,7 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		Cosign:                     vo.Cosign,
 		SLSAProvenance:             vo.SLSAProvenance,
 		Minisign:                   vo.Minisign,
-		GitHubArtifactAttestations: vo.GitHubArtifactAttestations,
+		GitHubArtifactAttestations: Attestations(vo.GitHubArtifactAttestations),
 		Checksum:                   signedChecksum(vo.Checksum),
 
 		Format:       correctedFormat(asset, vo.Format),
@@ -178,7 +178,7 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		Cosign:                     ov.Cosign,
 		SLSAProvenance:             ov.SLSAProvenance,
 		Minisign:                   ov.Minisign,
-		GitHubArtifactAttestations: ov.GitHubArtifactAttestations,
+		GitHubArtifactAttestations: Attestations(ov.GitHubArtifactAttestations),
 		Checksum:                   signedChecksum(ov.Checksum),
 
 		Format:       correctedFormat(asset, ov.Format),
@@ -187,4 +187,23 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		AppendExt:    ov.AppendExt,
 		Vars:         ov.Vars,
 	}
+}
+
+// Attestations writes the signing workflow under the name aqua reads first.
+//
+// aqua-registry still holds entries written as signer-workflow, which aqua accepts
+// and has deprecated. A registry being written now has no reason to carry the old
+// spelling into its first version of a file.
+//
+// being translated away from.
+//
+//nolint:staticcheck // reading the deprecated name is the point: it is what is
+func Attestations(a *aquaregistry.GitHubArtifactAttestations) *aquaregistry.GitHubArtifactAttestations {
+	if a == nil || a.SignerWorkflow3 == "" {
+		return a
+	}
+	out := *a
+	out.SignerWorkflow2 = a.SignerWorkflow()
+	out.SignerWorkflow3 = ""
+	return &out
 }
