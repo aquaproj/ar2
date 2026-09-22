@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/migrate"
@@ -34,7 +35,7 @@ type newConfig struct {
 // aqua-registry, so it is converted the first time the package is worked on. The
 // conversion travels with the files generated from it, which is what makes the move
 // happen package by package instead of as a migration of its own.
-func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string) (*newConfig, error) {
+func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string, versions []*version) (*newConfig, error) {
 	if config != nil {
 		// The branch already has one, which is every package but the first time it
 		// is worked on. Nothing to write is the ordinary outcome, not a failure.
@@ -59,6 +60,7 @@ func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, inp
 	}
 
 	cfg, unconverted := migrate.Config(base, scaffold)
+	pinSigner(logger, pkgName, cfg, versions)
 	for _, constraint := range unconverted {
 		logger.Warn("a version_constraint couldn't be turned into a boundary",
 			"package", pkgName, "version_constraint", constraint)
@@ -94,4 +96,58 @@ func marshalConfig(cfg *aquag2.Config) (string, error) {
 		return "", fmt.Errorf("close the YAML encoder: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// pinSigner records who signs the package's releases, so that a later one signed by
+// somebody else can be told apart.
+//
+// The generated files carry the signer read off the signature, which is a fact about
+// the release that was just looked at. Writing it into the definition turns it into
+// what the package is expected to be signed by: every version after this is verified
+// against it, and one that doesn't match can't merge itself.
+//
+// A definition that already says who signs is left alone. It was written by someone
+// who knows the package, and this would only replace it with whatever signed the
+// release ar2 happened to look at.
+func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions []*version) {
+	if cfg == nil || cfg.PackageInfo == nil || cfg.Cosign.GetEnabled() {
+		return
+	}
+	signer := observedSigner(versions)
+	if signer == nil {
+		return
+	}
+	logger.Info("recording who signs the package", "package", pkgName,
+		"identity", identityOf(signer.Opts))
+	cfg.Cosign = signer
+}
+
+// observedSigner returns the cosign configuration the generated files ended up with.
+//
+// The newest version is asked first, because that is the one whose signer the
+// package should be held to. Every environment of a release is signed by the same
+// thing, so the first entry carrying one answers for all of them.
+func observedSigner(versions []*version) *aquaregistry.Cosign {
+	for _, v := range versions {
+		for _, asset := range v.Registry.Assets {
+			if asset.Cosign == nil {
+				continue
+			}
+			if identityOf(asset.Cosign.Opts) != "" {
+				return asset.Cosign
+			}
+		}
+	}
+	return nil
+}
+
+// identityOf returns the signer a cosign configuration names, or an empty string
+// when it only has a pattern to match against.
+func identityOf(opts []string) string {
+	for i, opt := range opts {
+		if opt == "--certificate-identity" && i+1 < len(opts) {
+			return opts[i+1]
+		}
+	}
+	return ""
 }

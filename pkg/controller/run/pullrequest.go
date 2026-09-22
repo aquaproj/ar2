@@ -93,7 +93,7 @@ func (c *Controller) filesToCommit(ctx context.Context, logger *slog.Logger, inp
 	// hasn't taken over. Converting it here means the move happens as a package is
 	// worked on rather than as a migration of its own, and it arrives for review
 	// beside the files generated from it.
-	cfg, err := c.packageConfig(ctx, logger, input, config, pkgName)
+	cfg, err := c.packageConfig(ctx, logger, input, config, pkgName, versions)
 	if err != nil {
 		return nil, err
 	}

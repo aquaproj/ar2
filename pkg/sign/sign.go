@@ -30,6 +30,7 @@ import (
 
 // Verifier runs the signature verifications an entry asks for.
 type Verifier struct {
+	httpClient    *http.Client
 	cosign        *cosign.Verifier
 	slsa          *slsa.Verifier
 	minisign      *minisign.Verifier
@@ -61,6 +62,7 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 		return nil, fmt.Errorf("prepare gh: %w", err)
 	}
 	return &Verifier{
+		httpClient:    httpClient,
 		cosign:        cosign.NewVerifier(exe, dl, param),
 		slsa:          slsa.New(dl, slsa.NewExecutor(exe, param)),
 		minisign:      minisign.New(dl, minisignExe),
@@ -103,6 +105,10 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 			"os", asset.OS, "arch", asset.Arch, "kind", kind, "error", err.Error())
 		dropped = append(dropped, kind)
 	}
+
+	// Who signed is read off the signature before it is checked, so that a guessed
+	// pattern is replaced by a name and the entry records what actually signed.
+	v.pin(ctx, logger, version, asset)
 
 	if asset.Cosign.GetEnabled() {
 		if err := v.cosign.Verify(ctx, logger, rt, file, asset.Cosign, art, path); err != nil {

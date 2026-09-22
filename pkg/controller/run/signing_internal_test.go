@@ -180,3 +180,58 @@ func TestBaselineVersion(t *testing.T) {
 		t.Errorf("a package the repository holds nothing of has no baseline, got %q", got)
 	}
 }
+
+// The signer read off the release is written into the definition, so that every
+// version after this is held to it.
+func TestPinSigner(t *testing.T) {
+	t.Parallel()
+	observed := &aquaregistry.Cosign{
+		Bundle: &aquaregistry.DownloadedFile{Type: "github_release"},
+		Opts: []string{
+			"--certificate-identity", "https://github.com/cli/cli/.github/workflows/deployment.yml@refs/tags/{{.Version}}",
+			"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
+		},
+	}
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "cli/cli", cfg, []*version{
+		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{OS: "linux", Arch: "amd64", Cosign: observed})},
+	})
+	if cfg.Cosign != observed {
+		t.Errorf("the definition didn't record the signer: %+v", cfg.Cosign)
+	}
+}
+
+// A definition that already says who signs was written by someone who knows the
+// package. Replacing it with whatever signed the release ar2 happened to look at is
+// exactly what must not happen: it is the pinned value a later release is checked
+// against.
+func TestPinSigner_definitionWins(t *testing.T) {
+	t.Parallel()
+	declared := &aquaregistry.Cosign{Opts: []string{"--certificate-identity", "the reviewed one"}}
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{Cosign: declared}}
+	pinSigner(discardLogger(), "cli/cli", cfg, []*version{
+		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64",
+			Cosign: &aquaregistry.Cosign{Opts: []string{"--certificate-identity", "somebody else"}},
+		})},
+	})
+	if cfg.Cosign != declared {
+		t.Errorf("the definition's signer was replaced: %+v", cfg.Cosign)
+	}
+}
+
+// Nothing is recorded from a release whose signature only ever matched a pattern:
+// that is the guess, not a name.
+func TestPinSigner_noIdentity(t *testing.T) {
+	t.Parallel()
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "cli/cli", cfg, []*version{
+		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64",
+			Cosign: &aquaregistry.Cosign{Opts: []string{"--certificate-identity-regexp", "^https://github\\.com/cli/.+$"}},
+		})},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("a pattern was recorded as a signer: %+v", cfg.Cosign)
+	}
+}
