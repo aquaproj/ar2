@@ -112,20 +112,14 @@ func namesAVersion(constraint string) bool {
 		!strings.HasPrefix(strings.TrimSpace(inner), "==")
 }
 
-// lowerBound turns the bound an entry has from above into the bound the entry above
-// it needs from below.
+// semverArg returns what a constraint that is one semver call asks for.
 //
-// The two have to meet exactly: whatever the one below doesn't cover, the one above
-// must. So "<= 3.0.7" becomes "> 3.0.7" and "< 4.14.0" becomes ">= 4.14.0", because
-// the version on the boundary belongs to whichever of them didn't exclude it.
-// Getting this wrong loses a single version to the wrong definition, which is the
-// kind of thing that only shows up on the day someone installs it.
-//
-// Only the shape v1 writes is understood: a single semver call with one "<=" or "<"
-// comparison. Anything else, such as Version == or a compound expression, is left to
-// a person, because turning it into a boundary would be a guess about what the entry
-// was for.
-func lowerBound(constraint string) (string, bool) {
+// The whole constraint has to be that call and nothing else. openziti/zrok bounds a
+// range and excludes a prefix in the same expression, and cutting that at the first
+// and last bracket produced a bound with the rest of the expression trailing off it
+// — a constraint that evaluates to nothing and so matches no version, which is how
+// the package lost the attestations its newest releases carry.
+func semverArg(constraint string) (string, bool) {
 	s := strings.TrimSpace(constraint)
 	inner, ok := strings.CutPrefix(s, "semver(")
 	if !ok {
@@ -140,6 +134,30 @@ func lowerBound(constraint string) (string, bool) {
 		return "", false
 	}
 	inner = inner[1 : len(inner)-1]
+	if strings.Contains(inner, `"`) {
+		return "", false
+	}
+	return inner, true
+}
+
+// lowerBound turns the bound an entry has from above into the bound the entry above
+// it needs from below.
+//
+// The two have to meet exactly: whatever the one below doesn't cover, the one above
+// must. So "<= 3.0.7" becomes "> 3.0.7" and "< 4.14.0" becomes ">= 4.14.0", because
+// the version on the boundary belongs to whichever of them didn't exclude it.
+// Getting this wrong loses a single version to the wrong definition, which is the
+// kind of thing that only shows up on the day someone installs it.
+//
+// Only the shape v1 writes is understood: a single semver call with one "<=" or "<"
+// comparison. Anything else, such as Version == or a compound expression, is left to
+// a person, because turning it into a boundary would be a guess about what the entry
+// was for.
+func lowerBound(constraint string) (string, bool) {
+	inner, ok := semverArg(constraint)
+	if !ok {
+		return "", false
+	}
 	if strings.Contains(inner, ",") {
 		// A range already has a lower bound, so the entry wasn't relying on its
 		// position and rewriting it would change what it means.

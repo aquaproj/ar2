@@ -1,6 +1,8 @@
 package migrate_test
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -125,5 +127,29 @@ func TestReverseVersionOverrides_exclusiveBound(t *testing.T) {
 	}
 	if len(unconverted) != 0 {
 		t.Errorf("got %v as unconverted, want none", unconverted)
+	}
+}
+
+// A constraint that is a semver call and something else is not a bound.
+//
+// openziti/zrok bounds a range and excludes a prefix in the same expression. Cutting
+// that at the first and last bracket produced a bound with the rest of the
+// expression trailing off it — a constraint that evaluates to nothing and matches no
+// version, which is how the package lost the attestations its newest releases carry.
+func TestReverseVersionOverrides_compoundExpression(t *testing.T) {
+	t.Parallel()
+	compound := `semver("< 2.0.0") and not (Version startsWith "v2.0.0-rc")`
+	got, _ := migrate.ReverseVersionOverrides(overrides(
+		compound,
+		`"true"`,
+	))
+	for _, c := range constraints(got) {
+		if strings.Contains(c, `\"`) {
+			t.Errorf("a constraint was cut into something that doesn't parse: %s", c)
+		}
+	}
+	// It keeps its own constraint, which is what it always meant.
+	if !slices.Contains(constraints(got), compound) {
+		t.Errorf("the expression was rewritten: %v", constraints(got))
 	}
 }
