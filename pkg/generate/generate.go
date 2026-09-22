@@ -71,7 +71,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return resolve(logger, input.PkgName, base, nil, input.Version, nil)
 	}
 
-	inferred, err := g.packageInfo(ctx, logger, input)
+	inferred, err := g.packageInfo(ctx, logger, withSpellings(input, base))
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +87,34 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return nil, err
 	}
 	return reg, nil
+}
+
+// withSpellings tells aqua gr how this release writes the platforms it can't read.
+//
+// aqua gr works out what a release supports by reading its asset names, and it knows
+// the spellings it knows. luau-lang/luau calls its Linux build luau-ubuntu.zip, so
+// the asset belongs to no platform at all and the package comes back with no Linux
+// in it — not a wrong asset name for Linux, no Linux.
+//
+// The definition already says what the spelling means, and it says it the same way
+// whether it is aqua-registry's or the one on the package's branch.
+func withSpellings(input *Input, base *aquaregistry.PackageInfo) *Input {
+	if base == nil || len(base.Replacements) == 0 {
+		return input
+	}
+	out := *input
+	scaffold := &genrgst.RawConfig{}
+	if out.Scaffold != nil {
+		scaffold = &genrgst.RawConfig{
+			AllAssetsFilter: out.Scaffold.AllAssetsFilter,
+			VersionFilter:   out.Scaffold.VersionFilter,
+			VersionPrefix:   out.Scaffold.VersionPrefix,
+			Package:         out.Scaffold.Package,
+		}
+	}
+	scaffold.Replacements = base.Replacements
+	out.Scaffold = scaffold
+	return &out
 }
 
 // useConfig replaces the aqua-registry definition with aqua-registry-g2's own when
