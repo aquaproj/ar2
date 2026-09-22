@@ -68,6 +68,16 @@ func (failingAutoMerger) GetStars(_ context.Context, _ []github.Repo) (map[strin
 func (failingAutoMerger) FillForbiddenStars(_ context.Context, _ map[string]int, _ map[string]string) {
 }
 
+// These tests reach the work a package needs, not the sweep that decides which
+// packages need any.
+func (failingAutoMerger) Versions(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
+	return nil, nil, nil
+}
+
+func (failingAutoMerger) Tags(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
+	return nil, nil, nil
+}
+
 // ghClient is a client that is never called: these tests don't reach anything that
 // makes a request. It is a real one because the controller builds what it needs out
 // of it when it is created.

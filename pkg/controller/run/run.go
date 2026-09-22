@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -62,6 +63,10 @@ type GraphQL interface {
 	EnableAutoMerge(ctx context.Context, pullRequestID string) error
 	GetStars(ctx context.Context, repos []github.Repo) (map[string]int, map[string]string, error)
 	FillForbiddenStars(ctx context.Context, stars map[string]int, reasons map[string]string)
+	// Versions and Tags are the sweep: they say what each package's newest
+	// versions are, fifty packages to a request.
+	Versions(ctx context.Context, repos []github.Repo) (map[string][]string, map[string]string, error)
+	Tags(ctx context.Context, repos []github.Repo) (map[string][]string, map[string]string, error)
 }
 
 // New creates a Controller.
@@ -110,8 +115,15 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		return 0, fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
 
+	candidates := order(input.State)
+	// What each package's newest versions are, for the whole registry, before any of
+	// it is worked on. It says which packages have anything to do at all, which is
+	// most of what a run decides and used to cost a request each.
+	swept := c.sweep(ctx, logger, candidates, input.PkgInfos)
+	now := time.Now()
+
 	generated, attempted := 0, 0
-	for _, candidate := range order(input.State) {
+	for _, candidate := range candidates {
 		if attempted >= input.Limit {
 			return generated, nil
 		}
@@ -122,7 +134,15 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 			logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
 			continue
 		}
-		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted)
+		versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName]
+		todo := decide(candidate.Package, versions, now)
+		if todo == workNone {
+			// The newest versions upstream are the ones the registry holds, and its
+			// history was checked recently enough. Nothing is asked about it.
+			logger.Debug("nothing new for the package", "package", candidate.Name)
+			continue
+		}
+		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions)
 		if err != nil && tried == 0 {
 			// A package that failed before reaching any version still cost API calls
 			// and still has to move the run forward, or a failure every package
@@ -150,7 +170,7 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 // budget.
 // runPackage generates the missing versions of one package, newest first, up to
 // budget. It returns how many were generated and how many were attempted.
-func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int) (int, int, error) {
+func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string) (int, int, error) {
 	pkg := candidate.Package
 	if pkg.RepoOwner == "" || pkg.RepoName == "" {
 		// Versions can only be listed for a GitHub repository. Packages without one
@@ -165,7 +185,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		return 0, 0, fmt.Errorf("get the package definition: %w", err)
 	}
 
-	versions, err := c.versions(ctx, logger, pkg, input.PkgInfos[candidate.Name])
+	versions, err := c.candidateVersions(ctx, logger, input, candidate, todo, swept)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -173,6 +193,9 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if err != nil {
 		return 0, 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
 	}
+	// What the registry holds is the only thing that says a package is done with,
+	// and it is recorded after asking rather than after opening a pull request.
+	record(candidate.Package, versions, existing, todo)
 
 	budget = limitBudget(budget, existing)
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"github.com/szksh-lab-2/ar2/pkg/cli/token"
@@ -43,17 +44,8 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		return err
 	}
 
-	// aqua-registry gains packages continuously, and one the state doesn't know
-	// about is never ordered and so never processed. Adding it here means it waits
-	// for the next run rather than for the next 'ar2 init'.
-	changed, err := c.SyncState(ctx, logger.Logger, s, pkgInfos)
-	if err != nil {
-		return fmt.Errorf("add the new packages to the state: %w", err)
-	}
-	if changed {
-		if err := writeState(ctx, logger, args, s); err != nil {
-			return err
-		}
+	if err := syncState(ctx, logger, c, args, s, pkgInfos); err != nil {
+		return err
 	}
 
 	logger.Info("generating registry.json", "limit", args.Limit, "output_dir", args.OutputDir)
@@ -70,6 +62,15 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		return fmt.Errorf("generate registry.json: %w", err)
 	}
 	logger.Info("generated registry.json", "num_of_versions", generated)
+
+	// The run wrote down what each package turned out to hold. Without this the
+	// next run would sweep the registry and find every package looking as though it
+	// had never been looked at.
+	if !args.SkipPR {
+		if err := writeState(ctx, logger, args, s); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -104,6 +105,23 @@ func verifier(ctx context.Context, logger *slogutil.Logger, httpClient *http.Cli
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
 	return verify.New(http.DefaultClient, signatures), nil
+}
+
+// syncState adds the packages aqua-registry has gained and stores the result.
+//
+// aqua-registry gains packages continuously, and one the state doesn't know about is
+// never ordered and so never processed. Adding it here means it waits for the next
+// run rather than for the next 'ar2 init'. It is stored before the run rather than
+// after it, so that a run which fails partway doesn't have to find them again.
+func syncState(ctx context.Context, logger *slogutil.Logger, c *ctrl.Controller, args *Args, s *state.State, pkgInfos map[string]*aquaregistry.PackageInfo) error {
+	changed, err := c.SyncState(ctx, logger.Logger, s, pkgInfos)
+	if err != nil {
+		return fmt.Errorf("add the new packages to the state: %w", err)
+	}
+	if !changed {
+		return nil
+	}
+	return writeState(ctx, logger, args, s)
 }
 
 // registryClient builds the client that reads and writes aqua-registry-g2.

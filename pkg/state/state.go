@@ -6,6 +6,8 @@
 package state
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,6 +45,45 @@ type Package struct {
 	// It is not omitempty: a repository with 0 stars must stay distinguishable from
 	// one whose star count could not be read, so that the latter can be retried.
 	Stars int `json:"stars"`
+
+	// Versions fingerprints the newest versions the last sweep saw upstream.
+	//
+	// It is what an ETag would have been, over the one thing a sweep cares about.
+	// GitHub's own ETag for the release listing changes whenever an asset is
+	// downloaded, because the listing carries the count, so it says "something
+	// changed" for packages where nothing did — and does it most for the popular
+	// ones, which is exactly backwards.
+	Versions string `json:"versions,omitempty"`
+	// CaughtUp says the registry held every version of that sweep.
+	//
+	// It is recorded from asking the registry, never from having opened a pull
+	// request. A pull request that fails CI is never merged, and a package marked
+	// done for work that didn't land would never be looked at again. Versions are
+	// not removed from the registry, so what was true when it was written stays
+	// true.
+	CaughtUp bool `json:"caught_up,omitempty"`
+	// LastDeepCheck is when the package's whole history was last walked. Zero means
+	// never, which is what a package that hasn't been backfilled looks like.
+	//
+	// A sweep sees the newest versions, and anything published after the history is
+	// complete appears among them. A release dated in the past doesn't, so the
+	// history is walked again from time to time to find what the sweep structurally
+	// cannot.
+	LastDeepCheck time.Time `json:"last_deep_check,omitzero"`
+}
+
+// Fingerprint reduces a sweep's versions to something worth storing for every
+// package in the registry.
+//
+// The versions themselves would be a few hundred kilobytes of state pushed on every
+// run; what a sweep asks of them is only whether they are the same as last time.
+func Fingerprint(versions []string) string {
+	h := sha256.New()
+	for _, v := range versions {
+		h.Write([]byte(v))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // SchemaVersion is the current schema version of the state.
