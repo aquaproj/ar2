@@ -17,7 +17,6 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
 	"github.com/szksh-lab-2/ar2/pkg/state"
-	"github.com/szksh-lab-2/ar2/pkg/verify"
 	"golang.org/x/oauth2"
 )
 
@@ -128,11 +127,11 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if !args.SkipPR {
 		return errSkipPRRequired
 	}
-	return single(ctx, logger, gh, args)
+	return single(ctx, logger, gh, httpClient, args)
 }
 
 // single generates registry.json for one package version.
-func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args) error {
+func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args) error {
 	pkgName, version, found := strings.Cut(args.Target, "@")
 	if !found {
 		return errVersionRequired
@@ -154,7 +153,11 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, a
 
 	// Assets without a digest are hashed whether or not --verify is set: a
 	// registry.json missing a checksum would defeat the lock file.
-	needsReview, err := verify.New(http.DefaultClient).Fill(ctx, logger.Logger, version, reg, args.Verify)
+	v, err := verifier(ctx, logger, httpClient, args)
+	if err != nil {
+		return err
+	}
+	needsReview, err := v.Fill(ctx, logger.Logger, pkgName, version, reg, args.Verify)
 	if err != nil {
 		return fmt.Errorf("complete registry.json: %w", err)
 	}

@@ -277,7 +277,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
-	needsReview, err := c.verifier.Fill(ctx, logger, tag, reg, input.Verify)
+	needsReview, err := c.verifier.Fill(ctx, logger, pkgName, tag, reg, input.Verify)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
 	}

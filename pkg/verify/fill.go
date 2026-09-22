@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
@@ -22,7 +23,7 @@ const ChecksumAlgorithm = "sha256"
 // Extracting is optional because it costs a download per asset even when the release
 // reports digests, which is what makes a backfill bandwidth-bound. Hashing is not
 // optional: a registry.json without a checksum would defeat the lock file.
-func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, version string, reg *generate.Registry, extract bool) (bool, error) {
+func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, version string, reg *generate.Registry, extract bool) (bool, error) {
 	needsReview := false
 	for _, asset := range reg.Assets {
 		if extract && !Extractable(asset.Format) {
@@ -32,7 +33,7 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, version string
 			logger.Warn("can't open this format here, so its files go unchecked",
 				"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
 		} else if extract {
-			review, err := v.fillByExtracting(ctx, logger, version, asset)
+			review, err := v.fillByExtracting(ctx, logger, pkgName, version, asset)
 			if err == nil {
 				needsReview = needsReview || review
 				continue
@@ -56,8 +57,8 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, version string
 }
 
 // fillByExtracting extracts the asset, resolves its files, and records the checksum.
-func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, version string, asset *generate.Asset) (bool, error) {
-	result, err := v.Verify(ctx, logger, version, asset)
+func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (bool, error) {
+	result, err := v.Verify(ctx, logger, pkgName, version, asset)
 	if err != nil {
 		return false, fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
 	}
@@ -70,7 +71,13 @@ func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, ve
 		logger.Warn("the files of this asset don't match the archive",
 			"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
 	}
-	return result.NeedsReview, nil
+	if len(result.Unverified) > 0 {
+		// The entry no longer claims them, which is what makes it honest. Saying so
+		// is what keeps it from merging itself.
+		logger.Warn("dropped the signatures the asset didn't hold up to",
+			"os", asset.OS, "arch", asset.Arch, "dropped", strings.Join(result.Unverified, ", "))
+	}
+	return result.NeedsReview || len(result.Unverified) > 0, nil
 }
 
 // fillChecksum downloads the asset only when its checksum is still missing.

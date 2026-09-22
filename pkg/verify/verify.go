@@ -35,6 +35,16 @@ import (
 type Verifier struct {
 	httpClient *http.Client
 	unarchiver *unarchive.Unarchiver
+	// signatures checks that the asset carries what its entry says it does. It is
+	// optional: a run that only wants the files checked doesn't install cosign and
+	// the rest to do it.
+	signatures Signatures
+}
+
+// Signatures verifies an asset against the signatures its entry claims, drops the
+// ones that don't hold, and returns what it dropped.
+type Signatures interface {
+	Check(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, path string) []string
 }
 
 // New creates a Verifier.
@@ -43,10 +53,11 @@ type Verifier struct {
 // tools that open them exist. Whether they do is asked before extracting rather than
 // assumed from the format: the same code runs on a macOS laptop and a Linux runner,
 // and only one of them can open a dmg.
-func New(httpClient *http.Client) *Verifier {
+func New(httpClient *http.Client, signatures Signatures) *Verifier {
 	return &Verifier{
 		httpClient: httpClient,
 		unarchiver: unarchive.New(osexec.New()),
+		signatures: signatures,
 	}
 }
 
@@ -85,6 +96,10 @@ type Result struct {
 	NeedsReview bool
 	// Unresolved names the files that aren't anywhere in the archive.
 	Unresolved []string
+	// Unverified names the signatures the entry claimed and the asset didn't hold
+	// up to. They have been dropped from the entry, which is a change nobody should
+	// merge without looking at.
+	Unverified []string
 	// LinkedLibc is the libc the executables need, read from the binaries. It is
 	// empty when the asset holds nothing that can be read that way.
 	LinkedLibc string
@@ -123,7 +138,7 @@ func assetFileName(url string, asset *generate.Asset) string {
 
 // Verify downloads the asset, extracts it, and resolves its files against the
 // archive's actual contents.
-func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version string, asset *generate.Asset) (*Result, error) {
+func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (*Result, error) {
 	url, err := downloadURL(version, asset)
 	if err != nil {
 		return nil, err
@@ -142,6 +157,13 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version stri
 		return nil, err
 	}
 
+	// While the file is still here: an entry that says it is signed has to be
+	// signed, or what the registry promises isn't what aqua will be able to do.
+	var unverified []string
+	if v.signatures != nil {
+		unverified = v.signatures.Check(ctx, logger, pkgName, version, asset, path)
+	}
+
 	dest := filepath.Join(dir, "extracted")
 	if err := v.unarchiver.Unarchive(ctx, logger, &unarchive.File{
 		Body:     &downloadedFile{path: path},
@@ -151,7 +173,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, version stri
 		return nil, fmt.Errorf("extract the asset: %w", err)
 	}
 
-	result := &Result{Checksum: checksum}
+	result := &Result{Checksum: checksum, Unverified: unverified}
 	result.Files, result.NeedsReview, result.Unresolved = resolveFiles(logger, dest, asset.Files)
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.

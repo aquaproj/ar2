@@ -16,6 +16,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/github"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
+	"github.com/szksh-lab-2/ar2/pkg/sign"
 	"github.com/szksh-lab-2/ar2/pkg/state"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
@@ -37,15 +38,10 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		return fmt.Errorf("get the aqua-registry definitions: %w", err)
 	}
 
-	reg, err := registryClient(gh, args)
+	c, err := controller(ctx, logger, gh, httpClient, args)
 	if err != nil {
 		return err
 	}
-	// The catalogue is written with the ordinary client: it goes to a branch of its
-	// own, not to a package branch, so the bypass token has no business there.
-	c := ctrl.New(gh, generate.New(gh.Repositories), reg,
-		github.NewClient(httpClient), verify.New(http.DefaultClient),
-		index.New(reg, args.BaseBranch))
 
 	// aqua-registry gains packages continuously, and one the state doesn't know
 	// about is never ordered and so never processed. Adding it here means it waits
@@ -75,6 +71,39 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 	}
 	logger.Info("generated registry.json", "num_of_versions", generated)
 	return nil
+}
+
+// controller assembles what a run works with.
+func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args) (*ctrl.Controller, error) {
+	reg, err := registryClient(gh, args)
+	if err != nil {
+		return nil, err
+	}
+	v, err := verifier(ctx, logger, httpClient, args)
+	if err != nil {
+		return nil, err
+	}
+	// The catalogue is written with the ordinary client: it goes to a branch of its
+	// own, not to a package branch, so the bypass token has no business there.
+	return ctrl.New(gh, generate.New(gh.Repositories), reg,
+		github.NewClient(httpClient), v,
+		index.New(reg, args.BaseBranch)), nil
+}
+
+// verifier builds what downloads an asset and decides whether the entry for it can
+// be merged.
+//
+// Signatures are checked only when the archives are: both need the asset on disk,
+// and a run that skips the download has nothing to check either against.
+func verifier(ctx context.Context, logger *slogutil.Logger, httpClient *http.Client, args *Args) (*verify.Verifier, error) {
+	if !args.Verify {
+		return verify.New(http.DefaultClient, nil), nil
+	}
+	signatures, err := sign.New(ctx, logger.Logger, httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("prepare the signature verification: %w", err)
+	}
+	return verify.New(http.DefaultClient, signatures), nil
 }
 
 // registryClient builds the client that reads and writes aqua-registry-g2.
