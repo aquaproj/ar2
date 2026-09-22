@@ -1,10 +1,12 @@
 package migrate_test
 
 import (
+	"log/slog"
 	"testing"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
+	"github.com/aquaproj/aqua/v2/pkg/expr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/szksh-lab-2/ar2/pkg/migrate"
 )
@@ -22,7 +24,7 @@ func TestConfig(t *testing.T) {
 			// The files identify the entries: the asset name is read from the
 			// release, so it doesn't survive the conversion.
 			{VersionConstraints: `semver("<= 2.0.0")`, Files: []*aquaregistry.File{{Name: "old"}}},
-			{VersionConstraints: `"true"`, Files: []*aquaregistry.File{{Name: "new"}}},
+			{VersionConstraints: "true", Files: []*aquaregistry.File{{Name: "new"}}},
 		},
 	}
 
@@ -70,7 +72,7 @@ func TestConfig_noVersionOverride(t *testing.T) {
 	if len(cfg.VersionOverrides) != 1 {
 		t.Fatalf("got %d overrides, want 1", len(cfg.VersionOverrides))
 	}
-	if diff := cmp.Diff(`"true"`, cfg.VersionOverrides[0].VersionConstraints); diff != "" {
+	if diff := cmp.Diff("true", cfg.VersionOverrides[0].VersionConstraints); diff != "" {
 		t.Errorf("the constraint is wrong (-want +got):\n%s", diff)
 	}
 	if cfg.VersionOverrides[0].Files != nil {
@@ -145,7 +147,7 @@ func TestConfig_format(t *testing.T) {
 				RepoOwner: "foo",
 				RepoName:  "foo",
 				VersionOverrides: []*aquaregistry.VersionOverride{
-					{VersionConstraints: `"true"`, Asset: tt.asset, Format: tt.format},
+					{VersionConstraints: "true", Asset: tt.asset, Format: tt.format},
 				},
 			}, nil)
 			if diff := cmp.Diff(tt.want, cfg.VersionOverrides[0].Format); diff != "" {
@@ -176,7 +178,7 @@ func TestConfig_allOverridesEmpty(t *testing.T) {
 	if len(cfg.VersionOverrides) != 1 {
 		t.Fatalf("got %d overrides, want the one that catches everything:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
 	}
-	if got := cfg.VersionOverrides[0].VersionConstraints; got != `"true"` {
+	if got := cfg.VersionOverrides[0].VersionConstraints; got != "true" {
 		t.Errorf("the constraint is %q, want the one that always matches", got)
 	}
 }
@@ -202,5 +204,34 @@ func TestConfig_someOverridesEmpty(t *testing.T) {
 
 	if len(cfg.VersionOverrides) != 2 {
 		t.Fatalf("got %d overrides, want both:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
+	}
+}
+
+// The catch-all constraint has to be an expression that evaluates, not a string
+// that looks like one.
+//
+// aqua parses a version_constraint as an expression and requires a boolean out of
+// it. Writing it as `"true"` produced "expected bool, but got string", so the
+// override matched nothing and the package it belonged to resolved for no version
+// at all — a definition that reads as though it covers everything and covers
+// nothing.
+func TestConfig_catchAllEvaluates(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "cli",
+		RepoName:  "cli",
+	}, nil)
+	if len(cfg.VersionOverrides) != 1 {
+		t.Fatalf("got %d overrides, want one", len(cfg.VersionOverrides))
+	}
+
+	got, err := expr.EvaluateVersionConstraints(
+		slog.New(slog.DiscardHandler), cfg.VersionOverrides[0].VersionConstraints, "v1.0.0", "1.0.0")
+	if err != nil {
+		t.Fatalf("the catch-all constraint doesn't evaluate: %v", err)
+	}
+	if !got {
+		t.Error("the catch-all constraint didn't match")
 	}
 }

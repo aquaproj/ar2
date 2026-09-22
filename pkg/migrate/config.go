@@ -8,6 +8,14 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/g2"
 )
 
+// catchAll is the constraint of an override that every version matches.
+//
+// It is the expression true, not the string "true": a constraint is evaluated as an
+// expression and has to come out a boolean, so a quoted one fails to parse and the
+// override it belongs to matches nothing at all. YAML quotes it on the way out,
+// because an unquoted true there would be a boolean rather than the expression.
+const catchAll = "true"
+
 // Config builds a package's aqua-registry-g2 definition from its aqua-registry one.
 //
 // The second return value names the constraints that couldn't be turned into a
@@ -34,7 +42,7 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 		// what a release can be read for was taken out of them, which is a file
 		// that tells a reader there are ten cases to think about and then describes
 		// none of them.
-		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: `"true"`}}
+		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
 	}
 	pkgInfo.VersionOverrides = overrides
 
