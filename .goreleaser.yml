@@ -1,0 +1,31 @@
+---
+version: 2
+project_name: ar2
+archives:
+  - name_template: "{{.ProjectName}}_{{.Os}}_{{.Arch}}"
+    files:
+      - LICENSE
+      - README.md
+      - third_party_licenses/**/*
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+builds:
+  - binary: ar2
+    main: cmd/ar2/main.go
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+release:
+  prerelease: "true"
+  header: |
+    [Pull Requests](https://github.com/szksh-lab-2/ar2/pulls?q=is%3Apr+milestone%3A{{.Tag}}) | [Issues](https://github.com/szksh-lab-2/ar2/issues?q=is%3Aissue+milestone%3A{{.Tag}}) | https://github.com/szksh-lab-2/ar2/compare/{{.PreviousTag}}...{{.Tag}}
+
+sboms:
+  - id: default
+    disable: false

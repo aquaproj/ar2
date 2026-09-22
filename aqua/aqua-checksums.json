@@ -1,6 +1,31 @@
 {
   "checksums": [
     {
+      "id": "github_release/github.com/anchore/syft/v1.52.0/syft_1.52.0_darwin_amd64.tar.gz",
+      "checksum": "56975F5D7FFA9846A1EAF64330647841B878097BC7E3730CB9325F93ADD96917",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/anchore/syft/v1.52.0/syft_1.52.0_darwin_arm64.tar.gz",
+      "checksum": "014D561B6D13059124155F74A6C5A9A99501F5E209313638DD884F39EB418EE6",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/anchore/syft/v1.52.0/syft_1.52.0_linux_amd64.tar.gz",
+      "checksum": "CAEEDB81FB0491615F1EBD1761E4145D41EE86DD2CC7BF80669F9F5AD9D6133D",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/anchore/syft/v1.52.0/syft_1.52.0_linux_arm64.tar.gz",
+      "checksum": "C46D5E4C28E12AA4C5BECFAA343EF1C7F89045B6B895F2C21D471C62DB09C706",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/anchore/syft/v1.52.0/syft_1.52.0_windows_amd64.zip",
+      "checksum": "DE787A374CF961C56FD7B206B2E183295ABBA32D0AF3CB44D9AEF2357CA9EDA2",
+      "algorithm": "sha256"
+    },
+    {
       "id": "github_release/github.com/apple/pkl/0.32.1/pkl-linux-aarch64",
       "checksum": "A76D2DD47DA435A8F911B0347373F47C7E59EA54FB75FF846D20B8DF10DBA058",
       "algorithm": "sha256"
@@ -78,6 +103,31 @@
     {
       "id": "github_release/github.com/golangci/golangci-lint/v2.13.2/golangci-lint-2.13.2-windows-arm64.zip",
       "checksum": "2DBFFBD1225D41AC5740F0B478A43B6517F3E3F702FE0AB3AEC470BD6EC8E263",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/goreleaser/goreleaser/v2.18.2/goreleaser_Darwin_all.tar.gz",
+      "checksum": "4BFD26942AA0F78E275CAD3E49144A7C5CE2E8A34F7D0E9D34C718125766BA12",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/goreleaser/goreleaser/v2.18.2/goreleaser_Linux_arm64.tar.gz",
+      "checksum": "A71681B29194F08F057A68CFCAA5C6B15D907A83A2622C51900C4FAFF828F322",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/goreleaser/goreleaser/v2.18.2/goreleaser_Linux_x86_64.tar.gz",
+      "checksum": "0A96EDC9D9BC594E4A41CC4D59467C182062910AB24D9D1F6DD7B667D32606D3",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/goreleaser/goreleaser/v2.18.2/goreleaser_Windows_arm64.zip",
+      "checksum": "D2AEBC59BEE96078C1F529160F170E02FFC96FD5D31B5E33EEF66CDD7256F602",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/goreleaser/goreleaser/v2.18.2/goreleaser_Windows_x86_64.zip",
+      "checksum": "DE61A8E7A064ABB14210B16C942FACD299643D83341C5CD293F19155A7C8B95F",
       "algorithm": "sha256"
     },
     {
@@ -188,6 +238,31 @@
     {
       "id": "github_release/github.com/rhysd/actionlint/v1.7.12/actionlint_1.7.12_windows_arm64.zip",
       "checksum": "CADCF7EA4EFE3A68728893813643CEBE1185E5B1D4BE5B96245F65C9A4D5EA41",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sigstore/cosign/v3.1.3/cosign-darwin-amd64",
+      "checksum": "2347488E5D5B25336644024DFECA5601B190E91197A71A917BDA44744AFF106C",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sigstore/cosign/v3.1.3/cosign-darwin-arm64",
+      "checksum": "5CF948C2F4DFE59687BDD0B8523709067383E03982CC543475C8A7DC70E92A76",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sigstore/cosign/v3.1.3/cosign-linux-amd64",
+      "checksum": "4629C757B7618056F8DDD7E2625AE9FDD94C0372A65049520BC7D9DF9EFC7F71",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sigstore/cosign/v3.1.3/cosign-linux-arm64",
+      "checksum": "C5D324E091826B0D7A78EB16FEF316450B4EB9AAEC045611C08BA06F5E73220A",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sigstore/cosign/v3.1.3/cosign-windows-amd64.exe",
+      "checksum": "9FE59BE0ECA1271873CE019061335EB1AC419B7059202E797828467DDABE33BE",
       "algorithm": "sha256"
     },
     {
