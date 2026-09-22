@@ -51,6 +51,23 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 	// being one, which is the same intent said the other way round.
 	pkgInfo.VersionConstraints = ""
 
+	// v1 reads the top level's constraint first and, when it has none, stops there:
+	// the overrides are never consulted. XcodesOrg/xcodes has one saying no_asset
+	// for a single version, which has never applied to anything. Carried over it
+	// would become the entry every version falls back to, and the package would
+	// resolve to no asset at all.
+	if strings.TrimSpace(base.VersionConstraints) == "" && len(pkgInfo.VersionOverrides) > 0 {
+		pkgInfo.VersionOverrides = nil
+		unreachable := make([]string, 0, len(base.VersionOverrides))
+		for _, vo := range base.VersionOverrides {
+			unreachable = append(unreachable, vo.VersionConstraints)
+		}
+		cfg := &g2.Config{PackageInfo: pkgInfo}
+		cfg.VersionOverrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
+		applyScaffold(cfg, scaffold)
+		return cfg, unreachable
+	}
+
 	// The trimmed overrides, not the source ones: reversing the originals would put
 	// back everything the trim just took out.
 	overrides, unconverted := ReverseVersionOverrides(pkgInfo.VersionOverrides)

@@ -146,6 +146,9 @@ func TestConfig_format(t *testing.T) {
 				Type:      "github_release",
 				RepoOwner: "foo",
 				RepoName:  "foo",
+				// "false" is how a registry says the top level is not a candidate,
+				// which is what makes the overrides the ones that answer.
+				VersionConstraints: "false",
 				VersionOverrides: []*aquaregistry.VersionOverride{
 					{VersionConstraints: "true", Asset: tt.asset, Format: tt.format},
 				},
@@ -288,5 +291,41 @@ func TestConfig_topLevelFalse(t *testing.T) {
 		if vo.VersionConstraints == "false" {
 			t.Errorf("the top level came back as a candidate:\n%+v", cfg.VersionOverrides)
 		}
+	}
+}
+
+// v1 reads the top level's constraint first and, when it has none, stops there: the
+// overrides are never consulted.
+//
+// XcodesOrg/xcodes has one saying no_asset for a single version, which has never
+// applied to anything. Carried over it would become the entry every version falls
+// back to, and the package would resolve to no asset at all.
+func TestConfig_unreachableOverrides(t *testing.T) {
+	t.Parallel()
+	no := true
+	cfg, unconverted := migrate.Config(&aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "XcodesOrg",
+		RepoName:  "xcodes",
+		Asset:     "xcodes.zip",
+		// No top-level version_constraint.
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `Version == "1.4.0"`, NoAsset: &no},
+		},
+	}, nil)
+
+	if len(cfg.VersionOverrides) != 1 {
+		t.Fatalf("got %d overrides, want the one that catches everything", len(cfg.VersionOverrides))
+	}
+	if got := cfg.VersionOverrides[0].VersionConstraints; got != "true" {
+		t.Errorf("the constraint is %q, want the one that always matches", got)
+	}
+	if cfg.VersionOverrides[0].NoAsset != nil {
+		t.Error("an override that never applied became the one every version falls back to")
+	}
+	// Someone wrote it meaning it to work, so it is reported rather than dropped
+	// quietly.
+	if len(unconverted) != 1 {
+		t.Errorf("the unreachable override wasn't reported: %v", unconverted)
 	}
 }
