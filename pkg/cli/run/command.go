@@ -17,7 +17,6 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
 	"github.com/szksh-lab-2/ar2/pkg/state"
-	"github.com/szksh-lab-2/ar2/pkg/verify"
 	"golang.org/x/oauth2"
 )
 
@@ -35,6 +34,7 @@ type Args struct {
 	StateFile   string
 	G2Owner     string
 	G2Repo      string
+	BaseBranch  string
 	Registry    string
 	Repository  string
 	Username    string
@@ -91,7 +91,7 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.BoolVar(&args.SkipPR, "skip-pr", false, "generate registry.json without creating a branch, a commit, or a pull request")
 	fs.StringVar(&args.Output, "output", "", "write registry.json to this file instead of standard output")
 	fs.StringVar(&args.RegistryRef, "registry-ref", "main", "the aqua-registry ref the package definition is read from")
-	fs.BoolVar(&args.Verify, "verify", false, "download and extract every asset to check that files[].src matches the archive")
+	fs.BoolVar(&args.Verify, "verify", true, "download and extract every asset to check that files[].src matches the archive and to read which libc its executables need")
 	fs.IntVar(&args.Limit, "limit", defaultLimit, "how many package versions to generate in one run")
 	fs.StringVar(&args.OutputDir, "output-dir", "", "write registry.json files under this directory")
 	fs.StringVar(&args.StateFile, "state", "", "read the state from this file instead of the container registry")
@@ -100,6 +100,7 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.StringVar(&args.Username, "username", "", "the user the GitHub access token belongs to (default the owner of --repository)")
 	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
 	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
+	fs.StringVar(&args.BaseBranch, "base-branch", "main", "the branch the index.json pull request targets")
 	return cmd
 }
 
@@ -126,11 +127,11 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if !args.SkipPR {
 		return errSkipPRRequired
 	}
-	return single(ctx, logger, gh, args)
+	return single(ctx, logger, gh, httpClient, args)
 }
 
 // single generates registry.json for one package version.
-func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args) error {
+func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args) error {
 	pkgName, version, found := strings.Cut(args.Target, "@")
 	if !found {
 		return errVersionRequired
@@ -152,7 +153,11 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, a
 
 	// Assets without a digest are hashed whether or not --verify is set: a
 	// registry.json missing a checksum would defeat the lock file.
-	needsReview, err := verify.New(http.DefaultClient).Fill(ctx, logger.Logger, version, reg, args.Verify)
+	v, err := verifier(ctx, logger, httpClient, args)
+	if err != nil {
+		return err
+	}
+	needsReview, err := v.Fill(ctx, logger.Logger, pkgName, version, reg, args.Verify)
 	if err != nil {
 		return fmt.Errorf("complete registry.json: %w", err)
 	}

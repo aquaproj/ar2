@@ -12,6 +12,7 @@ import (
 	aquaconfig "github.com/aquaproj/aqua/v2/pkg/config"
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
+	"github.com/aquaproj/aqua/v2/pkg/g2"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -30,6 +31,11 @@ type Input struct {
 	// the signing configuration. It may be nil for a package aqua-registry doesn't
 	// have yet.
 	Base *aquaregistry.PackageInfo
+	// Config is the package's definition on its aqua-registry-g2 branch. When it is
+	// set it replaces Base and Scaffold, because it is what those were converted
+	// into: aqua-registry is where a package's definition comes from until
+	// aqua-registry-g2 has one of its own, and after that it is no longer consulted.
+	Config *g2.Config
 }
 
 // Generator builds registry.json from a release.
@@ -49,6 +55,10 @@ func New(gh genrgst.RepositoriesService) *Generator {
 // the registry. The inferred PackageInfo is then resolved for each os/arch the same
 // way aqua resolves it at install time, so the static result installs identically.
 func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *Input) (*Registry, error) {
+	input, err := useConfig(logger, input)
+	if err != nil {
+		return nil, err
+	}
 	base, err := resolveBase(logger, input)
 	if err != nil {
 		return nil, err
@@ -58,18 +68,86 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// type the URL or the path is a template that nothing but registry.yaml knows,
 	// so its definition is used as it is.
 	if base != nil && base.Type != aquaregistry.PkgInfoTypeGitHubRelease {
-		return resolve(logger, base, nil, input.Version, nil)
+		return resolve(logger, input.PkgName, base, nil, input.Version, nil)
 	}
 
-	inferred, err := g.packageInfo(ctx, logger, input)
+	inferred, err := g.packageInfo(ctx, logger, withSpellings(input, base))
 	if err != nil {
 		return nil, err
 	}
-	digests, err := g.digests(ctx, input)
+	rel, err := g.release(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	return resolve(logger, merge(inferred, base), base, input.Version, digests)
+	reg, err := resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, rel.digests)
+	if err != nil {
+		return nil, err
+	}
+	if err := inferSigning(input.PkgName, reg, rel.names); err != nil {
+		return nil, err
+	}
+	return reg, nil
+}
+
+// withSpellings tells aqua gr how this release writes the platforms it can't read.
+//
+// aqua gr works out what a release supports by reading its asset names, and it knows
+// the spellings it knows. luau-lang/luau calls its Linux build luau-ubuntu.zip, so
+// the asset belongs to no platform at all and the package comes back with no Linux
+// in it — not a wrong asset name for Linux, no Linux.
+//
+// The definition already says what the spelling means, and it says it the same way
+// whether it is aqua-registry's or the one on the package's branch.
+func withSpellings(input *Input, base *aquaregistry.PackageInfo) *Input {
+	if base == nil || len(base.Replacements) == 0 {
+		return input
+	}
+	out := *input
+	scaffold := &genrgst.RawConfig{}
+	if out.Scaffold != nil {
+		scaffold = &genrgst.RawConfig{
+			AllAssetsFilter: out.Scaffold.AllAssetsFilter,
+			VersionFilter:   out.Scaffold.VersionFilter,
+			VersionPrefix:   out.Scaffold.VersionPrefix,
+			Package:         out.Scaffold.Package,
+		}
+	}
+	scaffold.Replacements = base.Replacements
+	out.Scaffold = scaffold
+	return &out
+}
+
+// useConfig replaces the aqua-registry definition with aqua-registry-g2's own when
+// the package has one.
+//
+// The two say the same things; g2's is what aqua-registry's was converted into, minus
+// what a release is read for. Preferring it is what makes the conversion take effect:
+// the filters it carries are what decide which assets are considered at all, and a
+// correction made to it would otherwise never be used.
+//
+// Base is already resolved for the version by resolveBase, so the definition is
+// handed over in the same shape.
+func useConfig(logger *slog.Logger, input *Input) (*Input, error) {
+	if input.Config == nil {
+		return input, nil
+	}
+	pkgInfo, err := input.Config.SetVersion(logger, input.Version)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the package definition for the version: %w", err)
+	}
+	// SetVersion has applied the overrides, so resolveBase must not apply them
+	// again.
+	pkgInfo.VersionConstraints = ""
+	pkgInfo.VersionOverrides = nil
+
+	replaced := *input
+	replaced.Base = pkgInfo
+	replaced.Scaffold = &genrgst.RawConfig{
+		AllAssetsFilter: input.Config.AllAssetsFilter,
+		VersionFilter:   pkgInfo.VersionFilter,
+		VersionPrefix:   pkgInfo.VersionPrefix,
+	}
+	return &replaced, nil
 }
 
 // resolveBase applies the version_overrides of aqua-registry's definition, so that
@@ -146,32 +224,62 @@ func writeScaffold(raw *genrgst.RawConfig) (string, func(), error) {
 	return path, clean, nil
 }
 
-// digests returns the SHA256 digest of each asset, keyed by asset name.
+// release is what a release says about its own assets.
+type release struct {
+	// digests holds the SHA256 digest of each asset that has one, keyed by name.
+	//
+	// GitHub started exposing digests on 2025-06-03 and doesn't backfill them, so
+	// this is empty for older releases. Those are downloaded and hashed instead.
+	digests map[string]string
+	// names holds every asset name, which is what the signatures are found by.
+	names map[string]struct{}
+}
+
+// release reads the release's asset list.
 //
-// GitHub started exposing digests on 2025-06-03 and doesn't backfill them, so this
-// is empty for older releases. Those need the asset downloaded and hashed, which
-// this doesn't do yet.
-func (g *Generator) digests(ctx context.Context, input *Input) (map[string]string, error) {
-	owner, name, found := strings.Cut(input.PkgName, "/")
-	if !found {
-		return nil, errPkgNameFormat
+// The list comes with the release rather than being fetched separately, which is one
+// request instead of two per version. Assets whose upload never completed are left
+// out: GitHub keeps them in the "starter" state, where they are hidden from the
+// release page and can't be downloaded.
+func (g *Generator) release(ctx context.Context, input *Input) (*release, error) {
+	owner, name, err := repo(input.PkgName)
+	if err != nil {
+		return nil, err
 	}
-	// A package name can have more than two segments (a monorepo publishing several
-	// binaries); the repository is the first two.
-	if i := strings.Index(name, "/"); i >= 0 {
-		name = name[:i]
-	}
-	release, _, err := g.gh.GetReleaseByTag(ctx, owner, name, input.Version)
+	rel, _, err := g.gh.GetReleaseByTag(ctx, owner, name, input.Version)
 	if err != nil {
 		return nil, fmt.Errorf("get the release: %w", err)
 	}
-	digests := map[string]string{}
-	for _, asset := range release.Assets {
-		digest := asset.GetDigest()
-		if digest == "" {
+	out := &release{
+		digests: map[string]string{},
+		names:   map[string]struct{}{},
+	}
+	for _, asset := range rel.Assets {
+		if asset.GetState() != assetStateUploaded {
 			continue
 		}
-		digests[asset.GetName()] = strings.TrimPrefix(digest, "sha256:")
+		out.names[asset.GetName()] = struct{}{}
+		if digest := asset.GetDigest(); digest != "" {
+			out.digests[asset.GetName()] = strings.TrimPrefix(digest, "sha256:")
+		}
 	}
-	return digests, nil
+	return out, nil
+}
+
+// assetStateUploaded is the state of an asset whose upload has completed.
+const assetStateUploaded = "uploaded"
+
+// repo returns the repository a package is released from.
+//
+// A package name can have more than two segments — a monorepo publishing several
+// binaries — and the repository is the first two.
+func repo(pkgName string) (string, string, error) {
+	owner, name, found := strings.Cut(pkgName, "/")
+	if !found {
+		return "", "", errPkgNameFormat
+	}
+	if i := strings.Index(name, "/"); i >= 0 {
+		name = name[:i]
+	}
+	return owner, name, nil
 }

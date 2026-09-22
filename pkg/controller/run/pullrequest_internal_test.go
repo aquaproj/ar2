@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
@@ -18,7 +19,7 @@ type fakeRegistry struct {
 	created   int
 }
 
-func (f *fakeRegistry) Versions(_ context.Context, _ string) (map[string]struct{}, error) {
+func (f *fakeRegistry) Versions(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
 
@@ -28,6 +29,18 @@ func (f *fakeRegistry) PackagesInFlight(_ context.Context) (map[string]struct{},
 
 func (f *fakeRegistry) EnsurePackageBranch(_ context.Context, _ string) (string, error) {
 	return "base-sha", nil
+}
+
+// Version is never asked for: these tests generate for a package the repository
+// holds nothing of, so there is no earlier version to compare the signing against.
+func (f *fakeRegistry) Version(_ context.Context, _, _ string) (*aquag2.Registry, error) {
+	return nil, nil //nolint:nilnil
+}
+
+// Config is never asked for: these tests pass the definition in, so that they see
+// only the generated files.
+func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, error) {
+	return nil, nil //nolint:nilnil
 }
 
 func (f *fakeRegistry) Commit(_ context.Context, _, _, _ string, files []*g2.File) error {
@@ -55,6 +68,28 @@ func (failingAutoMerger) GetStars(_ context.Context, _ []github.Repo) (map[strin
 func (failingAutoMerger) FillForbiddenStars(_ context.Context, _ map[string]int, _ map[string]string) {
 }
 
+// These tests reach the work a package needs, not the sweep that decides which
+// packages need any.
+func (failingAutoMerger) Versions(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
+	return nil, nil, nil
+}
+
+func (failingAutoMerger) Tags(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
+	return nil, nil, nil
+}
+
+// ghClient is a client that is never called: these tests don't reach anything that
+// makes a request. It is a real one because the controller builds what it needs out
+// of it when it is created.
+func ghClient(t *testing.T) *gogithub.Client {
+	t.Helper()
+	gh, err := gogithub.NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gh
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
@@ -69,8 +104,8 @@ func discardLogger() *slog.Logger {
 func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(nil, nil, reg, failingAutoMerger{}, nil)
-	err := c.openPullRequest(t.Context(), discardLogger(), "cli/cli", []*version{
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
 	if err != nil {
@@ -86,8 +121,8 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(nil, nil, reg, failingAutoMerger{}, nil)
-	if err := c.openPullRequest(t.Context(), discardLogger(), "cli/cli", []*version{
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
 	}); err != nil {
@@ -102,4 +137,54 @@ func TestOpenPullRequest_paths(t *testing.T) {
 			t.Errorf("file %d is at %q, want %q", i, file.Path, want[i])
 		}
 	}
+}
+
+// fakeIndex records what was added to the catalogue.
+type fakeIndex struct {
+	added map[string]*aquag2.Config
+	err   error
+}
+
+func (f *fakeIndex) AddPackage(_ context.Context, _ *slog.Logger, pkgName string, cfg *aquag2.Config) error {
+	if f.added == nil {
+		f.added = map[string]*aquag2.Config{}
+	}
+	f.added[pkgName] = cfg
+	return f.err
+}
+
+// A package whose branch already holds its definition has been in the catalogue
+// since the run that brought it, so a pull request adding versions leaves it alone.
+func TestOpenPullRequest_indexUntouched(t *testing.T) {
+	t.Parallel()
+	idx := &fakeIndex{}
+	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, idx)
+	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
+		{Version: "v2.1.0", Registry: &generate.Registry{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.added) != 0 {
+		t.Errorf("added %v to the catalogue, want nothing", idx.added)
+	}
+}
+
+// The definition the pull request carries is what the catalogue entry is made of.
+func TestAddToIndex(t *testing.T) {
+	t.Parallel()
+	idx := &fakeIndex{}
+	cfg := &aquag2.Config{}
+	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", cfg)
+	if idx.added["cli/cli"] != cfg {
+		t.Errorf("the catalogue got %v, want the definition just written", idx.added)
+	}
+}
+
+// The catalogue is a separate pull request against a separate branch, and the
+// reconciliation adds whatever was missed. Failing the package over it would throw
+// away the versions that were generated.
+func TestAddToIndex_errorIsNotFatal(t *testing.T) {
+	t.Parallel()
+	idx := &fakeIndex{err: errors.New("the catalogue is unreachable")}
+	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", &aquag2.Config{})
 }

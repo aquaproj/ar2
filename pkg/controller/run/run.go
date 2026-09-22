@@ -8,12 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/szksh-lab-2/ar2/pkg/attest"
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/github"
+	"github.com/szksh-lab-2/ar2/pkg/sign"
 	"github.com/szksh-lab-2/ar2/pkg/state"
 	"github.com/szksh-lab-2/ar2/pkg/summary"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
@@ -26,16 +30,28 @@ type Controller struct {
 	g2        Registry
 	graphql   GraphQL
 	verifier  *verify.Verifier
+	attester  *attest.Checker
+	index     Index
 	summary   *summary.Writer
 }
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
 type Registry interface {
-	Versions(ctx context.Context, pkgName string) (map[string]struct{}, error)
+	Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error)
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
+	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
+}
+
+// Index is the catalogue of the packages the registry holds.
+//
+// A run touches it only when it takes a package over, which is the one moment a
+// package can be new to the catalogue. Everything else is the reconciliation's job.
+type Index interface {
+	AddPackage(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error
 }
 
 // GraphQL is the part of GitHub's GraphQL API a run uses.
@@ -47,13 +63,17 @@ type GraphQL interface {
 	EnableAutoMerge(ctx context.Context, pullRequestID string) error
 	GetStars(ctx context.Context, repos []github.Repo) (map[string]int, map[string]string, error)
 	FillForbiddenStars(ctx context.Context, stars map[string]int, reasons map[string]string)
+	// Versions and Tags are the sweep: they say what each package's newest
+	// versions are, fifty packages to a request.
+	Versions(ctx context.Context, repos []github.Repo) (map[string][]string, map[string]string, error)
+	Tags(ctx context.Context, repos []github.Repo) (map[string][]string, map[string]string, error)
 }
 
 // New creates a Controller.
-func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier) *Controller {
+func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, index Index) *Controller {
 	return &Controller{
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
-		summary: summary.New(),
+		attester: attest.New(gh.Repositories), index: index, summary: summary.New(),
 	}
 }
 
@@ -73,6 +93,10 @@ type Input struct {
 	State *state.State
 	// PkgInfos are aqua-registry's definitions, keyed by package name.
 	PkgInfos map[string]*aquaregistry.PackageInfo
+	// RegistryRef is the aqua-registry ref the definitions were read from. A
+	// package's aqua gr configuration is read from the same ref, so that the two
+	// halves of a definition come from one state of that repository.
+	RegistryRef string
 }
 
 // Run generates registry.json for up to Limit package versions.
@@ -91,8 +115,15 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		return 0, fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
 
+	candidates := order(input.State)
+	// What each package's newest versions are, for the whole registry, before any of
+	// it is worked on. It says which packages have anything to do at all, which is
+	// most of what a run decides and used to cost a request each.
+	swept := c.sweep(ctx, logger, candidates, input.PkgInfos)
+	now := time.Now()
+
 	generated, attempted := 0, 0
-	for _, candidate := range order(input.State) {
+	for _, candidate := range candidates {
 		if attempted >= input.Limit {
 			return generated, nil
 		}
@@ -103,7 +134,15 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 			logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
 			continue
 		}
-		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted)
+		versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName]
+		todo := decide(candidate.Package, versions, now)
+		if todo == workNone {
+			// The newest versions upstream are the ones the registry holds, and its
+			// history was checked recently enough. Nothing is asked about it.
+			logger.Debug("nothing new for the package", "package", candidate.Name)
+			continue
+		}
+		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions)
 		if err != nil && tried == 0 {
 			// A package that failed before reaching any version still cost API calls
 			// and still has to move the run forward, or a failure every package
@@ -131,35 +170,66 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 // budget.
 // runPackage generates the missing versions of one package, newest first, up to
 // budget. It returns how many were generated and how many were attempted.
-func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int) (int, int, error) {
+func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string) (int, int, error) {
 	pkg := candidate.Package
 	if pkg.RepoOwner == "" || pkg.RepoName == "" {
 		// Versions can only be listed for a GitHub repository. Packages without one
 		// need another source and aren't handled yet.
 		return 0, 0, nil
 	}
-	versions, err := c.versions(ctx, logger, pkg, input.PkgInfos[candidate.Name])
+	// The definition is read once for the package rather than once per version: it
+	// is the same file for all of them, and it decides both how they are generated
+	// and whether one has to be converted first.
+	config, err := c.g2.Config(ctx, candidate.Name)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get the package definition: %w", err)
+	}
+
+	versions, err := c.candidateVersions(ctx, logger, input, candidate, todo, swept)
 	if err != nil {
 		return 0, 0, err
 	}
-	existing, err := c.g2.Versions(ctx, candidate.Name)
+	existing, err := c.g2.Versions(ctx, logger, candidate.Name)
 	if err != nil {
 		return 0, 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
 	}
+	// What the registry holds is the only thing that says a package is done with,
+	// and it is recorded after asking rather than after opening a pull request.
+	record(candidate.Package, versions, existing, todo)
 
 	budget = limitBudget(budget, existing)
 
-	generated, attempted := c.generateVersions(ctx, logger, input, candidate.Name, versions, existing, budget)
+	generated, attempted := c.generateVersions(ctx, logger, input, config, candidate.Name, versions, existing, budget)
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
+
+	c.reviewLostSigning(ctx, logger, candidate.Name, generated, versions, existing)
+
 	if input.SkipPR {
 		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
-	if err := c.openPullRequest(ctx, logger, candidate.Name, generated); err != nil {
+	if err := c.openPullRequest(ctx, logger, input, config, candidate.Name, generated); err != nil {
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil
+}
+
+// reviewLostSigning leaves for review any version that can be verified with less
+// than the one before it.
+//
+// The asset names and the checksums of a release an attacker published look no
+// different from any other; what is missing is the signature. Nothing else in the
+// generated file would say so.
+func (c *Controller) reviewLostSigning(ctx context.Context, logger *slog.Logger, pkgName string, generated []*version, versions []string, existing map[string]struct{}) {
+	baseline, ok := c.signingBaseline(ctx, logger, pkgName, baselineVersion(versions, existing))
+	if !ok {
+		for _, v := range generated {
+			v.NeedsReview = true
+		}
+		return
+	}
+	checkSigning(logger, pkgName, generated, baseline)
 }
 
 // limitBudget limits how much of the run's remaining budget one package may take.
@@ -196,7 +266,7 @@ const breadthDepth = 5
 
 // generateVersions generates the versions the repository is missing, newest first,
 // up to budget.
-func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []string, existing map[string]struct{}, budget int) ([]*version, int) {
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string, versions []string, existing map[string]struct{}, budget int) ([]*version, int) {
 	generated := make([]*version, 0, budget)
 	attempted := 0
 	for _, tag := range versions {
@@ -207,7 +277,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 			continue
 		}
 		attempted++
-		v, err := c.generate(ctx, logger, input, pkgName, tag)
+		v, err := c.generate(ctx, logger, input, config, pkgName, tag)
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
 			// all. The next run sees the version still missing and tries again.
@@ -221,20 +291,37 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 }
 
 // generate builds registry.json for one package version and completes it.
-func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, pkgName, tag string) (*version, error) {
+func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName, tag string) (*version, error) {
 	reg, err := c.generator.Generate(ctx, logger, &generate.Input{
 		PkgName: pkgName,
 		Version: tag,
 		Base:    input.PkgInfos[pkgName],
+		Config:  config,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
-	needsReview, err := c.verifier.Fill(ctx, logger, tag, reg, input.Verify)
+	needsReview, err := c.verifier.Fill(ctx, logger, pkgName, tag, reg, input.Verify)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
 	}
-	return &version{Version: tag, Registry: reg, NeedsReview: needsReview}, nil
+	// After Fill, because an attestation is held against the artifact's digest and
+	// Fill is what makes sure every asset has one.
+	dropped, err := c.attester.Check(ctx, logger, pkgName, reg)
+	if err != nil {
+		return nil, fmt.Errorf("check the attestations: %w", err)
+	}
+	// Whatever the definition wrote as a template is filled in here: the file
+	// describes one version of one environment and shouldn't leave anything to be
+	// worked out at install time.
+	for _, asset := range reg.Assets {
+		sign.Render(asset, tag)
+	}
+	return &version{
+		Version:     tag,
+		Registry:    reg,
+		NeedsReview: needsReview || dropped,
+	}, nil
 }
 
 // writeAll writes the generated files out instead of opening a pull request.

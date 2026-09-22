@@ -65,7 +65,8 @@ func (c *Client) GetStars(ctx context.Context, repos []Repo) (map[string]int, ma
 	for start := 0; start < len(repos); start += BatchSize {
 		end := min(start+BatchSize, len(repos))
 		batch := repos[start:end]
-		if err := c.getStars(ctx, batch, stars, reasons); err != nil {
+		record := func(repo Repo, r *repository) { stars[repo.String()] = r.StargazerCount }
+		if err := c.fetch(ctx, batch, starCount, record, reasons); err != nil {
 			for _, repo := range batch {
 				reasons[repo.String()] = err.Error()
 			}
@@ -81,7 +82,11 @@ const aliasPrefix = "r"
 // and its name.
 const argsPerRepo = 2
 
-func buildQuery(repos []Repo) (string, map[string]any) {
+// selection is what a query asks for about one repository, written as the body of
+// its repository field.
+type selection func(ownerVar, nameVar string) string
+
+func buildQuery(repos []Repo, sel selection) (string, map[string]any) {
 	args := make([]string, 0, len(repos)*argsPerRepo)
 	fields := make([]string, 0, len(repos))
 	vars := make(map[string]any, len(repos)*argsPerRepo)
@@ -89,7 +94,7 @@ func buildQuery(repos []Repo) (string, map[string]any) {
 		alias := aliasPrefix + strconv.Itoa(i)
 		ownerVar, nameVar := alias+"o", alias+"n"
 		args = append(args, "$"+ownerVar+": String!", "$"+nameVar+": String!")
-		fields = append(fields, fmt.Sprintf("%s: repository(owner: $%s, name: $%s) { stargazerCount }", alias, ownerVar, nameVar))
+		fields = append(fields, alias+": "+sel(ownerVar, nameVar))
 		vars[ownerVar] = repo.Owner
 		vars[nameVar] = repo.Name
 	}
@@ -97,13 +102,32 @@ func buildQuery(repos []Repo) (string, map[string]any) {
 	return query, vars
 }
 
+// starCount asks for a repository's stargazer count.
+func starCount(ownerVar, nameVar string) string {
+	return fmt.Sprintf("repository(owner: $%s, name: $%s) { stargazerCount }", ownerVar, nameVar)
+}
+
 type graphQLResponse struct {
 	Data   map[string]*repository `json:"data"`
 	Errors []graphQLError         `json:"errors"`
 }
 
+// repository is what a query asks about one repository. Each query fills in the
+// fields it selected and leaves the rest empty.
 type repository struct {
 	StargazerCount int `json:"stargazerCount"`
+	Releases       *struct {
+		Nodes []struct {
+			TagName      string `json:"tagName"`
+			IsDraft      bool   `json:"isDraft"`
+			IsPrerelease bool   `json:"isPrerelease"`
+		} `json:"nodes"`
+	} `json:"releases"`
+	Refs *struct {
+		Nodes []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"refs"`
 }
 
 type graphQLError struct {
@@ -127,8 +151,13 @@ func (e *graphQLError) alias() string {
 // succeeds in a smaller batch.
 const errResourceLimits = "RESOURCE_LIMITS_EXCEEDED"
 
-func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]int, reasons map[string]string) error {
-	result, err := c.request(ctx, repos)
+// take records what a query asked for about one repository.
+type take func(repo Repo, r *repository)
+
+// fetch asks one batch, records what came back, and asks again in smaller batches
+// for the repositories whose alias hit the resource limit.
+func (c *Client) fetch(ctx context.Context, repos []Repo, sel selection, record take, reasons map[string]string) error {
+	result, err := c.request(ctx, repos, sel)
 	if err != nil {
 		return err
 	}
@@ -139,7 +168,7 @@ func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]in
 	}
 	// Repositories whose alias hit the resource limit are retried in smaller batches.
 	// They are not missing: the same query succeeds when it asks for less.
-	overflowed := collect(repos, result, stars, reasons)
+	overflowed := collect(repos, result, record, reasons)
 	if len(overflowed) == 0 {
 		return nil
 	}
@@ -147,21 +176,21 @@ func (c *Client) getStars(ctx context.Context, repos []Repo, stars map[string]in
 		// Splitting would recurse forever on a batch that never shrinks.
 		return fmt.Errorf("GraphQL resource limits exceeded for %d repositories", len(overflowed))
 	}
-	return c.getStars(ctx, overflowed, stars, reasons)
+	return c.fetch(ctx, overflowed, sel, record, reasons)
 }
 
 // collect reads the star counts out of a response and returns the repositories that
 // have to be asked for again because their alias hit the resource limit.
 // Anything else left unanswered (NOT_FOUND) is a repository that can't be resolved;
 // it is left out of the result and reported by the caller.
-func collect(repos []Repo, result *graphQLResponse, stars map[string]int, reasons map[string]string) []Repo {
+func collect(repos []Repo, result *graphQLResponse, record take, reasons map[string]string) []Repo {
 	limited := limitedAliases(result.Errors)
 	byAlias := errorsByAlias(result.Errors)
 	var overflowed []Repo
 	for i, repo := range repos {
 		alias := aliasPrefix + strconv.Itoa(i)
 		if r := result.Data[alias]; r != nil {
-			stars[repo.String()] = r.StargazerCount
+			record(repo, r)
 			delete(reasons, repo.String())
 			continue
 		}
@@ -191,9 +220,9 @@ func errorsByAlias(errs []graphQLError) map[string]string {
 	return m
 }
 
-// request sends one GraphQL query asking for the star count of each repository.
-func (c *Client) request(ctx context.Context, repos []Repo) (*graphQLResponse, error) {
-	query, vars := buildQuery(repos)
+// request sends one GraphQL query asking the same thing about each repository.
+func (c *Client) request(ctx context.Context, repos []Repo, sel selection) (*graphQLResponse, error) {
+	query, vars := buildQuery(repos, sel)
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": vars,
