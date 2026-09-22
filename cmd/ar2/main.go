@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/aquaproj/ar2/pkg/cli"
 	"github.com/suzuki-shunsuke/cobra-util/cobrautil"
-	"github.com/szksh-lab-2/ar2/pkg/cli"
 )
 
 var version = ""

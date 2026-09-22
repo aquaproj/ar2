@@ -3,8 +3,8 @@ package run
 import (
 	"testing"
 
+	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/google/go-cmp/cmp"
-	"github.com/szksh-lab-2/ar2/pkg/state"
 )
 
 // TestOrder checks the order a run works in: most starred first, and packages whose

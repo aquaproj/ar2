@@ -13,8 +13,8 @@ import (
 	"log/slog"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
 )
 
 // Registry is what the catalogue is built from and written to.

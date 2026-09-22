@@ -1,4 +1,4 @@
-module github.com/szksh-lab-2/ar2
+module github.com/aquaproj/ar2
 
 go 1.27.1
 

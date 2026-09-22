@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/controller/initcmd"
+	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/state"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
-	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
-	"github.com/szksh-lab-2/ar2/pkg/controller/initcmd"
-	"github.com/szksh-lab-2/ar2/pkg/github"
-	"github.com/szksh-lab-2/ar2/pkg/state"
 	"golang.org/x/oauth2"
 )
 

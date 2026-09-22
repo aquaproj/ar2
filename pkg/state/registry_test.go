@@ -3,8 +3,8 @@ package state_test
 import (
 	"testing"
 
+	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/google/go-cmp/cmp"
-	"github.com/szksh-lab-2/ar2/pkg/state"
 )
 
 func TestFlags_Resolve(t *testing.T) {

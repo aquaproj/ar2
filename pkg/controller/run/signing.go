@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/generate"
 )
 
 // signingKinds names each way an asset can be verified, in the order they are

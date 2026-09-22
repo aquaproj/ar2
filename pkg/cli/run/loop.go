@@ -8,18 +8,18 @@ import (
 	"os"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/ar2/pkg/cli/token"
+	"github.com/aquaproj/ar2/pkg/controller/index"
+	ctrl "github.com/aquaproj/ar2/pkg/controller/run"
+	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/registry"
+	"github.com/aquaproj/ar2/pkg/sign"
+	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/verify"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
-	"github.com/szksh-lab-2/ar2/pkg/cli/token"
-	"github.com/szksh-lab-2/ar2/pkg/controller/index"
-	ctrl "github.com/szksh-lab-2/ar2/pkg/controller/run"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
-	"github.com/szksh-lab-2/ar2/pkg/github"
-	"github.com/szksh-lab-2/ar2/pkg/registry"
-	"github.com/szksh-lab-2/ar2/pkg/sign"
-	"github.com/szksh-lab-2/ar2/pkg/state"
-	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
 // loop works through aqua-registry in the order the state gives, generating up to

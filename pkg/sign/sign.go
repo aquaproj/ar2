@@ -24,8 +24,8 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
 	"github.com/aquaproj/aqua/v2/pkg/slsa"
+	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/suzuki-shunsuke/go-osenv/osenv"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
 
 // Verifier runs the signature verifications an entry asks for.

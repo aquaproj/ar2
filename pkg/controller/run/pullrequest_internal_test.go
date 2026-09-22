@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/github"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
-	"github.com/szksh-lab-2/ar2/pkg/github"
 )
 
 type fakeRegistry struct {

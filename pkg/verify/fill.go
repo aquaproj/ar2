@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/generate"
 )
 
 // ChecksumAlgorithm is the algorithm of every checksum ar2 records.

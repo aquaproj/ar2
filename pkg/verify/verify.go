@@ -28,7 +28,7 @@ import (
 
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
 	"github.com/aquaproj/aqua/v2/pkg/unarchive"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/generate"
 )
 
 // Verifier downloads and extracts assets.

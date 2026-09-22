@@ -3,8 +3,8 @@ package g2_test
 import (
 	"testing"
 
+	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/google/go-cmp/cmp"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
 )
 
 func TestEncodePackageName(t *testing.T) {

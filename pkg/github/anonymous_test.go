@@ -3,7 +3,7 @@ package github_test
 import (
 	"testing"
 
-	"github.com/szksh-lab-2/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/github"
 )
 
 // TestFillForbiddenStars checks that a repository an organization's IP allow list

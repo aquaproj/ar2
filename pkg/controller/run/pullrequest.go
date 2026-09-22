@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/generate"
 )
 
 // version is one generated registry.json waiting to be committed.

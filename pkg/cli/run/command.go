@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/registry"
+	"github.com/aquaproj/ar2/pkg/state"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
-	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
-	"github.com/szksh-lab-2/ar2/pkg/registry"
-	"github.com/szksh-lab-2/ar2/pkg/state"
 	"golang.org/x/oauth2"
 )
 

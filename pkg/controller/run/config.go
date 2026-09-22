@@ -8,10 +8,10 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/migrate"
-	"github.com/szksh-lab-2/ar2/pkg/registry"
-	"github.com/szksh-lab-2/ar2/pkg/sign"
+	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/migrate"
+	"github.com/aquaproj/ar2/pkg/registry"
+	"github.com/aquaproj/ar2/pkg/sign"
 	"go.yaml.in/yaml/v3"
 )
 

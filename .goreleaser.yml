@@ -24,7 +24,7 @@ builds:
 release:
   prerelease: "true"
   header: |
-    [Pull Requests](https://github.com/szksh-lab-2/ar2/pulls?q=is%3Apr+milestone%3A{{.Tag}}) | [Issues](https://github.com/szksh-lab-2/ar2/issues?q=is%3Aissue+milestone%3A{{.Tag}}) | https://github.com/szksh-lab-2/ar2/compare/{{.PreviousTag}}...{{.Tag}}
+    [Pull Requests](https://github.com/aquaproj/ar2/pulls?q=is%3Apr+milestone%3A{{.Tag}}) | [Issues](https://github.com/aquaproj/ar2/issues?q=is%3Aissue+milestone%3A{{.Tag}}) | https://github.com/aquaproj/ar2/compare/{{.PreviousTag}}...{{.Tag}}
 
 sboms:
   - id: default

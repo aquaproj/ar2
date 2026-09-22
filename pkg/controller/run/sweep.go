@@ -7,8 +7,8 @@ import (
 	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
-	"github.com/szksh-lab-2/ar2/pkg/github"
-	"github.com/szksh-lab-2/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/state"
 )
 
 // deepCheckAge is how long a package's history stands before it is walked again.

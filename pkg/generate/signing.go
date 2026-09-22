@@ -2,7 +2,7 @@ package generate
 
 import (
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
-	"github.com/szksh-lab-2/ar2/pkg/migrate"
+	"github.com/aquaproj/ar2/pkg/migrate"
 )
 
 // inferSigning records, per environment, how the release signs that asset.

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/google/go-cmp/cmp"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
 
 // newArchive writes the given paths as empty files and returns the directory,

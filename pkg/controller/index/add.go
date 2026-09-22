@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
 )
 
 // target is the catalogue an update is built on top of, and where it came from.

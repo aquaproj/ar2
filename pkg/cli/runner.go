@@ -6,13 +6,13 @@ package cli
 import (
 	"context"
 
+	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/index"
+	"github.com/aquaproj/ar2/pkg/cli/initcmd"
+	"github.com/aquaproj/ar2/pkg/cli/run"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/cobra-util/cobrautil"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
-	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
-	"github.com/szksh-lab-2/ar2/pkg/cli/index"
-	"github.com/szksh-lab-2/ar2/pkg/cli/initcmd"
-	"github.com/szksh-lab-2/ar2/pkg/cli/run"
 )
 
 // Run creates and executes the ar2 CLI application.
@@ -29,7 +29,7 @@ func Run(ctx context.Context, logger *slogutil.Logger, env *cobrautil.Env) error
 func newCommand(logger *slogutil.Logger, env *cobrautil.Env, gFlags *flag.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ar2",
-		Short: "Maintain aqua-registry-g2. https://github.com/szksh-lab-2/ar2",
+		Short: "Maintain aqua-registry-g2. https://github.com/aquaproj/ar2",
 		Long: `Maintain aqua-registry-g2.
 
 ar2 generates the statically resolved registry.json of aqua-registry-g2 from upstream

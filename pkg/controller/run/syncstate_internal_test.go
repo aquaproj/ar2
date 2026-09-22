@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
-	"github.com/szksh-lab-2/ar2/pkg/github"
-	"github.com/szksh-lab-2/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/state"
 )
 
 // starFetcher answers with fixed star counts, and refuses one repository the way an
