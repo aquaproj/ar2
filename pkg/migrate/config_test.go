@@ -205,8 +205,13 @@ func TestConfig_someOverridesEmpty(t *testing.T) {
 		},
 	}, nil)
 
-	if len(cfg.VersionOverrides) != 2 {
-		t.Fatalf("got %d overrides, want both:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
+	// Both the definition's own entries, and the entry every version falls through
+	// to, which inherits the base the way v1's top level did.
+	if len(cfg.VersionOverrides) != 3 {
+		t.Fatalf("got %d overrides:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
+	}
+	if got := cfg.VersionOverrides[2].VersionConstraints; got != "true" {
+		t.Errorf("the last entry is %q, want the one everything matches", got)
 	}
 }
 

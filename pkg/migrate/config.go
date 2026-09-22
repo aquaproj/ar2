@@ -9,6 +9,27 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/g2"
 )
 
+// withFallback ends the list with an entry every version matches.
+//
+// v1 answers a version that matches no override with the top level itself. g2 has no
+// top level, and answers with its first entry instead — which, once the entries that
+// name a version are lifted to the front, is one written for a particular version.
+// bazelbuild/bazel-watcher's V0.26.9 matches nothing and took an entry saying
+// no_asset, for a release that has assets.
+//
+// An empty entry at the end carries nothing, so it inherits the base: the same
+// answer v1 gives. Nothing reaches it that matched anything above, and the first
+// entry stops being the fallback because nothing falls that far.
+func withFallback(overrides []*aquaregistry.VersionOverride) []*aquaregistry.VersionOverride {
+	if len(overrides) == 0 {
+		return overrides
+	}
+	if last := overrides[len(overrides)-1]; last.VersionConstraints == catchAll && emptyOverride(last) {
+		return overrides
+	}
+	return append(overrides, &aquaregistry.VersionOverride{VersionConstraints: catchAll})
+}
+
 // topLevelFirst puts v1's top level back as the entry it was.
 //
 // v1 evaluates the top level before any override and uses it when it matches, so a
@@ -83,7 +104,7 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 		// none of them.
 		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
 	}
-	pkgInfo.VersionOverrides = topLevelFirst(base.VersionConstraints, overrides)
+	pkgInfo.VersionOverrides = withFallback(topLevelFirst(base.VersionConstraints, overrides))
 
 	cfg := &g2.Config{PackageInfo: pkgInfo}
 	applyScaffold(cfg, scaffold)
