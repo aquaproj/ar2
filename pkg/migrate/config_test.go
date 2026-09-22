@@ -334,3 +334,57 @@ func TestConfig_unreachableOverrides(t *testing.T) {
 		t.Errorf("the unreachable override wasn't reported: %v", unconverted)
 	}
 }
+
+// A list ending in a constraint every version matches never reaches the top level,
+// so what it catches is every tag the repository has — including the ones that are
+// no version of the package at all.
+//
+// superradcompany/microsandbox publishes another component's tags in the same
+// repository, and monocore-v0.2.1 parses as no version, so it took that last entry.
+// The conversion gives the entry a bound, which stops it catching them, and the
+// entry that answers instead has to say what it said.
+func TestConfig_fallbackCarriesTheCatchAll(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "superradcompany",
+		RepoName:           "microsandbox",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver("<= 0.5.10")`, Replacements: aquaregistry.Replacements{"arm64": "aarch64"}},
+			{VersionConstraints: "true", Replacements: aquaregistry.Replacements{"amd64": "x86_64", "arm64": "aarch64"}},
+		},
+	}, nil)
+
+	resolved, err := cfg.SetVersion(slog.New(slog.DiscardHandler), "monocore-v0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Replacements["amd64"]; got != "x86_64" {
+		t.Errorf("a tag that is no version resolved to %q, want what the catch-all said", got)
+	}
+}
+
+// A list ending in a bound does reach the top level, so the entry that answers for
+// what it doesn't match carries nothing and inherits the base.
+func TestConfig_fallbackInheritsTheBase(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "bazelbuild",
+		RepoName:           "bazel-watcher",
+		VersionConstraints: "false",
+		Replacements:       aquaregistry.Replacements{"darwin": "Darwin"},
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver("<= 0.4.0")`, Replacements: aquaregistry.Replacements{"darwin": "old"}},
+		},
+	}, nil)
+
+	resolved, err := cfg.SetVersion(slog.New(slog.DiscardHandler), "V0.26.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Replacements["darwin"]; got != "Darwin" {
+		t.Errorf("a version that matches nothing resolved to %q, want the base's", got)
+	}
+}

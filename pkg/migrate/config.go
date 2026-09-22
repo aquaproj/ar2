@@ -17,17 +17,28 @@ import (
 // bazelbuild/bazel-watcher's V0.26.9 matches nothing and took an entry saying
 // no_asset, for a release that has assets.
 //
-// An empty entry at the end carries nothing, so it inherits the base: the same
-// answer v1 gives. Nothing reaches it that matched anything above, and the first
-// entry stops being the fallback because nothing falls that far.
-func withFallback(overrides []*aquaregistry.VersionOverride) []*aquaregistry.VersionOverride {
+// What the entry carries is what v1 would have answered. A list ending in a
+// constraint every version matches never reaches the top level, so a tag that is no
+// version at all — superradcompany/microsandbox publishes another component's tags
+// in the same repository — takes that last entry; the conversion gives it a bound
+// and it would otherwise stop catching them. A list ending in a bound does reach the
+// top level, and an entry carrying nothing inherits it.
+func withFallback(overrides, original []*aquaregistry.VersionOverride) []*aquaregistry.VersionOverride {
 	if len(overrides) == 0 {
 		return overrides
 	}
 	if last := overrides[len(overrides)-1]; last.VersionConstraints == catchAll && emptyOverride(last) {
 		return overrides
 	}
-	return append(overrides, &aquaregistry.VersionOverride{VersionConstraints: catchAll})
+	fallback := &aquaregistry.VersionOverride{VersionConstraints: catchAll}
+	if len(original) > 0 {
+		if newest := original[len(original)-1]; isCatchAll(newest.VersionConstraints) {
+			copied := *newest
+			copied.VersionConstraints = catchAll
+			fallback = &copied
+		}
+	}
+	return append(overrides, fallback)
 }
 
 // topLevelFirst puts v1's top level back as the entry it was.
@@ -104,7 +115,7 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 		// none of them.
 		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
 	}
-	pkgInfo.VersionOverrides = withFallback(topLevelFirst(base.VersionConstraints, overrides))
+	pkgInfo.VersionOverrides = withFallback(topLevelFirst(base.VersionConstraints, overrides), pkgInfo.VersionOverrides)
 
 	cfg := &g2.Config{PackageInfo: pkgInfo}
 	applyScaffold(cfg, scaffold)

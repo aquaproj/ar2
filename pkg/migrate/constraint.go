@@ -202,3 +202,12 @@ func lowerBound(constraint string) (string, bool) {
 	}
 	return "", false
 }
+
+// isCatchAll reports whether a constraint matches every version.
+//
+// v1 ends a list with one, and what it catches is every tag the repository has,
+// including the ones that are no version of the package at all.
+func isCatchAll(constraint string) bool {
+	s := strings.TrimSpace(constraint)
+	return s == catchAll || s == `"`+catchAll+`"`
+}
