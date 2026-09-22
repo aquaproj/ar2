@@ -16,6 +16,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/generate"
 	"github.com/szksh-lab-2/ar2/pkg/github"
+	"github.com/szksh-lab-2/ar2/pkg/sign"
 	"github.com/szksh-lab-2/ar2/pkg/state"
 	"github.com/szksh-lab-2/ar2/pkg/summary"
 	"github.com/szksh-lab-2/ar2/pkg/verify"
@@ -286,6 +287,12 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	dropped, err := c.attester.Check(ctx, logger, pkgName, reg)
 	if err != nil {
 		return nil, fmt.Errorf("check the attestations: %w", err)
+	}
+	// Whatever the definition wrote as a template is filled in here: the file
+	// describes one version of one environment and shouldn't leave anything to be
+	// worked out at install time.
+	for _, asset := range reg.Assets {
+		sign.Render(asset, tag)
 	}
 	return &version{
 		Version:     tag,

@@ -185,10 +185,12 @@ func TestBaselineVersion(t *testing.T) {
 // version after this is held to it.
 func TestPinSigner(t *testing.T) {
 	t.Parallel()
+	// What the run generated: the release it looked at, signed under its own tag.
+	bundle := "gh_2.0.0_linux_amd64.tar.gz.sigstore.json"
 	observed := &aquaregistry.Cosign{
-		Bundle: &aquaregistry.DownloadedFile{Type: "github_release"},
+		Bundle: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &bundle},
 		Opts: []string{
-			"--certificate-identity", "https://github.com/cli/cli/.github/workflows/deployment.yml@refs/tags/{{.Version}}",
+			"--certificate-identity", "https://github.com/cli/cli/.github/workflows/deployment.yml@refs/tags/v2.0.0",
 			"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
 		},
 	}
@@ -196,8 +198,19 @@ func TestPinSigner(t *testing.T) {
 	pinSigner(discardLogger(), "cli/cli", cfg, []*version{
 		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{OS: "linux", Arch: "amd64", Cosign: observed})},
 	})
-	if cfg.Cosign != observed {
-		t.Errorf("the definition didn't record the signer: %+v", cfg.Cosign)
+
+	// The definition applies to every version, so the one that was looked at goes
+	// back to being a template.
+	want := "https://github.com/cli/cli/.github/workflows/deployment.yml@refs/tags/{{.Version}}"
+	if got := cfg.Cosign.Opts[1]; got != want {
+		t.Errorf("the identity is %q, want %q", got, want)
+	}
+	if got := *cfg.Cosign.Bundle.Asset; got != "{{.Asset}}.sigstore.json" {
+		t.Errorf("the bundle is %q", got)
+	}
+	// What the run generated is untouched: it describes one version.
+	if observed.Opts[1] != "https://github.com/cli/cli/.github/workflows/deployment.yml@refs/tags/v2.0.0" {
+		t.Errorf("the generated file was rewritten: %q", observed.Opts[1])
 	}
 }
 

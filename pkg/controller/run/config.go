@@ -11,6 +11,7 @@ import (
 	"github.com/szksh-lab-2/ar2/pkg/g2"
 	"github.com/szksh-lab-2/ar2/pkg/migrate"
 	"github.com/szksh-lab-2/ar2/pkg/registry"
+	"github.com/szksh-lab-2/ar2/pkg/sign"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -114,10 +115,11 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 		return
 	}
 	if !cfg.Cosign.GetEnabled() {
-		if signer := observedSigner(versions); signer != nil {
+		if signer, version := observedSigner(versions); signer != nil {
+			cosign := templateSigner(signer, version)
 			logger.Info("recording who signs the package", "package", pkgName,
-				"identity", identityOf(signer.Opts))
-			cfg.Cosign = signer
+				"identity", identityOf(cosign.Opts))
+			cfg.Cosign = cosign
 		}
 	}
 	if cfg.GitHubArtifactAttestations.SignerWorkflow() == "" {
@@ -147,18 +149,43 @@ func observedAttestation(versions []*version) *aquaregistry.GitHubArtifactAttest
 // The newest version is asked first, because that is the one whose signer the
 // package should be held to. Every environment of a release is signed by the same
 // thing, so the first entry carrying one answers for all of them.
-func observedSigner(versions []*version) *aquaregistry.Cosign {
+func observedSigner(versions []*version) (*aquaregistry.Cosign, string) {
 	for _, v := range versions {
 		for _, asset := range v.Registry.Assets {
 			if asset.Cosign == nil {
 				continue
 			}
 			if identityOf(asset.Cosign.Opts) != "" {
-				return asset.Cosign
+				return asset.Cosign, v.Version
 			}
 		}
 	}
-	return nil
+	return nil, ""
+}
+
+// templateSigner turns what one release was signed by into what every release is
+// expected to be signed by.
+//
+// A workflow signs under the ref it ran for, so its name holds the version of the
+// release that was looked at. The generated files record that as it stands, because
+// each describes one version; the definition applies to all of them and puts the
+// version back as a template.
+func templateSigner(cosign *aquaregistry.Cosign, version string) *aquaregistry.Cosign {
+	out := *cosign
+	out.Opts = make([]string, len(cosign.Opts))
+	for i, opt := range cosign.Opts {
+		out.Opts[i] = sign.TemplateVersion(opt, version)
+	}
+	// The bundle is named after the asset, which differs per environment, so the
+	// definition refers to it the way a registry does.
+	if out.Bundle != nil {
+		bundle := *out.Bundle
+		asset := "{{.Asset}}.sigstore.json"
+		bundle.Asset = &asset
+		bundle.URL = nil
+		out.Bundle = &bundle
+	}
+	return &out
 }
 
 // identityOf returns the signer a cosign configuration names, or an empty string

@@ -51,26 +51,25 @@ func (v *Verifier) pin(ctx context.Context, logger *slog.Logger, version string,
 		return nil
 	}
 
-	templated := observed.template(version)
 	logger.Debug("read who signed the asset",
-		"os", asset.OS, "arch", asset.Arch, "identity", templated.SAN, "issuer", templated.Issuer)
-	asset.Cosign.Opts = replaceIdentity(asset.Cosign.Opts, templated)
-	return templated
+		"os", asset.OS, "arch", asset.Arch, "identity", observed.SAN, "issuer", observed.Issuer)
+	asset.Cosign.Opts = replaceIdentity(asset.Cosign.Opts, observed)
+	return observed
 }
 
-// template puts the version back where the signer's name holds it.
+// TemplateVersion puts the version back where a value holds it.
 //
-// A workflow signs under the ref it ran for, so the name holds the version and
-// pinning it as it stands would only ever match the one release. A service account
-// signs under a name that doesn't move, and is pinned as it is.
-func (i *Identity) template(version string) *Identity {
-	if version == "" || !strings.Contains(i.SAN, version) {
-		return i
+// A workflow signs under the ref it ran for, so its name holds the version, and a
+// definition pinning it as it stands would only ever match the one release. A
+// service account signs under a name that doesn't move and is pinned as it is.
+//
+// It is the definition that wants this. What a run generates describes one version
+// and holds no templates at all.
+func TemplateVersion(s, version string) string {
+	if version == "" || !strings.Contains(s, version) {
+		return s
 	}
-	return &Identity{
-		SAN:    strings.Replace(i.SAN, version, "{{.Version}}", 1),
-		Issuer: i.Issuer,
-	}
+	return strings.Replace(s, version, "{{.Version}}", 1)
 }
 
 // identityOpt returns the value of a cosign flag, or an empty string when it isn't
@@ -167,4 +166,47 @@ func (v *Verifier) get(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("download the signature: status code %d", resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body) //nolint:wrapcheck // the caller says what it was reading
+}
+
+// Render fills in the templates an entry's signing configuration still holds.
+//
+// The definition writes them, and the file being generated describes one version of
+// one environment, so nothing in it should have to be worked out again later. It is
+// done last because the pattern a signer was guessed by, and the name it was
+// replaced with, are both written with the version in them.
+func Render(asset *generate.Asset, version string) {
+	if asset.Cosign != nil {
+		for i, opt := range asset.Cosign.Opts {
+			asset.Cosign.Opts[i] = render(opt, version, asset)
+		}
+		for _, f := range []*aquaregistry.DownloadedFile{
+			asset.Cosign.Signature, asset.Cosign.Certificate, asset.Cosign.Key, asset.Cosign.Bundle,
+		} {
+			renderFile(f, version, asset)
+		}
+	}
+	if asset.SLSAProvenance != nil {
+		asset.SLSAProvenance.Asset = renderPtr(asset.SLSAProvenance.Asset, version, asset)
+		asset.SLSAProvenance.URL = renderPtr(asset.SLSAProvenance.URL, version, asset)
+	}
+	if asset.Minisign != nil {
+		asset.Minisign.Asset = renderPtr(asset.Minisign.Asset, version, asset)
+		asset.Minisign.URL = renderPtr(asset.Minisign.URL, version, asset)
+	}
+}
+
+func renderFile(f *aquaregistry.DownloadedFile, version string, asset *generate.Asset) {
+	if f == nil {
+		return
+	}
+	f.Asset = renderPtr(f.Asset, version, asset)
+	f.URL = renderPtr(f.URL, version, asset)
+}
+
+func renderPtr(s *string, version string, asset *generate.Asset) *string {
+	if s == nil {
+		return nil
+	}
+	rendered := render(*s, version, asset)
+	return &rendered
 }
