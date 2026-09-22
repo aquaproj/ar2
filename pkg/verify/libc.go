@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/szksh-lab-2/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/generate"
 )
 
 // The libc an executable is linked against, as recorded in registry.json.

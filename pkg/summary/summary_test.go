@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/szksh-lab-2/ar2/pkg/summary"
+	"github.com/aquaproj/ar2/pkg/summary"
 )
 
 // TestWriter checks that the indented form of what a run generated reaches the job

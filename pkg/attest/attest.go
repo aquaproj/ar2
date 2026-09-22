@@ -14,8 +14,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/aquaproj/ar2/pkg/generate"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
 
 // Attestations is the part of GitHub's API that answers whether an artifact is

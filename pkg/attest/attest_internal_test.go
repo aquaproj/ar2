@@ -8,8 +8,8 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/generate"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
 
 // fakeAttestations answers for the digests it was given and records what was asked.

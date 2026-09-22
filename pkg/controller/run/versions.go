@@ -7,8 +7,8 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/expr"
+	"github.com/aquaproj/ar2/pkg/state"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/state"
 )
 
 // versionsPerPage is how many versions are looked at per package in one run.

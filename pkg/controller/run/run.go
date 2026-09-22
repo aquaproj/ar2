@@ -12,15 +12,15 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/attest"
+	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/sign"
+	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/summary"
+	"github.com/aquaproj/ar2/pkg/verify"
 	gogithub "github.com/google/go-github/v92/github"
-	"github.com/szksh-lab-2/ar2/pkg/attest"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
-	"github.com/szksh-lab-2/ar2/pkg/github"
-	"github.com/szksh-lab-2/ar2/pkg/sign"
-	"github.com/szksh-lab-2/ar2/pkg/state"
-	"github.com/szksh-lab-2/ar2/pkg/summary"
-	"github.com/szksh-lab-2/ar2/pkg/verify"
 )
 
 // Controller runs the loop.

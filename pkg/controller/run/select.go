@@ -10,7 +10,7 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/szksh-lab-2/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/state"
 )
 
 // Candidate is one package to work on, in the order it should be worked on.

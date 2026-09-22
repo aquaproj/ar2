@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/google/go-cmp/cmp"
-	"github.com/szksh-lab-2/ar2/pkg/generate"
 )
 
 // A workflow signs under the ref it ran for, so its name holds the version. Pinning

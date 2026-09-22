@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/token"
+	ctrl "github.com/aquaproj/ar2/pkg/controller/index"
+	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
-	"github.com/szksh-lab-2/ar2/pkg/cli/flag"
-	"github.com/szksh-lab-2/ar2/pkg/cli/token"
-	ctrl "github.com/szksh-lab-2/ar2/pkg/controller/index"
-	"github.com/szksh-lab-2/ar2/pkg/g2"
 )
 
 // errTokenRequired is returned when no access token is available.
