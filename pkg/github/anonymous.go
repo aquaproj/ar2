@@ -33,7 +33,7 @@ func (c *Client) FillForbiddenStars(ctx context.Context, stars map[string]int, r
 		if reason != reasonForbidden {
 			continue
 		}
-		star, err := anonymousStars(ctx, repo)
+		star, err := c.anonymousStars(ctx, repo)
 		if err != nil {
 			continue
 		}
@@ -43,8 +43,8 @@ func (c *Client) FillForbiddenStars(ctx context.Context, stars map[string]int, r
 }
 
 // anonymousStars reads a public repository's star count without a token.
-func anonymousStars(ctx context.Context, repo string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, anonymousEndpoint+repo, nil)
+func (c *Client) anonymousStars(ctx context.Context, repo string) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.anonymousEndpoint+repo, nil)
 	if err != nil {
 		return 0, fmt.Errorf("create a request for the repository: %w", err)
 	}
