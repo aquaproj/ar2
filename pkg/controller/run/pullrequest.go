@@ -56,8 +56,6 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 	logger.Info("opened a pull request",
 		"package", pkgName, "number", pr.GetNumber(), "needs_review", needsReview)
 
-	c.addToIndex(ctx, logger, pkgName, contents.config)
-
 	if needsReview {
 		// A relocated files[].src is a guess. Merging it without anyone looking is
 		// exactly what the archive check exists to prevent.
@@ -119,25 +117,6 @@ func (c *Controller) filesToCommit(logger *slog.Logger, def *definition, pkgName
 		out.needsReview = out.needsReview || v.NeedsReview
 	}
 	return out, nil
-}
-
-// addToIndex puts a package the run has just taken over into the catalogue.
-//
-// Only a package arriving with its definition: any other has been in the catalogue
-// since the run that brought it. The definition is the one just written, because the
-// branch won't hold it until this pull request merges.
-//
-// A failure here doesn't fail the package. The catalogue update is a separate pull
-// request against a separate branch, and the reconciliation that runs on a schedule
-// adds whatever was missed once the definition has landed.
-func (c *Controller) addToIndex(ctx context.Context, logger *slog.Logger, pkgName string, config *aquag2.Config) {
-	if config == nil || c.index == nil {
-		return
-	}
-	if err := c.index.AddPackage(ctx, logger, pkgName, config); err != nil {
-		logger.Warn("failed to add the package to the catalogue",
-			"package", pkgName, "error", err.Error())
-	}
 }
 
 // marshal renders registry.json the way it is stored: on one line.
