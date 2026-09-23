@@ -159,8 +159,6 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 	return generated, nil
 }
 
-// runPackage generates the missing versions of one package, newest first, up to
-// budget.
 // todo says what this package needs doing, and on which versions. workNone is
 // everything the run passes over without asking anything about it.
 func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight map[string]struct{}, swept map[string][]string, now time.Time) (work, []string) {
