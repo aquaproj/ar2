@@ -46,7 +46,7 @@ type Verifier struct {
 // per run, into aqua's own root directory — the same copies aqua would use, and the
 // same place AQUA_ROOT_DIR points at.
 func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Verifier, error) {
-	param := &config.Param{RootDir: config.GetRootDir(osenv.New())}
+	param := &config.Param{RootDir: config.GetRootDir(osenv.New(), "")}
 	exe := osexec.New()
 	// aqua's own client, because the downloader is aqua's: it reads the token from
 	// the same environment variable ar2 does.
