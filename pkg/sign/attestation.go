@@ -25,7 +25,7 @@ func ghPath(ctx context.Context) string {
 	pkg := ghattestation.Package()
 	pkg.PackageInfo.OverrideByRuntime(rt)
 	if files := pkg.PackageInfo.GetFiles(); len(files) > 0 {
-		if p, err := pkg.ExePath(config.GetRootDir(osenv.New()), files[0], rt); err == nil {
+		if p, err := pkg.ExePath(config.GetRootDir(osenv.New(), ""), files[0], rt); err == nil {
 			if _, err := os.Stat(p); err == nil {
 				return p
 			}
