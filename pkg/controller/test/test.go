@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -36,14 +37,41 @@ type Verifier interface {
 	Verify(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (*verify.Result, error)
 }
 
+// Environment is one os and arch, as an entry names them.
+type Environment struct {
+	OS   string
+	Arch string
+}
+
+// String renders the environment the way a registry writes it.
+func (e Environment) String() string {
+	return e.OS + "/" + e.Arch
+}
+
+// Empty says the caller named no environment, so every entry is checked.
+func (e Environment) Empty() bool {
+	return e.OS == "" && e.Arch == ""
+}
+
+// matches reports whether the entry belongs to the environment.
+func (e Environment) matches(asset *generate.Asset) bool {
+	return e.Empty() || (asset.OS == e.OS && asset.Arch == e.Arch)
+}
+
 // Controller checks registry.json files.
 type Controller struct {
 	verifier Verifier
+	// env limits the run to the entries of one environment, which is how a job
+	// running on a machine of that environment checks the entry meant for it: an
+	// archive is opened by its format rather than by its platform, but running what
+	// is inside it isn't, and checking an entry where it will be installed is what
+	// makes that possible.
+	env Environment
 }
 
-// New creates a Controller.
-func New(verifier Verifier) *Controller {
-	return &Controller{verifier: verifier}
+// New creates a Controller. An empty environment checks every entry.
+func New(verifier Verifier, env Environment) *Controller {
+	return &Controller{verifier: verifier, env: env}
 }
 
 // Run checks every file and fails if any of them didn't hold up.
@@ -81,7 +109,12 @@ func (c *Controller) check(ctx context.Context, logger *slog.Logger, pkgName, pa
 	}
 
 	failed := false
+	checked := 0
 	for _, asset := range reg.Assets {
+		if !c.env.matches(asset) {
+			continue
+		}
+		checked++
 		logger := logger.With("asset_env", asset.OS+"/"+asset.Arch)
 		if err := shape(asset); err != nil {
 			slogerr.WithError(logger, err).Error("the entry isn't complete")
@@ -96,7 +129,44 @@ func (c *Controller) check(ctx context.Context, logger *slog.Logger, pkgName, pa
 	if failed {
 		return errFailed
 	}
-	logger.Info("the registry holds up to its release", "assets", len(reg.Assets))
+	if checked == 0 {
+		// The file describes no such environment. A job runs per environment the
+		// files hold, so this is a file that doesn't hold the one it was given, not
+		// a package that fails on it.
+		logger.Info("the registry has nothing for this environment", "environment", c.env)
+		return nil
+	}
+	logger.Info("the registry holds up to its release", "assets", checked)
+	return nil
+}
+
+// Environments lists the environments the files describe, sorted, without repeats.
+//
+// The checks run one job per environment, on a machine of that environment, and the
+// jobs are worked out from this: a fixed list would leave an entry for an environment
+// nobody thought of unchecked, which is the one thing a merge gate must not do.
+func Environments(w io.Writer, paths []string) error {
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		reg, err := read(path)
+		if err != nil {
+			return err
+		}
+		for _, asset := range reg.Assets {
+			if asset.OS == "" || asset.Arch == "" {
+				return errNoEnv
+			}
+			seen[Environment{OS: asset.OS, Arch: asset.Arch}.String()] = struct{}{}
+		}
+	}
+	envs := make([]string, 0, len(seen))
+	for env := range seen {
+		envs = append(envs, env)
+	}
+	sort.Strings(envs)
+	for _, env := range envs {
+		fmt.Fprintln(w, env)
+	}
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -147,5 +148,76 @@ func TestRead(t *testing.T) {
 				t.Fatalf("read() returned %d assets, wanted %d", len(reg.Assets), d.assets)
 			}
 		})
+	}
+}
+
+func TestEnvironment_matches(t *testing.T) {
+	t.Parallel()
+	linuxAmd64 := &generate.Asset{OS: "linux", Arch: "amd64"}
+	data := []struct {
+		name string
+		env  Environment
+		exp  bool
+	}{
+		{
+			// Nobody named an environment, so every entry is checked.
+			name: "empty",
+			env:  Environment{},
+			exp:  true,
+		},
+		{
+			name: "the entry's own",
+			env:  Environment{OS: "linux", Arch: "amd64"},
+			exp:  true,
+		},
+		{
+			name: "another architecture",
+			env:  Environment{OS: "linux", Arch: "arm64"},
+		},
+		{
+			name: "another operating system",
+			env:  Environment{OS: "windows", Arch: "amd64"},
+		},
+	}
+	for _, d := range data {
+		t.Run(d.name, func(t *testing.T) {
+			t.Parallel()
+			if got := d.env.matches(linuxAmd64); got != d.exp {
+				t.Fatalf("matches() = %v, wanted %v", got, d.exp)
+			}
+		})
+	}
+}
+
+// The jobs are worked out from the files, so an entry for an environment nobody
+// thought of gets a job rather than going unchecked.
+func TestEnvironments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	a := write("versions/v1.0.0/registry.json", `{"assets":[
+		{"os":"linux","arch":"amd64","type":"github_release","checksum":"a"},
+		{"os":"darwin","arch":"arm64","type":"github_release","checksum":"b"}]}`)
+	b := write("versions/v1.1.0/registry.json", `{"assets":[
+		{"os":"linux","arch":"amd64","type":"github_release","checksum":"c"},
+		{"os":"windows","arch":"arm64","type":"github_release","checksum":"d"}]}`)
+
+	out := &strings.Builder{}
+	if err := Environments(out, []string{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	// Sorted, and each environment once however many versions hold it.
+	want := "darwin/arm64\nlinux/amd64\nwindows/arm64\n"
+	if out.String() != want {
+		t.Fatalf("Environments() printed:\n%s\nwanted:\n%s", out.String(), want)
 	}
 }
