@@ -24,14 +24,31 @@ type Identity struct {
 	// Issuer is the OIDC issuer that vouched for the SAN. Without it the SAN is
 	// only a string anyone could have put in a certificate of their own.
 	Issuer string
+	// Repository and Ref are the repository the signing run belonged to and the ref
+	// it ran for, as Fulcio recorded them. They are empty for a signature made
+	// somewhere other than GitHub Actions.
+	//
+	// They matter because a workflow is shared. suzuki-shunsuke/go-release-workflow
+	// signs the releases of dozens of repositories, so a certificate naming it is a
+	// certificate any of them could have obtained: asking for the workflow alone
+	// accepts a signature made for somebody else's release.
+	Repository string
+	Ref        string
 }
 
 // Opts renders the identity as the cosign flags that check for it.
 func (i *Identity) Opts() []string {
-	return []string{
-		"--certificate-identity", i.SAN,
-		"--certificate-oidc-issuer", i.Issuer,
+	opts := []string{
+		flagIdentity, i.SAN,
+		flagIssuer, i.Issuer,
 	}
+	if i.Repository != "" {
+		opts = append(opts, flagWorkflowRepository, i.Repository)
+	}
+	if i.Ref != "" {
+		opts = append(opts, flagWorkflowRef, i.Ref)
+	}
+	return opts
 }
 
 // bundle is the part of a Sigstore bundle holding the signing certificate.
@@ -90,6 +107,16 @@ var (
 	oidIssuerV1 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 1} //nolint:gochecknoglobals
 	oidIssuerV2 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8} //nolint:gochecknoglobals
 	oidSAN      = asn1.ObjectIdentifier{2, 5, 29, 17}                  //nolint:gochecknoglobals
+
+	// The repository the run belonged to and the ref it ran for. Fulcio records
+	// each twice: once as plain bytes, and once wrapped in a DER UTF8String with
+	// the repository written as a URL. The plain ones are deprecated and are what
+	// cosign's flags check, so they are preferred and the others are read only when
+	// a certificate carries nothing else.
+	oidRepositoryV1 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 5}  //nolint:gochecknoglobals
+	oidRefV1        = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 6}  //nolint:gochecknoglobals
+	oidRepositoryV2 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 12} //nolint:gochecknoglobals
+	oidRefV2        = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 14} //nolint:gochecknoglobals
 )
 
 func identityFromDER(der []byte) (*Identity, error) {
@@ -105,7 +132,40 @@ func identityFromDER(der []byte) (*Identity, error) {
 	if issuer == "" {
 		return nil, errNoIssuer
 	}
-	return &Identity{SAN: san, Issuer: issuer}, nil
+	return &Identity{
+		SAN:        san,
+		Issuer:     issuer,
+		Repository: repositoryOf(cert),
+		Ref:        extension(cert, oidRefV1, oidRefV2),
+	}, nil
+}
+
+// repositoryOf returns the repository the signing run belonged to, as owner/name.
+//
+// The deprecated extension holds it that way already. The one that replaced it holds
+// the repository's URL, which is the same thing with a prefix cosign's flag doesn't
+// want.
+func repositoryOf(cert *x509.Certificate) string {
+	repo := extension(cert, oidRepositoryV1, oidRepositoryV2)
+	return strings.TrimPrefix(repo, "https://github.com/")
+}
+
+// extension returns the value of the first extension that has one, reading a plain
+// value or a DER UTF8String as each is written.
+func extension(cert *x509.Certificate, oids ...asn1.ObjectIdentifier) string {
+	for _, oid := range oids {
+		for _, ext := range cert.Extensions {
+			if !ext.Id.Equal(oid) {
+				continue
+			}
+			var s string
+			if _, err := asn1.Unmarshal(ext.Value, &s); err == nil {
+				return s
+			}
+			return strings.TrimSpace(string(ext.Value))
+		}
+	}
+	return ""
 }
 
 // subjectAlternativeName returns the one name the certificate was issued for.

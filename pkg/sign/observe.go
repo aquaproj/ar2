@@ -21,6 +21,11 @@ const (
 	flagIdentity       = "--certificate-identity"
 	flagIdentityRegexp = "--certificate-identity-regexp"
 	flagIssuer         = "--certificate-oidc-issuer"
+	// The repository the signing run belonged to and the ref it ran for. A shared
+	// workflow signs for many repositories, so the identity alone doesn't say which
+	// release a certificate was obtained for.
+	flagWorkflowRepository = "--certificate-github-workflow-repository"
+	flagWorkflowRef        = "--certificate-github-workflow-ref"
 )
 
 // pin records who signed the asset, replacing a guessed pattern with the name read
@@ -88,13 +93,24 @@ func identityOpt(opts []string, flag string) string {
 func replaceIdentity(opts []string, id *Identity) []string {
 	out := make([]string, 0, len(opts)+2) //nolint:mnd // the identity is a flag and its value
 	for i := 0; i < len(opts); i++ {
-		if (opts[i] == flagIdentityRegexp || opts[i] == flagIssuer) && i+1 < len(opts) {
+		if replaced(opts[i]) && i+1 < len(opts) {
 			i++
 			continue
 		}
 		out = append(out, opts[i])
 	}
 	return append(out, id.Opts()...)
+}
+
+// replaced reports whether a flag is one the read identity writes for itself, so
+// that what a guess put there is dropped rather than kept beside it.
+func replaced(opt string) bool {
+	switch opt {
+	case flagIdentityRegexp, flagIssuer, flagWorkflowRepository, flagWorkflowRef:
+		return true
+	default:
+		return false
+	}
 }
 
 // observe downloads whatever the entry points at as its signature and reads the
