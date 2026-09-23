@@ -106,7 +106,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
-	err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
+	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
-	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
 	}); err != nil {
@@ -160,7 +160,7 @@ func TestOpenPullRequest_indexUntouched(t *testing.T) {
 	t.Parallel()
 	idx := &fakeIndex{}
 	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, idx)
-	if err := c.openPullRequest(t.Context(), discardLogger(), &Input{}, &aquag2.Config{}, "cli/cli", []*version{
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	}); err != nil {
 		t.Fatal(err)

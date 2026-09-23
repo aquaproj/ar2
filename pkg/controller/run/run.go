@@ -178,11 +178,12 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		return 0, 0, nil
 	}
 	// The definition is read once for the package rather than once per version: it
-	// is the same file for all of them, and it decides both how they are generated
-	// and whether one has to be converted first.
-	config, err := c.g2.Config(ctx, candidate.Name)
+	// is the same file for all of them, and it decides how they are generated. A
+	// package whose branch has none is converted here, before anything is generated
+	// from it.
+	def, err := c.resolveDefinition(ctx, logger, input, candidate.Name)
 	if err != nil {
-		return 0, 0, fmt.Errorf("get the package definition: %w", err)
+		return 0, 0, err
 	}
 
 	versions, err := c.candidateVersions(ctx, logger, input, candidate, todo, swept)
@@ -199,7 +200,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 
 	budget = limitBudget(budget, existing)
 
-	generated, attempted := c.generateVersions(ctx, logger, input, config, candidate.Name, versions, existing, budget)
+	generated, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions, existing, budget)
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
@@ -209,7 +210,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if input.SkipPR {
 		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
-	if err := c.openPullRequest(ctx, logger, input, config, candidate.Name, generated); err != nil {
+	if err := c.openPullRequest(ctx, logger, def, candidate.Name, generated); err != nil {
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil
@@ -266,7 +267,7 @@ const breadthDepth = 5
 
 // generateVersions generates the versions the repository is missing, newest first,
 // up to budget.
-func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string, versions []string, existing map[string]struct{}, budget int) ([]*version, int) {
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, versions []string, existing map[string]struct{}, budget int) ([]*version, int) {
 	generated := make([]*version, 0, budget)
 	attempted := 0
 	for _, tag := range versions {
@@ -277,7 +278,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 			continue
 		}
 		attempted++
-		v, err := c.generate(ctx, logger, input, config, pkgName, tag)
+		v, err := c.generate(ctx, logger, input, def, pkgName, tag)
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
 			// all. The next run sees the version still missing and tries again.
@@ -291,12 +292,12 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 }
 
 // generate builds registry.json for one package version and completes it.
-func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName, tag string) (*version, error) {
+func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string) (*version, error) {
 	reg, err := c.generator.Generate(ctx, logger, &generate.Input{
 		PkgName: pkgName,
 		Version: tag,
 		Base:    input.PkgInfos[pkgName],
-		Config:  config,
+		Config:  def.config,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
