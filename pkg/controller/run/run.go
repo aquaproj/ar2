@@ -21,6 +21,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/summary"
 	"github.com/aquaproj/ar2/pkg/verify"
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
 
 // Controller runs the loop.
@@ -32,6 +33,9 @@ type Controller struct {
 	verifier  *verify.Verifier
 	attester  *attest.Checker
 	summary   *summary.Writer
+	// problems are the versions this run didn't publish. A run is read through its
+	// summary, so what it left out belongs there rather than only in the log.
+	problems []*summary.Problem
 }
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
@@ -112,6 +116,9 @@ type Input struct {
 // and then through every other package, spending an entire run's API calls on
 // failures.
 func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input) (int, error) {
+	// Whatever the run leaves out is written where the run is read, however it ends.
+	defer c.reportProblems(logger)
+
 	inFlight, err := c.g2.PackagesInFlight(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("list the packages with an open pull request: %w", err)
@@ -209,6 +216,19 @@ func ignore(logger *slog.Logger, candidates []*Candidate, ignored map[string]str
 		out = append(out, candidate)
 	}
 	return out
+}
+
+// reportProblems writes the versions the run didn't publish to the job summary.
+//
+// Failing to say so isn't worth failing the run over: the versions are still in the
+// log, and the run generated whatever else it could.
+func (c *Controller) reportProblems(logger *slog.Logger) {
+	if c.summary == nil {
+		return
+	}
+	if err := c.summary.Problems(c.problems); err != nil {
+		slogerr.WithError(logger, err).Warn("write the summary of what wasn't published")
+	}
 }
 
 // runPackage generates the missing versions of one package, newest first, up to
@@ -324,9 +344,14 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		v, err := c.generate(ctx, logger, input, def, pkgName, tag)
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
-			// all. The next run sees the version still missing and tries again.
+			// all, and a signature that can't be verified stops the version rather
+			// than being dropped from it. The next run sees the version still
+			// missing and tries again.
 			logger.Warn("failed to generate registry.json",
 				"package", pkgName, "version", tag, "error", err.Error())
+			c.problems = append(c.problems, &summary.Problem{
+				Package: pkgName, Version: tag, Reason: err.Error(),
+			})
 			continue
 		}
 		generated = append(generated, v)
