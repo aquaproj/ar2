@@ -70,6 +70,33 @@ func TestReplaceIdentity(t *testing.T) {
 	}
 }
 
+// A definition guessing at the repository and the ref is replaced along with the
+// identity, rather than keeping the guess beside the name.
+func TestReplaceIdentity_workflow(t *testing.T) {
+	t.Parallel()
+	opts := []string{
+		flagIdentityRegexp, `^https://github\.com/docker/.+$`,
+		flagIssuer, "https://token.actions.githubusercontent.com",
+		flagWorkflowRepository, "docker/buildx",
+		flagWorkflowRef, "refs/heads/main",
+	}
+	want := []string{
+		flagIdentity, "https://github.com/suzuki-shunsuke/go-release-workflow/.github/workflows/release.yaml@1cf29d7b",
+		flagIssuer, "https://token.actions.githubusercontent.com",
+		flagWorkflowRepository, "aquaproj/ar2",
+		flagWorkflowRef, "refs/tags/v0.0.7",
+	}
+	got := replaceIdentity(opts, &Identity{
+		SAN:        "https://github.com/suzuki-shunsuke/go-release-workflow/.github/workflows/release.yaml@1cf29d7b",
+		Issuer:     "https://token.actions.githubusercontent.com",
+		Repository: "aquaproj/ar2",
+		Ref:        "refs/tags/v0.0.7",
+	})
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("the options are wrong (-want +got):\n%s", diff)
+	}
+}
+
 func TestIdentityOpt(t *testing.T) {
 	t.Parallel()
 	opts := []string{flagIdentity, "someone", flagIssuer, "an issuer"}

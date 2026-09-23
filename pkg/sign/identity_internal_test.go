@@ -23,14 +23,18 @@ func TestIdentityFromBundle(t *testing.T) {
 			name: "signed by a workflow",
 			file: "testdata/workflow.sigstore.json",
 			want: &Identity{
-				SAN:    "https://github.com/goreleaser/goreleaser/.github/workflows/release.yml@refs/tags/v2.18.2",
-				Issuer: "https://token.actions.githubusercontent.com",
+				SAN:        "https://github.com/goreleaser/goreleaser/.github/workflows/release.yml@refs/tags/v2.18.2",
+				Issuer:     "https://token.actions.githubusercontent.com",
+				Repository: "goreleaser/goreleaser",
+				Ref:        "refs/tags/v2.18.2",
 			},
 		},
 		{
 			// The guess would have been a workflow in sigstore/cosign.
 			name: "signed by a service account",
 			file: "testdata/service-account.sigstore.json",
+			// A service account belongs to no repository and ran for no ref, so
+			// there is nothing more to ask cosign for.
 			want: &Identity{
 				SAN:    "keyless@projectsigstore.iam.gserviceaccount.com",
 				Issuer: "https://accounts.google.com",
@@ -59,13 +63,44 @@ func TestIdentityFromBundle(t *testing.T) {
 // for anything matching a pattern.
 func TestIdentity_Opts(t *testing.T) {
 	t.Parallel()
-	id := &Identity{SAN: "keyless@projectsigstore.iam.gserviceaccount.com", Issuer: "https://accounts.google.com"}
-	want := []string{
-		"--certificate-identity", "keyless@projectsigstore.iam.gserviceaccount.com",
-		"--certificate-oidc-issuer", "https://accounts.google.com",
+	tests := []struct {
+		name string
+		id   *Identity
+		want []string
+	}{
+		{
+			name: "a service account",
+			id:   &Identity{SAN: "keyless@projectsigstore.iam.gserviceaccount.com", Issuer: "https://accounts.google.com"},
+			want: []string{
+				"--certificate-identity", "keyless@projectsigstore.iam.gserviceaccount.com",
+				"--certificate-oidc-issuer", "https://accounts.google.com",
+			},
+		},
+		{
+			// The workflow is shared, so the identity alone would accept a
+			// certificate obtained for somebody else's release.
+			name: "a workflow another repository also uses",
+			id: &Identity{
+				SAN:        "https://github.com/suzuki-shunsuke/go-release-workflow/.github/workflows/release.yaml@1cf29d7b17983b901021799b87a55d357cfff790",
+				Issuer:     "https://token.actions.githubusercontent.com",
+				Repository: "aquaproj/ar2",
+				Ref:        "refs/tags/v0.0.7",
+			},
+			want: []string{
+				"--certificate-identity", "https://github.com/suzuki-shunsuke/go-release-workflow/.github/workflows/release.yaml@1cf29d7b17983b901021799b87a55d357cfff790",
+				"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
+				"--certificate-github-workflow-repository", "aquaproj/ar2",
+				"--certificate-github-workflow-ref", "refs/tags/v0.0.7",
+			},
+		},
 	}
-	if diff := cmp.Diff(want, id.Opts()); diff != "" {
-		t.Errorf("the options are wrong (-want +got):\n%s", diff)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, tt.id.Opts()); diff != "" {
+				t.Errorf("the options are wrong (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
