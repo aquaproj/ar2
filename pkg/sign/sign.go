@@ -74,25 +74,29 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	}, nil
 }
 
-// Check verifies every signature the asset's entry carries, against the file at
-// path, and drops the ones that don't hold. It returns what it dropped.
+// Check verifies every signature the asset's entry carries against the file at path,
+// and reports whether they all held.
 //
-// Dropping rather than failing, because a signature that doesn't verify is a
-// statement the entry can't make. Some of them are read off the release — a
-// .sigstore.json beside an asset means it is signed, but not by whom, so the signer
-// is guessed at as a workflow in the package's own repository. sigstore/cosign signs
-// its releases as keyless@projectsigstore.iam.gserviceaccount.com, and an entry
-// carrying that guess would fail for every user who installed it.
+// A signature that can't be verified stops the version rather than being dropped from
+// the entry. The two readings of a failure -- the release stopped being signed, and
+// the check couldn't be made right now -- are not distinguishable here, and only one
+// of them is safe to act on: recording a signed package as unsigned is a loss that
+// nothing later notices, while not publishing a version is undone by the next run.
 //
-// What is dropped is not nothing, though: the caller leaves the version for review,
-// and the comparison against the version before it reports the loss. A release that
-// really did stop being signed and a guess that was wrong look the same from here,
-// and both are for a person to settle.
+// It happened the other way first. cosign was rate limited while the kubernetes
+// packages were generated, five retries inside two seconds all met the same limit,
+// and the entries came out saying those releases carry no signature at all.
+//
+// The cost is a version that stalls: an upstream that really did stop signing, or a
+// signer that can't be read off the certificate, produces nothing until somebody
+// changes the definition. That is the direction to fail in, and it is why the signer
+// is read off the signature first, which settles the case this used to exist for --
+// a guessed identity that was never right.
 //
 // The environment the asset is for is what the signature names are rendered with,
 // not the machine this runs on: the entry for darwin/arm64 is verified with
 // darwin/arm64's signature wherever the run happens.
-func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, path string) []string {
+func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, path string) error {
 	rt := &runtime.Runtime{GOOS: asset.OS, GOARCH: asset.Arch}
 	pkg := assetPackage(pkgName, version, asset)
 	art := pkg.TemplateArtifact(rt, asset.Asset)
@@ -102,50 +106,57 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 		Version:   version,
 	}
 
-	var dropped []string
-	drop := func(kind string, err error) {
+	var failed error
+	note := func(kind string, err error) {
 		logger.Warn("the asset can't be verified the way its entry says it can",
 			"package", pkgName, "version", version,
 			"os", asset.OS, "arch", asset.Arch, "kind", kind, "error", err.Error())
-		dropped = append(dropped, kind)
+		if failed == nil {
+			failed = fmt.Errorf("%s: %w", kind, err)
+		}
 	}
 
 	// Who signed is read off the signature before it is checked, so that a guessed
 	// pattern is replaced by a name and the entry records what actually signed.
 	v.pin(ctx, logger, version, asset)
 
-	if asset.Cosign.GetEnabled() {
-		if err := v.cosign.Verify(ctx, logger, rt, file, asset.Cosign, art, path); err != nil {
-			asset.Cosign = nil
-			drop("cosign", err)
+	for _, check := range []struct {
+		kind    string
+		enabled bool
+		verify  func() error
+	}{
+		{"cosign", asset.Cosign.GetEnabled(), func() error {
+			return v.cosign.Verify(ctx, logger, rt, file, asset.Cosign, art, path)
+		}},
+		{"slsa_provenance", asset.SLSAProvenance.GetEnabled(), func() error {
+			return v.slsa.Verify(ctx, logger, rt, asset.SLSAProvenance, art, file, &slsa.ParamVerify{
+				SourceURI:    pkg.PackageInfo.SLSASourceURI(),
+				SourceTag:    version,
+				ArtifactPath: path,
+			})
+		}},
+		{"minisign", asset.Minisign.GetEnabled(), func() error {
+			return v.minisign.Verify(ctx, logger, rt, asset.Minisign, art, file, &minisign.ParamVerify{
+				ArtifactPath: path,
+				PublicKey:    asset.Minisign.PublicKey,
+			})
+		}},
+		{"github_artifact_attestations", asset.GitHubArtifactAttestations.GetEnabled(), func() error {
+			return v.attestation(ctx, logger, asset, path)
+		}},
+	} {
+		if !check.enabled {
+			continue
+		}
+		if err := check.verify(); err != nil {
+			note(check.kind, err)
 		}
 	}
-	if asset.SLSAProvenance.GetEnabled() {
-		if err := v.slsa.Verify(ctx, logger, rt, asset.SLSAProvenance, art, file, &slsa.ParamVerify{
-			SourceURI:    pkg.PackageInfo.SLSASourceURI(),
-			SourceTag:    version,
-			ArtifactPath: path,
-		}); err != nil {
-			asset.SLSAProvenance = nil
-			drop("slsa_provenance", err)
-		}
+
+	if failed != nil {
+		return fmt.Errorf("%w: %w", ErrUnverified, failed)
 	}
-	if asset.Minisign.GetEnabled() {
-		if err := v.minisign.Verify(ctx, logger, rt, asset.Minisign, art, file, &minisign.ParamVerify{
-			ArtifactPath: path,
-			PublicKey:    asset.Minisign.PublicKey,
-		}); err != nil {
-			asset.Minisign = nil
-			drop("minisign", err)
-		}
-	}
-	if asset.GitHubArtifactAttestations.GetEnabled() {
-		if err := v.attestation(ctx, logger, asset, path); err != nil {
-			asset.GitHubArtifactAttestations = nil
-			drop("github_artifact_attestations", err)
-		}
-	}
-	return dropped
+	return nil
 }
 
 // assetPackage turns the entry back into the package aqua would install, which is

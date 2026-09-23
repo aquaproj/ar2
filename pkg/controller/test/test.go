@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/verify"
 	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
@@ -186,6 +187,11 @@ func (c *Controller) asset(ctx context.Context, logger *slog.Logger, pkgName, ve
 
 	result, err := c.verifier.Verify(ctx, logger, pkgName, version, asset)
 	if err != nil {
+		// A signature that didn't hold says what it was; anything else got as far as
+		// the archive or not at all.
+		if errors.Is(err, sign.ErrUnverified) {
+			return err //nolint:wrapcheck // it already says which signature and why
+		}
 		return fmt.Errorf("extract the asset: %w", err)
 	}
 	if !strings.EqualFold(result.Checksum, asset.Checksum) {
@@ -200,9 +206,6 @@ func (c *Controller) asset(ctx context.Context, logger *slog.Logger, pkgName, ve
 		// the generator would have relocated. An entry that has already been written
 		// is simply wrong.
 		return errFilesMoved
-	}
-	if len(result.Unverified) > 0 {
-		return fmt.Errorf("%w: %s", errSignature, strings.Join(result.Unverified, ", "))
 	}
 	return nil
 }

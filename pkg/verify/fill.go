@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -71,13 +70,7 @@ func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pk
 		logger.Warn("the files of this asset don't match the archive",
 			"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
 	}
-	if len(result.Unverified) > 0 {
-		// The entry no longer claims them, which is what makes it honest. Saying so
-		// is what keeps it from merging itself.
-		logger.Warn("dropped the signatures the asset didn't hold up to",
-			"os", asset.OS, "arch", asset.Arch, "dropped", strings.Join(result.Unverified, ", "))
-	}
-	return result.NeedsReview || len(result.Unverified) > 0, nil
+	return result.NeedsReview, nil
 }
 
 // fillChecksum downloads the asset only when its checksum is still missing.
