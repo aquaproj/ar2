@@ -9,6 +9,7 @@ import (
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
 
 // target is the catalogue an update is built on top of, and where it came from.
@@ -140,6 +141,19 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, a
 	}
 	logger.Info("opened a pull request",
 		"number", pr.GetNumber(), "num_of_packages", len(added))
+
+	// The catalogue is a name, a description and a link per package, read out of
+	// definitions that were reviewed when they arrived. There is nothing here for a
+	// person to decide, so it goes the way a package version does: the checks on main
+	// say whether it is a file aqua can read, and it merges itself when they pass.
+	if c.automerge == nil {
+		return nil
+	}
+	if err := c.automerge.EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
+		// The pull request is open and correct; it just waits for someone.
+		slogerr.WithError(logger, err).Warn("failed to turn on auto-merge",
+			"number", pr.GetNumber())
+	}
 	return nil
 }
 

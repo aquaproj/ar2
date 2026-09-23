@@ -28,15 +28,22 @@ type Registry interface {
 	CreateIndexPullRequest(ctx context.Context, base, title, body string) (*gogithub.PullRequest, error)
 }
 
+// AutoMerger turns a pull request over to its checks.
+type AutoMerger interface {
+	EnableAutoMerge(ctx context.Context, pullRequestID string) error
+}
+
 // Controller adds packages to the catalogue.
 type Controller struct {
 	g2         Registry
+	automerge  AutoMerger
 	baseBranch string
 }
 
-// New creates a Controller.
-func New(registry Registry, baseBranch string) *Controller {
-	return &Controller{g2: registry, baseBranch: baseBranch}
+// New creates a Controller. automerge may be nil, and then the catalogue's pull
+// requests wait for someone.
+func New(registry Registry, automerge AutoMerger, baseBranch string) *Controller {
+	return &Controller{g2: registry, automerge: automerge, baseBranch: baseBranch}
 }
 
 // AddPackage puts one package into the catalogue.

@@ -11,9 +11,11 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/index"
 	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/github"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"golang.org/x/oauth2"
 )
 
 // errTokenRequired is returned when no access token is available.
@@ -84,6 +86,10 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return err //nolint:wrapcheck // the error already names the token it is for
 	}
 
-	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo), args.BaseBranch)
+	// Auto-merge is turned on with the ordinary token: it needs the pull request the
+	// app just opened, not the app.
+	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo),
+		github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))),
+		args.BaseBranch)
 	return c.Sync(ctx, logger.Logger) //nolint:wrapcheck
 }

@@ -86,9 +86,10 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	}
 	// The catalogue is written with the ordinary client: it goes to a branch of its
 	// own, not to a package branch, so the bypass token has no business there.
+	graphQL := github.NewClient(httpClient)
 	return ctrl.New(gh, generate.New(gh.Repositories), reg,
-		github.NewClient(httpClient), v,
-		index.New(reg, args.BaseBranch)), nil
+		graphQL, v,
+		index.New(reg, graphQL, args.BaseBranch)), nil
 }
 
 // verifier builds what downloads an asset and decides whether the entry for it can
