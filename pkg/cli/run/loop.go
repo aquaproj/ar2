@@ -56,6 +56,7 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 		State:       s,
 		PkgInfos:    pkgInfos,
 		RegistryRef: args.RegistryRef,
+		BaseBranch:  args.BaseBranch,
 	})
 	if err != nil {
 		return fmt.Errorf("generate registry.json: %w", err)

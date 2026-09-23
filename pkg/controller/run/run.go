@@ -41,6 +41,7 @@ type Registry interface {
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
 	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
+	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
@@ -95,6 +96,9 @@ type Input struct {
 	// package's aqua gr configuration is read from the same ref, so that the two
 	// halves of a definition come from one state of that repository.
 	RegistryRef string
+	// BaseBranch is aqua-registry-g2's default branch, where the registry's own
+	// configuration is.
+	BaseBranch string
 }
 
 // Run generates registry.json for up to Limit package versions.
@@ -112,8 +116,10 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 	if err != nil {
 		return 0, fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
-
-	candidates := order(input.State)
+	candidates, err := c.candidates(ctx, logger, input)
+	if err != nil {
+		return 0, err
+	}
 	// What each package's newest versions are, for the whole registry, before any of
 	// it is worked on. It says which packages have anything to do at all, which is
 	// most of what a run decides and used to cost a request each.
@@ -125,19 +131,8 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		if attempted >= input.Limit {
 			return generated, nil
 		}
-		if _, ok := inFlight[g2.HeadBranchName(candidate.Name)]; ok {
-			// A pull request for this package is still open. Opening a second one
-			// would target the same package branch and conflict on merge, and if the
-			// first is open because its CI failed, a copy of it helps no one.
-			logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
-			continue
-		}
-		versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName]
-		todo := decide(candidate.Package, versions, now)
+		todo, versions := c.todo(logger, candidate, inFlight, swept, now)
 		if todo == workNone {
-			// The newest versions upstream are the ones the registry holds, and its
-			// history was checked recently enough. Nothing is asked about it.
-			logger.Debug("nothing new for the package", "package", candidate.Name)
 			continue
 		}
 		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions)
@@ -166,6 +161,58 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 
 // runPackage generates the missing versions of one package, newest first, up to
 // budget.
+// todo says what this package needs doing, and on which versions. workNone is
+// everything the run passes over without asking anything about it.
+func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight map[string]struct{}, swept map[string][]string, now time.Time) (work, []string) {
+	if _, ok := inFlight[g2.HeadBranchName(candidate.Name)]; ok {
+		// A pull request for this package is still open. Opening a second one would
+		// target the same package branch and conflict on merge, and if the first is
+		// open because its CI failed, a copy of it helps no one.
+		logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
+		return workNone, nil
+	}
+	versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName]
+	todo := decide(candidate.Package, versions, now)
+	if todo == workNone {
+		// The newest versions upstream are the ones the registry holds, and its
+		// history was checked recently enough. Nothing is asked about it.
+		logger.Debug("nothing new for the package", "package", candidate.Name)
+	}
+	return todo, versions
+}
+
+// candidates is the packages to work through, in the order the state gives them,
+// without the ones the registry says to leave alone.
+func (c *Controller) candidates(ctx context.Context, logger *slog.Logger, input *Input) ([]*Candidate, error) {
+	cfg, err := c.g2.RegistryConfig(ctx, input.BaseBranch)
+	if err != nil {
+		return nil, fmt.Errorf("get the registry configuration: %w", err)
+	}
+	// Before the sweep, so that a repository nobody expects to answer isn't asked
+	// about either.
+	return ignore(logger, order(input.State), cfg.Ignored()), nil
+}
+
+// ignore drops the packages the registry says to leave alone.
+//
+// They are dropped before anything asks GitHub about them: a package is usually on
+// this list because its repository isn't there any more, and the sweep would spend a
+// request finding that out every half hour.
+func ignore(logger *slog.Logger, candidates []*Candidate, ignored map[string]struct{}) []*Candidate {
+	if len(ignored) == 0 {
+		return candidates
+	}
+	out := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := ignored[candidate.Name]; ok {
+			logger.Debug("the registry says to leave this package alone", "package", candidate.Name)
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
 // runPackage generates the missing versions of one package, newest first, up to
 // budget. It returns how many were generated and how many were attempted.
 func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string) (int, int, error) {

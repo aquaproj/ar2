@@ -40,6 +40,10 @@ func (f *fakeRegistry) Version(_ context.Context, _, _ string) (*aquag2.Registry
 
 // Config is never asked for: these tests pass the definition in, so that they see
 // only the generated files.
+func (f *fakeRegistry) RegistryConfig(_ context.Context, _ string) (*g2.RegistryConfig, error) {
+	return &g2.RegistryConfig{}, nil
+}
+
 func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, error) {
 	return nil, nil //nolint:nilnil
 }

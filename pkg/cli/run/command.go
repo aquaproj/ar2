@@ -103,7 +103,7 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.StringVar(&args.Username, "username", "", "the user the GitHub access token belongs to (default the owner of --repository)")
 	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
 	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
-	fs.StringVar(&args.BaseBranch, "base-branch", "main", "the branch the index.json pull request targets")
+	fs.StringVar(&args.BaseBranch, "base-branch", "main", "the branch aqua-registry-g2's own configuration is read from")
 	return cmd
 }
 
