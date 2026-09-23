@@ -22,3 +22,7 @@ var (
 	// gets. It is the check naming the repository to gh would have made.
 	errWrongSource = errors.New("the attestation is for another repository")
 )
+
+// ErrUnverified says a signature the entry carries couldn't be shown to hold, either
+// because it doesn't or because the check couldn't be made.
+var ErrUnverified = errors.New("the asset can't be verified the way its entry says it can")

@@ -41,10 +41,10 @@ type Verifier struct {
 	signatures Signatures
 }
 
-// Signatures verifies an asset against the signatures its entry claims, drops the
-// ones that don't hold, and returns what it dropped.
+// Signatures verifies an asset against the signatures its entry claims and reports
+// whether they all held.
 type Signatures interface {
-	Check(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, path string) []string
+	Check(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, path string) error
 }
 
 // New creates a Verifier.
@@ -96,10 +96,6 @@ type Result struct {
 	NeedsReview bool
 	// Unresolved names the files that aren't anywhere in the archive.
 	Unresolved []string
-	// Unverified names the signatures the entry claimed and the asset didn't hold
-	// up to. They have been dropped from the entry, which is a change nobody should
-	// merge without looking at.
-	Unverified []string
 	// LinkedLibc is the libc the executables need, read from the binaries. It is
 	// empty when the asset holds nothing that can be read that way.
 	LinkedLibc string
@@ -159,9 +155,10 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 
 	// While the file is still here: an entry that says it is signed has to be
 	// signed, or what the registry promises isn't what aqua will be able to do.
-	var unverified []string
 	if v.signatures != nil {
-		unverified = v.signatures.Check(ctx, logger, pkgName, version, asset, path)
+		if err := v.signatures.Check(ctx, logger, pkgName, version, asset, path); err != nil {
+			return nil, err //nolint:wrapcheck // it already names the signature and why
+		}
 	}
 
 	dest := filepath.Join(dir, "extracted")
@@ -173,7 +170,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 		return nil, fmt.Errorf("extract the asset: %w", err)
 	}
 
-	result := &Result{Checksum: checksum, Unverified: unverified}
+	result := &Result{Checksum: checksum}
 	result.Files, result.NeedsReview, result.Unresolved = resolveFiles(logger, dest, asset.Files)
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.

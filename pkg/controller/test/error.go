@@ -12,5 +12,4 @@ var (
 	errChecksum        = errors.New("the checksum doesn't match the asset")
 	errFilesMissing    = errors.New("files aren't in the archive")
 	errFilesMoved      = errors.New("files are in the archive under other paths")
-	errSignature       = errors.New("signatures the entry claims don't hold")
 )
