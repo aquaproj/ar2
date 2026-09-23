@@ -36,13 +36,20 @@ func (r Repo) String() string {
 type Client struct {
 	httpClient *http.Client
 	endpoint   string
+	// anonymousEndpoint is the REST API the star count of a refused repository is
+	// read from. A test points it somewhere it controls: the real one answers
+	// differently depending on how much of an hour's anonymous budget the machine
+	// running the test has left, and a test that depends on that fails for reasons
+	// that have nothing to do with the code.
+	anonymousEndpoint string
 }
 
 // NewClient creates a Client. httpClient must attach the GitHub token.
 func NewClient(httpClient *http.Client) *Client {
 	return &Client{
-		httpClient: httpClient,
-		endpoint:   endpoint,
+		httpClient:        httpClient,
+		endpoint:          endpoint,
+		anonymousEndpoint: anonymousEndpoint,
 	}
 }
 
