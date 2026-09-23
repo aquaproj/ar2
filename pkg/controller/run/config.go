@@ -26,6 +26,10 @@ type newConfig struct {
 	file        *g2.File
 	config      *aquag2.Config
 	needsReview bool
+	// unconverted names the version_constraints that couldn't be turned into
+	// boundaries. They are why the pull request needs review, so whoever reads it
+	// shouldn't have to find the run's log to learn that.
+	unconverted []string
 }
 
 // packageConfig returns the package definition to commit, or nil when the branch
@@ -75,6 +79,7 @@ func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, inp
 		file:        &g2.File{Path: g2.ConfigFileName, Content: content},
 		config:      cfg,
 		needsReview: len(unconverted) > 0,
+		unconverted: unconverted,
 	}, nil
 }
 

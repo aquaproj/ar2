@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -187,4 +188,17 @@ func TestAddToIndex_errorIsNotFatal(t *testing.T) {
 	t.Parallel()
 	idx := &fakeIndex{err: errors.New("the catalogue is unreachable")}
 	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", &aquag2.Config{})
+}
+
+func TestPRBodyReason(t *testing.T) {
+	t.Parallel()
+	body := prBody([]*version{{Version: "v1.18.32"}}, []string{`Version in ["v0.1.84", "v0.1.92"]`}, true)
+	for _, want := range []string{"v1.18.32", "couldn't be turned into boundaries", `Version in ["v0.1.84", "v0.1.92"]`, "Auto-merge is off. What it is waiting on is above."} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("the body doesn't mention %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "run's log") {
+		t.Fatalf("the body sends the reader to the log although it says the reason:\n%s", body)
+	}
 }
