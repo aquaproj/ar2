@@ -21,9 +21,12 @@ import (
 // Args holds the command's flags.
 type Args struct {
 	*flag.GlobalFlags
-	Definition string
-	Package    string
-	Signatures bool
+	Definition   string
+	Package      string
+	OS           string
+	Arch         string
+	Environments bool
+	Signatures   bool
 }
 
 // New creates the 'ar2 test' command.
@@ -47,17 +50,30 @@ The version comes from the path, which is versions/<version>/registry.json on a 
 branch. The package name comes from registry.yaml beside it, and --package overrides it
 for a file checked from somewhere else.
 
+--os and --arch limit the run to the entries of one environment, which is how a job
+running on a machine of that environment checks the entry meant for it.
+
+$ ar2 test --os windows --arch amd64 versions/v1.5.6/registry.json
+
+--environments lists the environments the files describe instead of checking them, so
+that the jobs can be worked out from the files rather than fixed in advance.
+
 An asset in a format this machine can't open is reported and passed over rather than
-failed: a dmg on Linux is a package this machine can't look inside. Run this on every
-platform the registry has assets for and between them nothing goes unopened.`,
+failed: a dmg on Linux is a package this machine can't look inside.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, paths []string) error {
+			if args.Environments {
+				return ctrl.Environments(cmd.OutOrStdout(), paths)
+			}
 			return action(cmd.Context(), logger, args, paths)
 		},
 	}
 	fs := cmd.Flags()
 	fs.StringVar(&args.Definition, "definition", g2.ConfigFileName, "the definition to read the package name from")
 	fs.StringVar(&args.Package, "package", "", "the package name, instead of reading it from the definition")
+	fs.StringVar(&args.OS, "os", "", "check only the entries of this operating system")
+	fs.StringVar(&args.Arch, "arch", "", "check only the entries of this architecture")
+	fs.BoolVar(&args.Environments, "environments", false, "list the environments the files describe instead of checking them")
 	fs.BoolVar(&args.Signatures, "signatures", true, "check the signatures the entries claim")
 	return cmd
 }
@@ -81,7 +97,8 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, paths []st
 	if err != nil {
 		return err
 	}
-	return ctrl.New(verifier).Run(ctx, logger.Logger, pkgName, paths) //nolint:wrapcheck
+	env := ctrl.Environment{OS: args.OS, Arch: args.Arch}
+	return ctrl.New(verifier, env).Run(ctx, logger.Logger, pkgName, paths) //nolint:wrapcheck
 }
 
 // packageName reads the name out of the definition at the root of the package branch.
