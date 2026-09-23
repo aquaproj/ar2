@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -59,7 +60,7 @@ func (f *fakeRegistry) IndexPullRequest(_ context.Context) (*gogithub.PullReques
 
 func (f *fakeRegistry) CreateIndexPullRequest(_ context.Context, _, _, _ string) (*gogithub.PullRequest, error) {
 	f.createdPRs++
-	return &gogithub.PullRequest{Number: new(1)}, nil
+	return &gogithub.PullRequest{Number: new(1), NodeID: new("PR_node")}, nil
 }
 
 func config(description string) *aquag2.Config {
@@ -73,7 +74,7 @@ func logger() *slog.Logger {
 func TestController_AddPackage(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	err := New(reg, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +99,7 @@ func TestController_AddPackage(t *testing.T) {
 func TestController_AddPackage_alreadyThere(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{index: &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}}
-	err := New(reg, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +121,7 @@ func TestController_Sync(t *testing.T) {
 			"suzuki-shunsuke/tfcmt": config("Fork of tfnotify"),
 		},
 	}
-	if err := New(reg, "main").Sync(t.Context(), logger()); err != nil {
+	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	// Only what the catalogue is missing: the definition of a package it has isn't
@@ -141,7 +142,7 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 		openPR: &gogithub.PullRequest{Number: new(7)},
 		index:  &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "aquaproj/aqua"}}},
 	}
-	err := New(reg, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +166,7 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 func TestController_Sync_noConfigYet(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{branches: []string{"cli/cli"}}
-	if err := New(reg, "main").Sync(t.Context(), logger()); err != nil {
+	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if reg.committed != nil {
@@ -173,5 +174,58 @@ func TestController_Sync_noConfigYet(t *testing.T) {
 	}
 	if reg.createdPRs != 0 {
 		t.Errorf("opened %d pull requests, want none", reg.createdPRs)
+	}
+}
+
+type fakeMerger struct {
+	ids []string
+	err error
+}
+
+func (m *fakeMerger) EnableAutoMerge(_ context.Context, pullRequestID string) error {
+	m.ids = append(m.ids, pullRequestID)
+	return m.err
+}
+
+// The catalogue holds nothing anyone decides, so it merges itself once the checks on
+// main say aqua can read it.
+func TestController_AddPackage_autoMerge(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	merger := &fakeMerger{}
+	if err := New(reg, merger, "main").AddPackage(t.Context(), logger(), "cli/cli",
+		config("GitHub's official command line tool")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"PR_node"}; len(merger.ids) != 1 || merger.ids[0] != want[0] {
+		t.Fatalf("turned over %v, want %v", merger.ids, want)
+	}
+}
+
+// A pull request that is open and correct isn't thrown away because it couldn't be
+// turned over; it waits for someone instead.
+func TestController_AddPackage_autoMergeFails(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	merger := &fakeMerger{err: errors.New("auto-merge is off for this repository")}
+	if err := New(reg, merger, "main").AddPackage(t.Context(), logger(), "cli/cli",
+		config("GitHub's official command line tool")); err != nil {
+		t.Fatal(err)
+	}
+	if reg.createdPRs != 1 {
+		t.Fatalf("opened %d pull requests, want 1", reg.createdPRs)
+	}
+}
+
+// Without one, the catalogue's pull requests wait for someone.
+func TestController_AddPackage_noAutoMerger(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	if err := New(reg, nil, "main").AddPackage(t.Context(), logger(), "cli/cli",
+		config("GitHub's official command line tool")); err != nil {
+		t.Fatal(err)
+	}
+	if reg.createdPRs != 1 {
+		t.Fatalf("opened %d pull requests, want 1", reg.createdPRs)
 	}
 }
