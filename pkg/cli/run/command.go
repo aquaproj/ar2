@@ -10,8 +10,11 @@ import (
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/migrate"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/state"
 	gogithub "github.com/google/go-github/v92/github"
@@ -142,10 +145,16 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		return err
 	}
 
+	cfg, err := definition(ctx, logger, gh, args, pkgName, base)
+	if err != nil {
+		return err
+	}
+
 	reg, err := generate.New(gh.Repositories).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,
+		Config:  cfg,
 	})
 	if err != nil {
 		return fmt.Errorf("generate registry.json: %w", err)
@@ -167,6 +176,39 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	}
 
 	return write(args.Output, reg)
+}
+
+// definition returns the definition to generate from, which is the same one the
+// registry would use: the package branch's when it has one, and aqua-registry's
+// converted when it doesn't.
+//
+// Generating without it produces something the registry wouldn't. The filters are
+// what decide which assets are considered at all -- all_assets_filter is how a
+// release's rocm or jetpack build is kept from being taken for the ordinary one --
+// and they live in the definition rather than in the release.
+func definition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args, pkgName string, base *aquaregistry.PackageInfo) (*aquag2.Config, error) {
+	cfg, err := g2.New(gh, nil, nil, args.G2Owner, args.G2Repo).Config(ctx, pkgName)
+	if err != nil {
+		return nil, fmt.Errorf("get the package definition: %w", err)
+	}
+	if cfg != nil {
+		return cfg, nil
+	}
+	if base == nil {
+		// aqua-registry doesn't have the package either, so there is nothing to
+		// generate from but the release.
+		return nil, nil //nolint:nilnil
+	}
+	scaffold, err := registry.FetchScaffold(ctx, gh, args.RegistryRef, pkgName)
+	if err != nil {
+		return nil, fmt.Errorf("get the aqua gr configuration: %w", err)
+	}
+	converted, unconverted := migrate.Config(base, scaffold)
+	for _, constraint := range unconverted {
+		logger.Warn("a version_constraint couldn't be turned into a boundary",
+			"package", pkgName, "version_constraint", constraint)
+	}
+	return converted, nil
 }
 
 // baseDefinition returns aqua-registry's definition of the package.
