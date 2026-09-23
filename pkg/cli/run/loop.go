@@ -9,7 +9,6 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/cli/token"
-	"github.com/aquaproj/ar2/pkg/controller/index"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/run"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -84,12 +83,8 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, err
 	}
-	// The catalogue is written with the ordinary client: it goes to a branch of its
-	// own, not to a package branch, so the bypass token has no business there.
-	graphQL := github.NewClient(httpClient)
 	return ctrl.New(gh, generate.New(gh.Repositories), reg,
-		graphQL, v,
-		index.New(reg, graphQL, args.BaseBranch)), nil
+		github.NewClient(httpClient), v), nil
 }
 
 // verifier builds what downloads an asset and decides whether the entry for it can

@@ -105,7 +105,7 @@ func discardLogger() *slog.Logger {
 func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil)
 	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
@@ -122,7 +122,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil)
 	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
@@ -138,56 +138,6 @@ func TestOpenPullRequest_paths(t *testing.T) {
 			t.Errorf("file %d is at %q, want %q", i, file.Path, want[i])
 		}
 	}
-}
-
-// fakeIndex records what was added to the catalogue.
-type fakeIndex struct {
-	added map[string]*aquag2.Config
-	err   error
-}
-
-func (f *fakeIndex) AddPackage(_ context.Context, _ *slog.Logger, pkgName string, cfg *aquag2.Config) error {
-	if f.added == nil {
-		f.added = map[string]*aquag2.Config{}
-	}
-	f.added[pkgName] = cfg
-	return f.err
-}
-
-// A package whose branch already holds its definition has been in the catalogue
-// since the run that brought it, so a pull request adding versions leaves it alone.
-func TestOpenPullRequest_indexUntouched(t *testing.T) {
-	t.Parallel()
-	idx := &fakeIndex{}
-	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, idx)
-	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
-		{Version: "v2.1.0", Registry: &generate.Registry{}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(idx.added) != 0 {
-		t.Errorf("added %v to the catalogue, want nothing", idx.added)
-	}
-}
-
-// The definition the pull request carries is what the catalogue entry is made of.
-func TestAddToIndex(t *testing.T) {
-	t.Parallel()
-	idx := &fakeIndex{}
-	cfg := &aquag2.Config{}
-	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", cfg)
-	if idx.added["cli/cli"] != cfg {
-		t.Errorf("the catalogue got %v, want the definition just written", idx.added)
-	}
-}
-
-// The catalogue is a separate pull request against a separate branch, and the
-// reconciliation adds whatever was missed. Failing the package over it would throw
-// away the versions that were generated.
-func TestAddToIndex_errorIsNotFatal(t *testing.T) {
-	t.Parallel()
-	idx := &fakeIndex{err: errors.New("the catalogue is unreachable")}
-	New(ghClient(t), nil, nil, nil, nil, idx).addToIndex(t.Context(), discardLogger(), "cli/cli", &aquag2.Config{})
 }
 
 func TestPRBodyReason(t *testing.T) {

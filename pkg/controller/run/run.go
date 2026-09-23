@@ -31,7 +31,6 @@ type Controller struct {
 	graphql   GraphQL
 	verifier  *verify.Verifier
 	attester  *attest.Checker
-	index     Index
 	summary   *summary.Writer
 }
 
@@ -44,14 +43,6 @@ type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
-}
-
-// Index is the catalogue of the packages the registry holds.
-//
-// A run touches it only when it takes a package over, which is the one moment a
-// package can be new to the catalogue. Everything else is the reconciliation's job.
-type Index interface {
-	AddPackage(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error
 }
 
 // GraphQL is the part of GitHub's GraphQL API a run uses.
@@ -70,10 +61,17 @@ type GraphQL interface {
 }
 
 // New creates a Controller.
-func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, index Index) *Controller {
+//
+// The catalogue is not among what a run touches. A package belongs in it once its
+// definition is on its branch, which is after the pull request carrying it merges
+// and not before, so adding it is the reconciliation's job rather than the run's:
+// 'ar2 index' lists the branches that have a definition and adds what the catalogue
+// is missing. A run that added it as it went would leave an entry behind whenever a
+// pull request didn't merge, describing a package nothing can install.
+func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier) *Controller {
 	return &Controller{
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
-		attester: attest.New(gh.Repositories), index: index, summary: summary.New(),
+		attester: attest.New(gh.Repositories), summary: summary.New(),
 	}
 }
 
