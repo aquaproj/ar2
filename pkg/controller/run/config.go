@@ -40,47 +40,79 @@ type newConfig struct {
 // aqua-registry, so it is converted the first time the package is worked on. The
 // conversion travels with the files generated from it, which is what makes the move
 // happen package by package instead of as a migration of its own.
-func (c *Controller) packageConfig(ctx context.Context, logger *slog.Logger, input *Input, config *aquag2.Config, pkgName string, versions []*version) (*newConfig, error) {
-	if config != nil {
+func (c *Controller) packageConfig(logger *slog.Logger, def *definition, pkgName string, versions []*version) (*newConfig, error) {
+	if def.fromBranch || def.config == nil {
 		// The branch already has one, which is every package but the first time it
-		// is worked on. Nothing to write is the ordinary outcome, not a failure.
+		// is worked on, or aqua-registry has none to convert. Nothing to write is
+		// the ordinary outcome, not a failure.
 		return nil, nil //nolint:nilnil
+	}
+
+	// After the versions, because what a release was signed by is read from them.
+	pinSigner(logger, pkgName, def.config, versions)
+
+	content, err := marshalConfig(def.config)
+	if err != nil {
+		return nil, err
+	}
+	return &newConfig{
+		file:        &g2.File{Path: g2.ConfigFileName, Content: content},
+		config:      def.config,
+		needsReview: len(def.unconverted) > 0,
+		unconverted: def.unconverted,
+	}, nil
+}
+
+// definition is the package's aqua-registry-g2 definition, and what the conversion
+// couldn't read when it had to produce one.
+type definition struct {
+	config *aquag2.Config
+	// fromBranch says the definition was already on the package's branch, so there
+	// is nothing to commit and nothing was converted.
+	fromBranch  bool
+	unconverted []string
+}
+
+// resolveDefinition returns the definition to generate from: the one on the package's
+// branch, or the one converted from aqua-registry when the branch has none.
+//
+// The conversion happens before anything is generated rather than after. The
+// definition carries the filters that decide which assets and which versions are
+// considered at all -- all_assets_filter keeps a release's rocm or jetpack build from
+// being taken for the ordinary one -- so generating without it produces a
+// registry.json that the definition committed beside it would not produce.
+func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger, input *Input, pkgName string) (*definition, error) {
+	cfg, err := c.g2.Config(ctx, pkgName)
+	if err != nil {
+		return nil, fmt.Errorf("get the package definition: %w", err)
+	}
+	if cfg != nil {
+		return &definition{config: cfg, fromBranch: true}, nil
 	}
 
 	base := input.PkgInfos[pkgName]
 	if base == nil {
 		// aqua-registry doesn't have the package, so there is nothing to convert.
-		// What was generated came from the release alone, and the definition is
+		// What is generated comes from the release alone, and the definition is
 		// written by whoever reviews it.
 		logger.Debug("no aqua-registry definition to convert", "package", pkgName)
-		return nil, nil //nolint:nilnil
+		return &definition{}, nil
 	}
 
 	scaffold, err := registry.FetchScaffold(ctx, c.gh, input.RegistryRef, pkgName)
 	if err != nil {
 		// The filters are what a release can't be read for, so losing them would
 		// produce a definition that quietly resolves differently. Better to leave
-		// the package without one and try again next run.
+		// the package alone and try again next run.
 		return nil, fmt.Errorf("get the aqua gr configuration: %w", err)
 	}
 
-	cfg, unconverted := migrate.Config(base, scaffold)
-	pinSigner(logger, pkgName, cfg, versions)
+	converted, unconverted := migrate.Config(base, scaffold)
 	for _, constraint := range unconverted {
 		logger.Warn("a version_constraint couldn't be turned into a boundary",
 			"package", pkgName, "version_constraint", constraint)
 	}
-
-	content, err := marshalConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &newConfig{
-		file:        &g2.File{Path: g2.ConfigFileName, Content: content},
-		config:      cfg,
-		needsReview: len(unconverted) > 0,
-		unconverted: unconverted,
-	}, nil
+	return &definition{config: converted, unconverted: unconverted}, nil
 }
 
 // yamlIndent is how far a registry file indents, which is what aqua-registry uses.
