@@ -17,18 +17,18 @@ import (
 
 // ghPath finds the GitHub CLI that checks attestations.
 //
-// It is the copy aqua installs for the same purpose, found the same way aqua finds
-// it, so a run uses one gh rather than two. One already on PATH will do when the
-// verifiers haven't installed theirs yet.
+// aqua is asked where it puts the one it installs, so that a run uses the copy it
+// just installed rather than a second one. A gh already on PATH answers for an
+// environment aqua's package doesn't cover, where installing it was never going to
+// work.
 func ghPath(ctx context.Context) string {
-	rt := runtime.NewR(ctx)
-	pkg := ghattestation.Package()
-	pkg.PackageInfo.OverrideByRuntime(rt)
-	if files := pkg.PackageInfo.GetFiles(); len(files) > 0 {
-		if p, err := pkg.ExePath(config.GetRootDir(osenv.New(), ""), files[0], rt); err == nil {
-			if _, err := os.Stat(p); err == nil {
-				return p
-			}
+	p, err := ghattestation.ExePath(&ghattestation.ParamExePath{
+		RootDir: config.GetRootDir(osenv.New(), ""),
+		Runtime: runtime.NewR(ctx),
+	})
+	if err == nil {
+		if _, err := os.Stat(p); err == nil {
+			return p
 		}
 	}
 	if p, err := exec.LookPath("gh"); err == nil {
