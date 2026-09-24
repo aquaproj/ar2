@@ -61,7 +61,17 @@ func (c *Controller) SyncState(ctx context.Context, logger *slog.Logger, s *stat
 }
 
 // newPackages returns the packages aqua-registry has and the state doesn't.
+//
+// They join at the back of the order rather than at the front. A package counts the
+// runs that have reached it, and one starting from nothing would be ahead of the
+// whole registry until it caught up -- taking a turn in every run for as long as
+// that took, which is what counting turns is there to stop. Joining at the back
+// costs it a lap, and in a registry that is caught up a lap is one run.
 func newPackages(s *state.State, pkgInfos map[string]*aquaregistry.PackageInfo) map[string]*state.Package {
+	back := 0
+	for _, pkg := range s.Packages {
+		back = max(back, pkg.Round)
+	}
 	added := map[string]*state.Package{}
 	for name, pkgInfo := range pkgInfos {
 		if _, ok := s.Packages[name]; ok {
@@ -70,6 +80,7 @@ func newPackages(s *state.State, pkgInfos map[string]*aquaregistry.PackageInfo) 
 		added[name] = &state.Package{
 			RepoOwner: pkgInfo.RepoOwner,
 			RepoName:  pkgInfo.RepoName,
+			Round:     back,
 		}
 	}
 	return added

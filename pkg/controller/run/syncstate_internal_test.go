@@ -98,3 +98,42 @@ func (starFetcher) Versions(_ context.Context, _ []github.Repo) (map[string][]st
 func (starFetcher) Tags(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
 	return nil, nil, nil
 }
+
+// TestSyncState_joinsAtTheBack checks that a package the registry has just gained
+// starts from the largest turn count there is.
+//
+// Starting from none would put it ahead of every package already known, and keep it
+// there until it caught up -- a turn in every run for as long as that took, which is
+// what counting turns exists to stop.
+func TestSyncState_joinsAtTheBack(t *testing.T) {
+	t.Parallel()
+	s := &state.State{Packages: map[string]*state.Package{
+		"cli/cli":            {RepoOwner: "cli", RepoName: "cli", Stars: 100, Round: 7},
+		"suzuki-shunsuke/ci": {RepoOwner: "suzuki-shunsuke", RepoName: "ci", Stars: 1, Round: 6},
+	}}
+	pkgInfos := map[string]*aquaregistry.PackageInfo{
+		"cli/cli":      {RepoOwner: "cli", RepoName: "cli"},
+		"junegunn/fzf": {RepoOwner: "junegunn", RepoName: "fzf"},
+	}
+	c := New(ghClient(t), nil, nil, starFetcher{stars: map[string]int{"junegunn/fzf": 50}}, nil)
+
+	if _, err := c.SyncState(t.Context(), discardLogger(), s, pkgInfos); err != nil {
+		t.Fatal(err)
+	}
+	added, ok := s.Packages["junegunn/fzf"]
+	if !ok {
+		t.Fatal("the new package wasn't added")
+	}
+	if added.Round != 7 {
+		t.Errorf("the new package joined at %d, want 7, the back of the order", added.Round)
+	}
+	// And it is ordered behind the packages that have had that many turns, not ahead
+	// of them, even though it has more stars than one of them.
+	got := make([]string, 0, len(s.Packages))
+	for _, candidate := range order(s) {
+		got = append(got, candidate.Name)
+	}
+	if got[0] != "suzuki-shunsuke/ci" {
+		t.Errorf("the order starts with %q, want the package that has had the fewest turns", got[0])
+	}
+}

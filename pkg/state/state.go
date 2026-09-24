@@ -73,7 +73,9 @@ type Package struct {
 	//
 	// It counts turns rather than naming a round the whole registry is in, so that
 	// nothing has to decide when a round ended: a package that has had fewer turns
-	// than another is behind, and that is the whole rule.
+	// than another is behind, and that is the whole rule. A package the registry has
+	// just gained starts from the largest count there is, which is the back of the
+	// order; starting from none would put it ahead of everything until it caught up.
 	Round int `json:"round,omitempty"`
 	// LastDeepCheck is when the package's whole history was last walked. Zero means
 	// never, which is what a package that hasn't been backfilled looks like.
