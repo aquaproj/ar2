@@ -7,6 +7,7 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/google/go-cmp/cmp"
 )
 
 // starFetcher answers with fixed star counts, and refuses one repository the way an
@@ -99,13 +100,16 @@ func (starFetcher) Tags(_ context.Context, _ []github.Repo) (map[string][]string
 	return nil, nil, nil
 }
 
-// TestSyncState_joinsAtTheBack checks that a package the registry has just gained
-// starts from the largest turn count there is.
+// TestSyncState_joinsTheCurrentLap checks that a package the registry has just gained
+// starts with the fewest turns anything in the order has: it waits for this lap's
+// turn rather than the next one.
 //
-// Starting from none would put it ahead of every package already known, and keep it
+// Starting from none would put it ahead of every package already known and keep it
 // there until it caught up -- a turn in every run for as long as that took, which is
-// what counting turns exists to stop.
-func TestSyncState_joinsAtTheBack(t *testing.T) {
+// what counting turns exists to stop. Starting from the most would cost it a lap for
+// no reason but having arrived late, and it is the package with nothing generated at
+// all.
+func TestSyncState_joinsTheCurrentLap(t *testing.T) {
 	t.Parallel()
 	s := &state.State{Packages: map[string]*state.Package{
 		"cli/cli":            {RepoOwner: "cli", RepoName: "cli", Stars: 100, Round: 7},
@@ -124,16 +128,18 @@ func TestSyncState_joinsAtTheBack(t *testing.T) {
 	if !ok {
 		t.Fatal("the new package wasn't added")
 	}
-	if added.Round != 7 {
-		t.Errorf("the new package joined at %d, want 7, the back of the order", added.Round)
+	if added.Round != 6 {
+		t.Errorf("the new package joined at %d, want 6, the turns of those still waiting", added.Round)
 	}
-	// And it is ordered behind the packages that have had that many turns, not ahead
-	// of them, even though it has more stars than one of them.
+	// It takes its place among the packages waiting for this lap's turn, where its
+	// stars decide where it sits, rather than ahead of the whole registry or behind
+	// all of it.
 	got := make([]string, 0, len(s.Packages))
 	for _, candidate := range order(s) {
 		got = append(got, candidate.Name)
 	}
-	if got[0] != "suzuki-shunsuke/ci" {
-		t.Errorf("the order starts with %q, want the package that has had the fewest turns", got[0])
+	want := []string{"junegunn/fzf", "suzuki-shunsuke/ci", "cli/cli"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("order is wrong (-want +got):\n%s", diff)
 	}
 }
