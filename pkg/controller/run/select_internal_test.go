@@ -95,3 +95,40 @@ func TestLimitBudget(t *testing.T) {
 		})
 	}
 }
+
+// TestRejoin checks that a package which was out of the order comes back at the end
+// of it rather than at the front.
+//
+// A run gives a turn to the packages with the fewest, so the counts of the packages
+// in the order are never more than one apart. A package further behind than that
+// wasn't in the order to be counted -- it was on the registry's ignored list -- and
+// left as it was it would be first in every run until it caught up.
+func TestRejoin(t *testing.T) {
+	t.Parallel()
+	s := &state.State{
+		Packages: map[string]*state.Package{
+			"a/left-out": {RepoOwner: "a", RepoName: "left-out", Stars: 1, Round: 2},
+			"b/waiting":  {RepoOwner: "b", RepoName: "waiting", Stars: 10, Round: 8},
+			"c/popular":  {RepoOwner: "c", RepoName: "popular", Stars: 99, Round: 9},
+			"d/seen":     {RepoOwner: "d", RepoName: "seen", Stars: 50, Round: 9},
+		},
+	}
+	got := make([]string, 0, len(s.Packages))
+	for _, candidate := range rejoin(discardLogger(), order(s)) {
+		got = append(got, candidate.Name)
+	}
+	// The one that was left out is now at the back with the rest, where its stars
+	// decide where it sits among them, rather than ahead of the whole registry.
+	want := []string{"b/waiting", "c/popular", "d/seen", "a/left-out"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("order is wrong (-want +got):\n%s", diff)
+	}
+	if s.Packages["a/left-out"].Round != 9 {
+		t.Errorf("it rejoined at %d, want 9", s.Packages["a/left-out"].Round)
+	}
+	// A package that is merely next in line is left alone: being one behind is what
+	// waiting for a turn looks like.
+	if s.Packages["b/waiting"].Round != 8 {
+		t.Errorf("the package waiting its turn moved to %d, want 8", s.Packages["b/waiting"].Round)
+	}
+}

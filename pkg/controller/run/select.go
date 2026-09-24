@@ -37,21 +37,24 @@ func order(s *state.State) []*Candidate {
 	for name, pkg := range s.Packages {
 		candidates = append(candidates, &Candidate{Name: name, Package: pkg})
 	}
-	slices.SortFunc(candidates, func(a, b *Candidate) int {
-		if d := cmp.Compare(a.Package.Round, b.Package.Round); d != 0 {
-			return d
-		}
-		if d := cmp.Compare(rank(a.Package), rank(b.Package)); d != 0 {
-			return d
-		}
-		if d := cmp.Compare(b.Package.Stars, a.Package.Stars); d != 0 {
-			return d
-		}
-		// Ties are broken by name so that a run is reproducible: the same state must
-		// produce the same work in the same order.
-		return cmp.Compare(a.Name, b.Name)
-	})
+	slices.SortFunc(candidates, compare)
 	return candidates
+}
+
+// compare is the order itself: fewest turns first, then the priority within a turn.
+func compare(a, b *Candidate) int {
+	if d := cmp.Compare(a.Package.Round, b.Package.Round); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(rank(a.Package), rank(b.Package)); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(b.Package.Stars, a.Package.Stars); d != 0 {
+		return d
+	}
+	// Ties are broken by name so that a run is reproducible: the same state must
+	// produce the same work in the same order.
+	return cmp.Compare(a.Name, b.Name)
 }
 
 // rank puts packages with a known star count ahead of those without one.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -199,7 +200,44 @@ func (c *Controller) candidates(ctx context.Context, logger *slog.Logger, input 
 	}
 	// Before the sweep, so that a repository nobody expects to answer isn't asked
 	// about either.
-	return ignore(logger, order(input.State), cfg.Ignored()), nil
+	candidates := ignore(logger, order(input.State), cfg.Ignored())
+	return rejoin(logger, candidates), nil
+}
+
+// rejoin puts a package that was outside the order back at the end of it.
+//
+// A run takes the packages with the fewest turns and gives each of them one, so the
+// counts of the packages in the order are never more than one apart: a run works
+// through the lowest count from the front, and whether it finishes that group or
+// stops inside it, what is left is that count and the one above. Anything further
+// behind than that wasn't in the order to be counted.
+//
+// Which happens when a package leaves the registry's ignored list. It is dropped
+// before the order is formed, so its count stops while the rest of the registry goes
+// on, and left as it was it would be first in every run until it caught up -- the
+// thing counting turns exists to stop. A package the registry has just gained is the
+// other way in, and joins at the back when it is added.
+func rejoin(logger *slog.Logger, candidates []*Candidate) []*Candidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	back := candidates[len(candidates)-1].Package.Round
+	rejoined := false
+	for _, candidate := range candidates {
+		if back-candidate.Package.Round <= 1 {
+			// Sorted by the count, so nothing after this one is further behind.
+			break
+		}
+		logger.Info("a package was out of the order and rejoins at the end of it",
+			"package", candidate.Name, "turns", candidate.Package.Round, "turns_of_the_rest", back)
+		candidate.Package.Round = back
+		rejoined = true
+	}
+	if rejoined {
+		// The counts decide the order, so changing one changes it.
+		slices.SortFunc(candidates, compare)
+	}
+	return candidates
 }
 
 // ignore drops the packages the registry says to leave alone.
