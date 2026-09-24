@@ -12,18 +12,24 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
+	"github.com/aquaproj/aqua/v2/pkg/checksum"
 	"github.com/aquaproj/aqua/v2/pkg/config"
 	"github.com/aquaproj/aqua/v2/pkg/config/aqua"
 	"github.com/aquaproj/aqua/v2/pkg/cosign"
 	"github.com/aquaproj/aqua/v2/pkg/download"
 	"github.com/aquaproj/aqua/v2/pkg/ghattestation"
 	aquagithub "github.com/aquaproj/aqua/v2/pkg/github"
+	"github.com/aquaproj/aqua/v2/pkg/installpackage"
+	"github.com/aquaproj/aqua/v2/pkg/link"
 	"github.com/aquaproj/aqua/v2/pkg/lockfile"
 	"github.com/aquaproj/aqua/v2/pkg/minisign"
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
 	"github.com/aquaproj/aqua/v2/pkg/slsa"
+	"github.com/aquaproj/aqua/v2/pkg/unarchive"
+	"github.com/aquaproj/aqua/v2/pkg/vacuum"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/suzuki-shunsuke/go-osenv/osenv"
 )
@@ -31,20 +37,30 @@ import (
 // Verifier runs the signature verifications an entry asks for.
 type Verifier struct {
 	httpClient *http.Client
-	// gh is the GitHub CLI that checks attestations, or empty when there is none
-	// to run.
+	// gh is the GitHub CLI that checks attestations, or empty when there is none to
+	// run. It is looked for on first use rather than at construction, because the
+	// copy it should prefer is the one installed for the check about to be made.
 	gh            string
+	ghOnce        sync.Once
 	cosign        *cosign.Verifier
 	slsa          *slsa.Verifier
 	minisign      *minisign.Verifier
 	ghattestation *ghattestation.Verifier
+
+	// installer puts the tools where the verifiers look for them, and rt is the
+	// host they are chosen for.
+	installer *installpackage.Installer
+	rt        *runtime.Runtime
+	tools     map[string]*tool
 }
 
 // New creates a Verifier.
 //
-// The verification tools are installed on demand by the verifiers themselves, once
-// per run, into aqua's own root directory — the same copies aqua would use, and the
-// same place AQUA_ROOT_DIR points at.
+// The verification tools are installed the first time a check needs one, into aqua's
+// own root directory — the same copies aqua would use, and the same place
+// AQUA_ROOT_DIR points at. aqua's verifiers don't install anything themselves: they
+// work out where the tool is and run it, and putting it there is the install path's
+// job, which this stands in for.
 func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Verifier, error) {
 	param := &config.Param{RootDir: config.GetRootDir(osenv.New(), "")}
 	exe := osexec.New()
@@ -64,13 +80,34 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	if err != nil {
 		return nil, fmt.Errorf("prepare gh: %w", err)
 	}
+	cosignVerifier := cosign.NewVerifier(exe, dl, param)
+	slsaVerifier := slsa.New(dl, slsa.NewExecutor(exe, param))
+	minisignVerifier := minisign.New(dl, minisignExe)
+	attestVerifier := ghattestation.New(attestExe)
+
+	rt := runtime.NewR(ctx)
+	httpDL := download.NewHTTPDownloader(logger, httpClient)
 	return &Verifier{
 		httpClient:    httpClient,
-		gh:            ghPath(ctx),
-		cosign:        cosign.NewVerifier(exe, dl, param),
-		slsa:          slsa.New(dl, slsa.NewExecutor(exe, param)),
-		minisign:      minisign.New(dl, minisignExe),
-		ghattestation: ghattestation.New(attestExe),
+		cosign:        cosignVerifier,
+		slsa:          slsaVerifier,
+		minisign:      minisignVerifier,
+		ghattestation: attestVerifier,
+		rt:            rt,
+		installer: installpackage.New(param, dl, rt, link.New(),
+			download.NewChecksumDownloader(gh, rt, httpDL), checksum.NewCalculator(),
+			unarchive.New(exe),
+			cosignVerifier, slsaVerifier, minisignVerifier, attestVerifier,
+			installpackage.NewGoInstallInstallerImpl(exe),
+			installpackage.NewGoBuildInstallerImpl(exe),
+			installpackage.NewCargoPackageInstallerImpl(exe),
+			vacuum.New(param)),
+		tools: map[string]*tool{
+			toolCosign:   {pkg: cosign.Package, checksums: cosign.Checksums()},
+			toolSLSA:     {pkg: slsa.Package, checksums: slsa.Checksums()},
+			toolMinisign: {pkg: minisign.Package, checksums: minisign.Checksums()},
+			toolGH:       {pkg: ghattestation.Package, checksums: ghattestation.Checksums()},
+		},
 	}, nil
 }
 
@@ -106,57 +143,98 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 		Version:   version,
 	}
 
-	var failed error
-	note := func(kind string, err error) {
-		logger.Warn("the asset can't be verified the way its entry says it can",
-			"package", pkgName, "version", version,
-			"os", asset.OS, "arch", asset.Arch, "kind", kind, "error", err.Error())
-		if failed == nil {
-			failed = fmt.Errorf("%s: %w", kind, err)
-		}
-	}
+	failed := &unverified{logger: logger, pkgName: pkgName, version: version, asset: asset}
 
 	// Who signed is read off the signature before it is checked, so that a guessed
 	// pattern is replaced by a name and the entry records what actually signed.
 	v.pin(ctx, logger, version, asset)
 
 	for _, check := range []struct {
-		kind    string
+		kind string
+		// tool is what the check is run with, and what has to be installed before
+		// it can be. The attestations are checked by a gh the machine already has.
+		tool    string
 		enabled bool
 		verify  func() error
 	}{
-		{"cosign", asset.Cosign.GetEnabled(), func() error {
+		{"cosign", toolCosign, asset.Cosign.GetEnabled(), func() error {
 			return v.cosign.Verify(ctx, logger, rt, file, asset.Cosign, art, path)
 		}},
-		{"slsa_provenance", asset.SLSAProvenance.GetEnabled(), func() error {
+		{"slsa_provenance", toolSLSA, asset.SLSAProvenance.GetEnabled(), func() error {
 			return v.slsa.Verify(ctx, logger, rt, asset.SLSAProvenance, art, file, &slsa.ParamVerify{
 				SourceURI:    pkg.PackageInfo.SLSASourceURI(),
 				SourceTag:    version,
 				ArtifactPath: path,
 			})
 		}},
-		{"minisign", asset.Minisign.GetEnabled(), func() error {
+		{"minisign", toolMinisign, asset.Minisign.GetEnabled(), func() error {
 			return v.minisign.Verify(ctx, logger, rt, asset.Minisign, art, file, &minisign.ParamVerify{
 				ArtifactPath: path,
 				PublicKey:    asset.Minisign.PublicKey,
 			})
 		}},
-		{"github_artifact_attestations", asset.GitHubArtifactAttestations.GetEnabled(), func() error {
+		{"github_artifact_attestations", toolGH, asset.GitHubArtifactAttestations.GetEnabled(), func() error {
 			return v.attestation(ctx, logger, asset, path)
 		}},
 	} {
 		if !check.enabled {
 			continue
 		}
+		if err := v.ensure(ctx, logger, check.tool); err != nil {
+			failed.note(check.kind, err)
+			continue
+		}
 		if err := check.verify(); err != nil {
-			note(check.kind, err)
+			failed.note(check.kind, err)
 		}
 	}
 
-	if failed != nil {
-		return fmt.Errorf("%w: %w", ErrUnverified, failed)
+	if failed.err != nil {
+		return fmt.Errorf("%w: %w", ErrUnverified, failed.err)
 	}
 	return nil
+}
+
+// unverified collects the checks that didn't hold. Each is logged as it happens,
+// because a run is read as a log, and the first is what the caller is told: an asset
+// that failed one check has failed, and which one is in the log above.
+type unverified struct {
+	logger  *slog.Logger
+	pkgName string
+	version string
+	asset   *generate.Asset
+	err     error
+}
+
+func (u *unverified) note(kind string, err error) {
+	u.logger.Warn("the asset can't be verified the way its entry says it can",
+		"package", u.pkgName, "version", u.version,
+		"os", u.asset.OS, "arch", u.asset.Arch, "kind", kind, "error", err.Error())
+	if u.err == nil {
+		u.err = fmt.Errorf("%s: %w", kind, err)
+	}
+}
+
+// ghExe is the GitHub CLI to read an attestation's signer with, found once.
+//
+// The tool has been installed by the time this is asked for, so aqua's own copy is
+// what it finds; the machine's own is the fallback for an environment the package
+// doesn't cover, where installing it was never going to work.
+func (v *Verifier) ghExe(ctx context.Context) string {
+	v.ghOnce.Do(func() {
+		v.gh = ghPath(ctx)
+	})
+	return v.gh
+}
+
+// ensure installs the tool a check is about to run, if it isn't installed already.
+// A check with no tool of its own asks for nothing.
+func (v *Verifier) ensure(ctx context.Context, logger *slog.Logger, name string) error {
+	t, ok := v.tools[name]
+	if !ok {
+		return nil
+	}
+	return t.ensure(ctx, logger, v.installer, v.rt)
 }
 
 // assetPackage turns the entry back into the package aqua would install, which is
