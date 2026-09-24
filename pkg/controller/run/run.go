@@ -124,10 +124,11 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 	if err != nil {
 		return 0, fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
-	candidates, err := c.candidates(ctx, logger, input)
+	cfg, err := c.g2.RegistryConfig(ctx, input.BaseBranch)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get the registry configuration: %w", err)
 	}
+	candidates := c.candidates(logger, input, cfg)
 	// What each package's newest versions are, for the whole registry, before any of
 	// it is worked on. It says which packages have anything to do at all, which is
 	// most of what a run decides and used to cost a request each.
@@ -147,7 +148,7 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		if todo == workNone {
 			continue
 		}
-		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions)
+		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions, cfg.Breadth)
 		if err != nil && tried == 0 {
 			// A package that failed before reaching any version still cost API calls
 			// and still has to move the run forward, or a failure every package
@@ -193,15 +194,10 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight ma
 
 // candidates is the packages to work through, in the order the state gives them,
 // without the ones the registry says to leave alone.
-func (c *Controller) candidates(ctx context.Context, logger *slog.Logger, input *Input) ([]*Candidate, error) {
-	cfg, err := c.g2.RegistryConfig(ctx, input.BaseBranch)
-	if err != nil {
-		return nil, fmt.Errorf("get the registry configuration: %w", err)
-	}
-	// Before the sweep, so that a repository nobody expects to answer isn't asked
-	// about either.
-	candidates := ignore(logger, order(input.State), cfg.Ignored())
-	return rejoin(logger, candidates), nil
+func (c *Controller) candidates(logger *slog.Logger, input *Input, cfg *g2.RegistryConfig) []*Candidate {
+	// Dropped before the sweep, so that a repository nobody expects to answer isn't
+	// asked about either.
+	return rejoin(logger, ignore(logger, order(input.State), cfg.Ignored()))
 }
 
 // rejoin puts a package that was outside the order back at the end of it.
@@ -275,7 +271,7 @@ func (c *Controller) reportProblems(logger *slog.Logger) {
 
 // runPackage generates the missing versions of one package, newest first, up to
 // budget. It returns how many were generated and how many were attempted.
-func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string) (int, int, error) {
+func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string, breadth *g2.Breadth) (int, int, error) {
 	pkg := candidate.Package
 	if pkg.RepoOwner == "" || pkg.RepoName == "" {
 		// Versions can only be listed for a GitHub repository. Packages without one
@@ -303,9 +299,8 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	// and it is recorded after asking rather than after opening a pull request.
 	record(candidate.Package, versions, existing, todo)
 
-	budget = limitBudget(budget, existing)
-
-	generated, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions, existing, budget)
+	generated, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions, existing,
+		limitBudget(budget, existing, breadth))
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
@@ -338,45 +333,56 @@ func (c *Controller) reviewLostSigning(ctx context.Context, logger *slog.Logger,
 	checkSigning(logger, pkgName, generated, baseline)
 }
 
-// limitBudget limits how much of the run's remaining budget one package may take.
-//
-// A package that g2 holds fewer than breadthDepth versions of gets only enough to
-// reach it, so the run moves on to the next package instead of finishing this one.
-// A package already past that takes whatever is left.
-func limitBudget(budget int, existing map[string]struct{}) int {
-	if len(existing) >= breadthDepth {
-		return budget
-	}
-	if remaining := breadthDepth - len(existing); remaining < budget {
-		return remaining
-	}
-	return budget
+// share is how much of a run one package may take.
+type share struct {
+	// attempts is how many versions may be tried.
+	attempts int
+	// versions ends the turn early once that many have been generated, or is zero
+	// when the package is past the breadth and takes what it can get.
+	versions int
 }
 
-// breadthDepth is how many versions a package that has none yet gets before the run
-// moves on to the next package.
+// limitBudget limits how much of the run's remaining budget one package may take.
 //
-// Without it a run spends itself on the most starred package, generating every
-// version it ever released while nothing else gets a single one. With it the first
-// sweep leaves every package with its newest versions, which is what makes the
-// registry usable: someone installing a package almost always wants a recent
-// version, and a package with nothing at all can't be installed from g2 at all.
+// A package that the registry holds few enough versions of gets enough of a turn to
+// reach the breadth, so the run moves on instead of finishing this one. A package
+// already past it takes whatever is left.
 //
-// Switching on what g2 already holds needs no flag and no record of which sweep this
-// is. The version list is fetched either way.
+// The two bounds are separate because the versions likeliest to fail are the newest,
+// which are the ones a turn starts from: a release with no assets, or one whose
+// signature can't be verified yet, produces nothing. Counting only the tries leaves a
+// package short of the breadth every turn and taking one every lap forever; counting
+// only what worked would let a package whose every version fails spend the whole run.
 //
-// The extra cost is one ListReleases per package on the second sweep, since listing
-// is paid per package and generating is paid per version. Over the whole registry
-// that is about 6% more API calls, roughly an hour.
-const breadthDepth = 5
+// A registry that asks for no attempts of its own gets as many as it wants and no
+// more, which is one try per version per lap.
+func limitBudget(budget int, existing map[string]struct{}, breadth *g2.Breadth) *share {
+	want := breadth.GetVersions() - len(existing)
+	if want <= 0 {
+		return &share{attempts: budget}
+	}
+	attempts := want
+	if a := breadth.GetAttempts(); a > 0 {
+		attempts = a
+	}
+	return &share{
+		attempts: min(budget, attempts),
+		versions: want,
+	}
+}
 
 // generateVersions generates the versions the repository is missing, newest first,
-// up to budget.
-func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, versions []string, existing map[string]struct{}, budget int) ([]*version, int) {
-	generated := make([]*version, 0, budget)
+// within the share of the run the package has.
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, versions []string, existing map[string]struct{}, budget *share) ([]*version, int) {
+	generated := make([]*version, 0, budget.attempts)
 	attempted := 0
 	for _, tag := range versions {
-		if attempted >= budget {
+		if attempted >= budget.attempts {
+			return generated, attempted
+		}
+		if budget.versions > 0 && len(generated) >= budget.versions {
+			// The package has what this turn was for, and the rest of its history
+			// is what the next turn is for.
 			return generated, attempted
 		}
 		if _, ok := existing[tag]; ok {

@@ -3,6 +3,7 @@ package run
 import (
 	"testing"
 
+	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/google/go-cmp/cmp"
 )
@@ -61,8 +62,8 @@ func TestOrder_rounds(t *testing.T) {
 	}
 }
 
-// TestLimitBudget checks that a package g2 holds little of takes only enough of the
-// run to reach breadthDepth. Without the cap a run spends itself on the most starred
+// TestLimitBudget checks how much of a run one package may take: enough of a turn to
+// reach the breadth, and no more, so that a run isn't spent on the most starred
 // package while nothing else gets a version at all.
 func TestLimitBudget(t *testing.T) {
 	t.Parallel()
@@ -70,29 +71,80 @@ func TestLimitBudget(t *testing.T) {
 		name     string
 		budget   int
 		existing int
-		want     int
+		want     *share
 	}{
-		{name: "nothing generated yet", budget: 300, existing: 0, want: breadthDepth},
-		{name: "partly generated", budget: 300, existing: 3, want: breadthDepth - 3},
-		{name: "past the breadth depth", budget: 300, existing: breadthDepth, want: 300},
+		{name: "nothing generated yet", budget: 300, existing: 0, want: &share{attempts: 5, versions: 5}},
+		{name: "partly generated", budget: 300, existing: 3, want: &share{attempts: 2, versions: 2}},
 		{
-			// The run has less left than the package would take, so the run's budget
-			// is what bounds it.
-			name:   "the run is nearly spent",
-			budget: 2, existing: 0, want: 2,
+			// Past the breadth there is nothing left to reach, so the package takes
+			// what the run has left and the versions bound doesn't apply.
+			name: "past the breadth", budget: 300, existing: 5, want: &share{attempts: 300},
+		},
+		{name: "the run is nearly spent", budget: 2, existing: 0, want: &share{attempts: 2, versions: 5}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			checkShare(t, tt.budget, tt.existing, nil, tt.want)
+		})
+	}
+}
+
+// TestLimitBudget_configured checks the two bounds a registry can set. They are
+// separate because the versions likeliest to fail are the newest, which are the ones
+// a turn starts from: a package would otherwise stop short of the breadth every turn.
+func TestLimitBudget_configured(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		existing int
+		breadth  *g2.Breadth
+		want     *share
+	}{
+		{
+			// What the registry asks for: try twenty and stop at ten.
+			name: "try twenty, stop at ten", existing: 0,
+			breadth: &g2.Breadth{Versions: 10, Attempts: 20},
+			want:    &share{attempts: 20, versions: 10},
+		},
+		{
+			// One that has some already needs fewer to reach ten, but may still try
+			// the whole twenty to get there.
+			name: "partly generated", existing: 8,
+			breadth: &g2.Breadth{Versions: 10, Attempts: 20},
+			want:    &share{attempts: 20, versions: 2},
+		},
+		{
+			// Without an attempts of its own, a turn tries as many as it wants and
+			// no more, so a version that fails costs the package a lap.
+			name: "only the versions are set", existing: 0,
+			breadth: &g2.Breadth{Versions: 10},
+			want:    &share{attempts: 10, versions: 10},
+		},
+		{
+			name: "only the versions are set, partly generated", existing: 8,
+			breadth: &g2.Breadth{Versions: 10},
+			want:    &share{attempts: 2, versions: 2},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			existing := make(map[string]struct{}, tt.existing)
-			for i := range tt.existing {
-				existing[string(rune('a'+i))] = struct{}{}
-			}
-			if got := limitBudget(tt.budget, existing); got != tt.want {
-				t.Errorf("limitBudget is %d, want %d", got, tt.want)
-			}
+			checkShare(t, 300, tt.existing, tt.breadth, tt.want)
 		})
+	}
+}
+
+// checkShare runs limitBudget against a package that already has the given number of
+// versions, whatever they are called.
+func checkShare(t *testing.T, budget, existing int, breadth *g2.Breadth, want *share) {
+	t.Helper()
+	held := make(map[string]struct{}, existing)
+	for i := range existing {
+		held[string(rune('a'+i))] = struct{}{}
+	}
+	if diff := cmp.Diff(want, limitBudget(budget, held, breadth), cmp.AllowUnexported(share{})); diff != "" {
+		t.Errorf("the share is wrong (-want +got):\n%s", diff)
 	}
 }
 
