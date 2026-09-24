@@ -33,6 +33,34 @@ func TestOrder(t *testing.T) {
 	}
 }
 
+// TestOrder_rounds checks that a package the last run reached goes behind the ones it
+// didn't, whatever its stars. A run is bounded, so without this the packages behind
+// the cut wait on the ones in front finishing -- and one that takes a share and gets
+// nowhere never finishes.
+func TestOrder_rounds(t *testing.T) {
+	t.Parallel()
+	s := &state.State{
+		Packages: map[string]*state.Package{
+			// The most starred package, already reached twice.
+			"a/popular": {RepoOwner: "a", RepoName: "popular", Stars: 100, Round: 2},
+			// Reached once, and less popular.
+			"b/seen": {RepoOwner: "b", RepoName: "seen", Stars: 50, Round: 1},
+			// Never reached, and least popular of the three.
+			"c/waiting": {RepoOwner: "c", RepoName: "waiting", Stars: 1},
+			// Never reached either, so stars decide between the two of them.
+			"d/waiting2": {RepoOwner: "d", RepoName: "waiting2", Stars: 2},
+		},
+	}
+	got := make([]string, 0, len(s.Packages))
+	for _, c := range order(s) {
+		got = append(got, c.Name)
+	}
+	want := []string{"d/waiting2", "c/waiting", "b/seen", "a/popular"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("order is wrong (-want +got):\n%s", diff)
+	}
+}
+
 // TestLimitBudget checks that a package g2 holds little of takes only enough of the
 // run to reach breadthDepth. Without the cap a run spends itself on the most starred
 // package while nothing else gets a version at all.

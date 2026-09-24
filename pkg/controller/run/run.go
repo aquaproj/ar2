@@ -138,6 +138,10 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		if attempted >= input.Limit {
 			return generated, nil
 		}
+		// The run reached this package, so it goes behind the ones it hasn't. Not
+		// whether there was anything to do, and not whether it worked: a package
+		// that fails every time would otherwise take the same share of every run.
+		candidate.Package.Round++
 		todo, versions := c.todo(logger, candidate, inFlight, swept, now)
 		if todo == workNone {
 			continue
