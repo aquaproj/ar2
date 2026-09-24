@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/aquaproj/aqua/v2/pkg/checksum"
 	"github.com/aquaproj/aqua/v2/pkg/config"
@@ -36,9 +37,11 @@ import (
 // Verifier runs the signature verifications an entry asks for.
 type Verifier struct {
 	httpClient *http.Client
-	// gh is the GitHub CLI that checks attestations, or empty when there is none
-	// to run.
+	// gh is the GitHub CLI that checks attestations, or empty when there is none to
+	// run. It is looked for on first use rather than at construction, because the
+	// copy it should prefer is the one installed for the check about to be made.
 	gh            string
+	ghOnce        sync.Once
 	cosign        *cosign.Verifier
 	slsa          *slsa.Verifier
 	minisign      *minisign.Verifier
@@ -86,7 +89,6 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	httpDL := download.NewHTTPDownloader(logger, httpClient)
 	return &Verifier{
 		httpClient:    httpClient,
-		gh:            ghPath(ctx),
 		cosign:        cosignVerifier,
 		slsa:          slsaVerifier,
 		minisign:      minisignVerifier,
@@ -104,6 +106,7 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 			toolCosign:   {pkg: cosign.Package, checksums: cosign.Checksums()},
 			toolSLSA:     {pkg: slsa.Package, checksums: slsa.Checksums()},
 			toolMinisign: {pkg: minisign.Package, checksums: minisign.Checksums()},
+			toolGH:       {pkg: ghattestation.Package, checksums: ghattestation.Checksums()},
 		},
 	}, nil
 }
@@ -170,7 +173,7 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 				PublicKey:    asset.Minisign.PublicKey,
 			})
 		}},
-		{"github_artifact_attestations", "", asset.GitHubArtifactAttestations.GetEnabled(), func() error {
+		{"github_artifact_attestations", toolGH, asset.GitHubArtifactAttestations.GetEnabled(), func() error {
 			return v.attestation(ctx, logger, asset, path)
 		}},
 	} {
@@ -210,6 +213,18 @@ func (u *unverified) note(kind string, err error) {
 	if u.err == nil {
 		u.err = fmt.Errorf("%s: %w", kind, err)
 	}
+}
+
+// ghExe is the GitHub CLI to read an attestation's signer with, found once.
+//
+// The tool has been installed by the time this is asked for, so aqua's own copy is
+// what it finds; the machine's own is the fallback for an environment the package
+// doesn't cover, where installing it was never going to work.
+func (v *Verifier) ghExe(ctx context.Context) string {
+	v.ghOnce.Do(func() {
+		v.gh = ghPath(ctx)
+	})
+	return v.gh
 }
 
 // ensure installs the tool a check is about to run, if it isn't installed already.

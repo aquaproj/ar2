@@ -58,7 +58,8 @@ type verification []struct {
 // ten seconds, which is worth paying once for a package being taken over and not
 // worth paying again for every version after it.
 func (v *Verifier) attestationSigner(ctx context.Context, repo, path string) (string, error) {
-	if v.gh == "" {
+	gh := v.ghExe(ctx)
+	if gh == "" {
 		return "", errNoGH
 	}
 	owner, _, _ := strings.Cut(repo, "/")
@@ -71,7 +72,7 @@ func (v *Verifier) attestationSigner(ctx context.Context, repo, path string) (st
 	//
 	// The command is the GitHub CLI aqua installs, and its arguments are a file ar2
 	// downloaded and an owner from the package's own definition.
-	cmd := exec.CommandContext(ctx, v.gh, "attestation", "verify", path, "--owner", owner, "--format", "json") //nolint:gosec // see above
+	cmd := exec.CommandContext(ctx, gh, "attestation", "verify", path, "--owner", owner, "--format", "json")
 	cmd.Args[0] = "gh"
 	// Packages are always on github.com, whatever GH_HOST says for the repository
 	// the run itself is against.

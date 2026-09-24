@@ -17,6 +17,7 @@ const (
 	toolCosign   = "cosign"
 	toolSLSA     = "slsa"
 	toolMinisign = "minisign"
+	toolGH       = "gh"
 )
 
 // tool is one of the programs a verification is run with.
