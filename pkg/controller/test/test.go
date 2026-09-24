@@ -262,7 +262,7 @@ func downloadable(typ string) bool {
 	}
 }
 
-// versionFromPath reads the version out of versions/<version>/registry.json, which is
+// versionFromPath reads the version out of versions/<version>/registry-1.json, which is
 // where a package branch keeps it. The file doesn't hold the version: it is the
 // directory's name, so that one version is one directory and a commit touches nothing
 // else.

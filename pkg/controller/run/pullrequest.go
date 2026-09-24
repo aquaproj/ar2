@@ -111,7 +111,7 @@ func (c *Controller) filesToCommit(logger *slog.Logger, def *definition, pkgName
 			return nil, err
 		}
 		out.files = append(out.files, &g2.File{
-			Path:    fmt.Sprintf("%s/%s/registry.json", g2.VersionDir, v.Version),
+			Path:    aquag2.Path(v.Version),
 			Content: content,
 		})
 		out.needsReview = out.needsReview || v.NeedsReview

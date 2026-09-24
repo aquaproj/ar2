@@ -10,10 +10,6 @@ import (
 	gogithub "github.com/google/go-github/v92/github"
 )
 
-// VersionDir is the directory holding the generated registry.json files on a
-// package's branch.
-const VersionDir = "versions"
-
 // Client reads and writes aqua-registry-g2.
 type Client struct {
 	gh    *gogithub.Client

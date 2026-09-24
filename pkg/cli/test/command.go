@@ -35,7 +35,7 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		GlobalFlags: gFlags,
 	}
 	cmd := &cobra.Command{
-		Use:   "test <registry.json>...",
+		Use:   "test <registry-1.json>...",
 		Short: "Check generated registry.json files against the releases they describe",
 		Long: `Check generated registry.json files against the releases they describe.
 
@@ -44,16 +44,16 @@ a human reading it, so the trust in what was generated comes from here: every as
 downloaded, hashed against the checksum the entry carries, opened to see that the files
 it names are where it says, and checked against the signatures it claims.
 
-$ ar2 test versions/v1.5.6/registry.json
+$ ar2 test versions/v1.5.6/registry-1.json
 
-The version comes from the path, which is versions/<version>/registry.json on a package
+The version comes from the path, which is versions/<version>/registry-1.json on a package
 branch. The package name comes from registry.yaml beside it, and --package overrides it
 for a file checked from somewhere else.
 
 --os and --arch limit the run to the entries of one environment, which is how a job
 running on a machine of that environment checks the entry meant for it.
 
-$ ar2 test --os windows --arch amd64 versions/v1.5.6/registry.json
+$ ar2 test --os windows --arch amd64 versions/v1.5.6/registry-1.json
 
 --environments lists the environments the files describe instead of checking them, so
 that the jobs can be worked out from the files rather than fixed in advance.
