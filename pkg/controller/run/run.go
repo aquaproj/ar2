@@ -406,9 +406,9 @@ func writeAll(dir, pkgName string, versions []*version) error {
 // write stores registry.json at the path it has on the package's branch.
 func write(dir, pkgName, version string, reg *generate.Registry) error {
 	// The layout mirrors aqua-registry-g2: the package branch holds
-	// versions/<version>/registry.json, and the package name is a directory here so
+	// versions/<version>/registry-1.json, and the package name is a directory here so
 	// that one run's output holds more than one package.
-	path := filepath.Join(dir, filepath.Join(strings.Split(pkgName, "/")...), "versions", version, "registry.json")
+	path := filepath.Join(dir, filepath.Join(strings.Split(pkgName, "/")...), filepath.FromSlash(aquag2.Path(version)))
 	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
 		return fmt.Errorf("create a directory for registry.json: %w", err)
 	}

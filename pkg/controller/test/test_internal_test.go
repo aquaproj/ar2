@@ -19,19 +19,19 @@ func TestVersionFromPath(t *testing.T) {
 	}{
 		{
 			name: "a package branch's layout",
-			path: "versions/v1.5.6/registry.json",
+			path: "versions/v1.5.6/registry-1.json",
 			exp:  "v1.5.6",
 		},
 		{
 			name: "checked out somewhere else",
-			path: "/tmp/pkg_foo/versions/0.10.20/registry.json",
+			path: "/tmp/pkg_foo/versions/0.10.20/registry-1.json",
 			exp:  "0.10.20",
 		},
 		{
 			// A version whose name looks like a path of its own still comes back
 			// whole, because it is one directory on the branch.
 			name: "a version with a slash in it",
-			path: filepath.Join("versions", "cli-v1.0.0", "registry.json"),
+			path: filepath.Join("versions", "cli-v1.0.0", "registry-1.json"),
 			exp:  "cli-v1.0.0",
 		},
 		{
@@ -40,7 +40,7 @@ func TestVersionFromPath(t *testing.T) {
 		},
 		{
 			name: "a directory deeper than the layout",
-			path: "versions/v1.5.6/extra/registry.json",
+			path: "versions/v1.5.6/extra/registry-1.json",
 		},
 	}
 	for _, d := range data {
@@ -204,10 +204,10 @@ func TestEnvironments(t *testing.T) {
 		}
 		return path
 	}
-	a := write("versions/v1.0.0/registry.json", `{"assets":[
+	a := write("versions/v1.0.0/registry-1.json", `{"assets":[
 		{"os":"linux","arch":"amd64","type":"github_release","checksum":"a"},
 		{"os":"darwin","arch":"arm64","type":"github_release","checksum":"b"}]}`)
-	b := write("versions/v1.1.0/registry.json", `{"assets":[
+	b := write("versions/v1.1.0/registry-1.json", `{"assets":[
 		{"os":"linux","arch":"amd64","type":"github_release","checksum":"c"},
 		{"os":"windows","arch":"arm64","type":"github_release","checksum":"d"}]}`)
 

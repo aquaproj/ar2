@@ -133,7 +133,7 @@ func TestOpenPullRequest_paths(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"versions/v2.1.0/registry.json", "versions/v2.2.0/registry.json"}
+	want := []string{"versions/v2.1.0/registry-1.json", "versions/v2.2.0/registry-1.json"}
 	if len(reg.committed) != len(want) {
 		t.Fatalf("%d files were committed, want %d", len(reg.committed), len(want))
 	}

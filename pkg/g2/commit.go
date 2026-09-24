@@ -10,7 +10,7 @@ import (
 // File is a file to commit.
 type File struct {
 	// Path is where the file goes on the package branch, such as
-	// versions/v1.2.3/registry.json.
+	// versions/v1.2.3/registry-1.json.
 	Path    string
 	Content string
 }
