@@ -62,6 +62,21 @@ type Package struct {
 	// not removed from the registry, so what was true when it was written stays
 	// true.
 	CaughtUp bool `json:"caught_up,omitempty"`
+	// Round counts the runs that have reached this package.
+	//
+	// A run works through the packages in order and stops when its budget is spent,
+	// so the ones it never reached keep the lower count and come first next time.
+	// Without it the order is the same every run, and a package that takes a share
+	// and gets nowhere -- one whose asset can't be downloaded, say -- takes the same
+	// share of every run and holds up everything behind it for as long as it is
+	// broken.
+	//
+	// It counts turns rather than naming a round the whole registry is in, so that
+	// nothing has to decide when a round ended: a package that has had fewer turns
+	// than another is behind, and that is the whole rule. A package the registry has
+	// just gained starts from the largest count there is, which is the back of the
+	// order; starting from none would put it ahead of everything until it caught up.
+	Round int `json:"round,omitempty"`
 	// LastDeepCheck is when the package's whole history was last walked. Zero means
 	// never, which is what a package that hasn't been backfilled looks like.
 	//

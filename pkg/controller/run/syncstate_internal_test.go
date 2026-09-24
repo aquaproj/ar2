@@ -7,6 +7,7 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/google/go-cmp/cmp"
 )
 
 // starFetcher answers with fixed star counts, and refuses one repository the way an
@@ -97,4 +98,48 @@ func (starFetcher) Versions(_ context.Context, _ []github.Repo) (map[string][]st
 
 func (starFetcher) Tags(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
 	return nil, nil, nil
+}
+
+// TestSyncState_joinsTheCurrentLap checks that a package the registry has just gained
+// starts with the fewest turns anything in the order has: it waits for this lap's
+// turn rather than the next one.
+//
+// Starting from none would put it ahead of every package already known and keep it
+// there until it caught up -- a turn in every run for as long as that took, which is
+// what counting turns exists to stop. Starting from the most would cost it a lap for
+// no reason but having arrived late, and it is the package with nothing generated at
+// all.
+func TestSyncState_joinsTheCurrentLap(t *testing.T) {
+	t.Parallel()
+	s := &state.State{Packages: map[string]*state.Package{
+		"cli/cli":            {RepoOwner: "cli", RepoName: "cli", Stars: 100, Round: 7},
+		"suzuki-shunsuke/ci": {RepoOwner: "suzuki-shunsuke", RepoName: "ci", Stars: 1, Round: 6},
+	}}
+	pkgInfos := map[string]*aquaregistry.PackageInfo{
+		"cli/cli":      {RepoOwner: "cli", RepoName: "cli"},
+		"junegunn/fzf": {RepoOwner: "junegunn", RepoName: "fzf"},
+	}
+	c := New(ghClient(t), nil, nil, starFetcher{stars: map[string]int{"junegunn/fzf": 50}}, nil)
+
+	if _, err := c.SyncState(t.Context(), discardLogger(), s, pkgInfos); err != nil {
+		t.Fatal(err)
+	}
+	added, ok := s.Packages["junegunn/fzf"]
+	if !ok {
+		t.Fatal("the new package wasn't added")
+	}
+	if added.Round != 6 {
+		t.Errorf("the new package joined at %d, want 6, the turns of those still waiting", added.Round)
+	}
+	// It takes its place among the packages waiting for this lap's turn, where its
+	// stars decide where it sits, rather than ahead of the whole registry or behind
+	// all of it.
+	got := make([]string, 0, len(s.Packages))
+	for _, candidate := range order(s) {
+		got = append(got, candidate.Name)
+	}
+	want := []string{"junegunn/fzf", "suzuki-shunsuke/ci", "cli/cli"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("order is wrong (-want +got):\n%s", diff)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -61,7 +62,27 @@ func (c *Controller) SyncState(ctx context.Context, logger *slog.Logger, s *stat
 }
 
 // newPackages returns the packages aqua-registry has and the state doesn't.
+//
+// They join with the fewest turns anything in the order has, which is the packages
+// waiting for this lap's turn. Starting from none instead would put them ahead of the
+// whole registry until they caught up -- a turn in every run for as long as that
+// took, which is what counting turns is there to stop -- and starting from the most
+// would cost them a lap for no reason but having arrived late. A package the registry
+// has just gained has nothing generated at all, so it is the last thing to hold back,
+// and it still takes one turn a lap like everything else.
+//
+// The counts in the order are never more than one apart, so this is a choice between
+// this lap and the next. In a registry that is caught up there is no difference at
+// all: a run reaches every package, so every count is the same.
 func newPackages(s *state.State, pkgInfos map[string]*aquaregistry.PackageInfo) map[string]*state.Package {
+	front := math.MaxInt
+	for _, pkg := range s.Packages {
+		front = min(front, pkg.Round)
+	}
+	if front == math.MaxInt {
+		// An empty state, which is what the first run works from.
+		front = 0
+	}
 	added := map[string]*state.Package{}
 	for name, pkgInfo := range pkgInfos {
 		if _, ok := s.Packages[name]; ok {
@@ -70,6 +91,7 @@ func newPackages(s *state.State, pkgInfos map[string]*aquaregistry.PackageInfo) 
 		added[name] = &state.Package{
 			RepoOwner: pkgInfo.RepoOwner,
 			RepoName:  pkgInfo.RepoName,
+			Round:     front,
 		}
 	}
 	return added

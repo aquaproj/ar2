@@ -21,28 +21,40 @@ type Candidate struct {
 
 // order returns the packages to process, most important first.
 //
-// Stars come first because they approximate how many people an entry helps. A
-// package without a GitHub repository goes last: its star count is unknown rather
-// than zero, and sorting it among the zero-star packages would put it ahead of
-// packages that are genuinely more used. Some popular packages are delayed by this,
-// which is accepted.
+// Whoever has had the fewest turns comes first, so that a run picks up where the last
+// one stopped and every package gets one before any package gets another. A run is
+// bounded and the order was otherwise the same every time, which left the packages
+// behind the cut waiting on the ones in front finishing -- and a package that takes a
+// share and gets nowhere never finishes.
+//
+// Within that, stars come first because they approximate how many people an entry
+// helps: a turn is shared out evenly, and who takes it first is not. A package
+// without a GitHub repository goes last: its star count is unknown rather than zero,
+// and sorting it among the zero-star packages would put it ahead of packages that are
+// genuinely more used. Some popular packages are delayed by this, which is accepted.
 func order(s *state.State) []*Candidate {
 	candidates := make([]*Candidate, 0, len(s.Packages))
 	for name, pkg := range s.Packages {
 		candidates = append(candidates, &Candidate{Name: name, Package: pkg})
 	}
-	slices.SortFunc(candidates, func(a, b *Candidate) int {
-		if d := cmp.Compare(rank(a.Package), rank(b.Package)); d != 0 {
-			return d
-		}
-		if d := cmp.Compare(b.Package.Stars, a.Package.Stars); d != 0 {
-			return d
-		}
-		// Ties are broken by name so that a run is reproducible: the same state must
-		// produce the same work in the same order.
-		return cmp.Compare(a.Name, b.Name)
-	})
+	slices.SortFunc(candidates, compare)
 	return candidates
+}
+
+// compare is the order itself: fewest turns first, then the priority within a turn.
+func compare(a, b *Candidate) int {
+	if d := cmp.Compare(a.Package.Round, b.Package.Round); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(rank(a.Package), rank(b.Package)); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(b.Package.Stars, a.Package.Stars); d != 0 {
+		return d
+	}
+	// Ties are broken by name so that a run is reproducible: the same state must
+	// produce the same work in the same order.
+	return cmp.Compare(a.Name, b.Name)
 }
 
 // rank puts packages with a known star count ahead of those without one.
