@@ -27,7 +27,11 @@ func withFallback(overrides, original []*aquaregistry.VersionOverride) []*aquare
 	if len(overrides) == 0 {
 		return overrides
 	}
-	if last := overrides[len(overrides)-1]; last.VersionConstraints == catchAll && emptyOverride(last) {
+	// A list already ending in one needs no other. Reordering gives the catch-all a
+	// lower bound, which is why the end of a converted list usually isn't one; a list
+	// that couldn't be reordered is returned as it stands and still ends in v1's,
+	// carrying everything v1 wrote in it. Appending there wrote that entry twice.
+	if isCatchAll(overrides[len(overrides)-1].VersionConstraints) {
 		return overrides
 	}
 	fallback := &aquaregistry.VersionOverride{VersionConstraints: catchAll}

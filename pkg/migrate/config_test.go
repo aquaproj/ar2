@@ -388,3 +388,35 @@ func TestConfig_fallbackInheritsTheBase(t *testing.T) {
 		t.Errorf("a version that matches nothing resolved to %q, want the base's", got)
 	}
 }
+
+// A list that couldn't be reordered is returned as it stands, ending in v1's
+// catch-all with everything v1 wrote in it. anthropics/claude-code has one:
+// semver("<= 2.1.117") or Version == "v2.1.126" is neither a bound nor a name, so
+// nothing can be derived about where it sits. Appending a fallback there wrote the
+// last entry twice, and the copy matches nothing because the original already
+// matched everything.
+func TestConfig_noDuplicateFallback(t *testing.T) {
+	t.Parallel()
+	noAsset := true
+	cfg, unconverted := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "http",
+		RepoOwner:          "anthropics",
+		RepoName:           "claude-code",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `Version == "v2.1.88"`, NoAsset: &noAsset},
+			{VersionConstraints: `semver("<= 2.1.117") or Version == "v2.1.126"`, Format: "raw"},
+			{VersionConstraints: "true", Type: "github_release", Format: "tar.gz"},
+		},
+	}, nil)
+
+	if len(unconverted) == 0 {
+		t.Fatal("want the compound constraint reported as unconverted")
+	}
+	if got := len(cfg.VersionOverrides); got != 3 {
+		for _, vo := range cfg.VersionOverrides {
+			t.Logf("%s", vo.VersionConstraints)
+		}
+		t.Fatalf("got %d overrides, want the 3 the registry has", got)
+	}
+}
