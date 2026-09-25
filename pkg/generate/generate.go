@@ -105,12 +105,8 @@ func withSpellings(input *Input, base *aquaregistry.PackageInfo) *Input {
 	out := *input
 	scaffold := &genrgst.RawConfig{}
 	if out.Scaffold != nil {
-		scaffold = &genrgst.RawConfig{
-			AllAssetsFilter: out.Scaffold.AllAssetsFilter,
-			VersionFilter:   out.Scaffold.VersionFilter,
-			VersionPrefix:   out.Scaffold.VersionPrefix,
-			Package:         out.Scaffold.Package,
-		}
+		copied := *out.Scaffold
+		scaffold = &copied
 	}
 	scaffold.Replacements = base.Replacements
 	out.Scaffold = scaffold
@@ -144,10 +140,32 @@ func useConfig(logger *slog.Logger, input *Input) (*Input, error) {
 	replaced.Base = pkgInfo
 	replaced.Scaffold = &genrgst.RawConfig{
 		AllAssetsFilter: input.Config.AllAssetsFilter,
-		VersionFilter:   pkgInfo.VersionFilter,
-		VersionPrefix:   pkgInfo.VersionPrefix,
+		// Which asset is the command can change over a package's history, so the
+		// generator is told the whole axis and picks the entry for this version.
+		VersionOverrides: rawAssetFilters(input.Config.AssetFilters),
+		VersionFilter:    pkgInfo.VersionFilter,
+		VersionPrefix:    pkgInfo.VersionPrefix,
 	}
 	return &replaced, nil
+}
+
+// rawAssetFilters hands the definition's version axis to the generator, which reads it
+// the way a registry reads its version_overrides.
+func rawAssetFilters(filters []*g2.AssetFilter) []*genrgst.RawVersionOverride {
+	if len(filters) == 0 {
+		return nil
+	}
+	out := make([]*genrgst.RawVersionOverride, 0, len(filters))
+	for _, f := range filters {
+		if f == nil {
+			continue
+		}
+		out = append(out, &genrgst.RawVersionOverride{
+			VersionConstraint: f.VersionConstraint,
+			AllAssetsFilter:   f.AllAssetsFilter,
+		})
+	}
+	return out
 }
 
 // resolveBase applies the version_overrides of aqua-registry's definition, so that
