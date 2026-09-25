@@ -6,8 +6,10 @@ import (
 	"log/slog"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	"github.com/aquaproj/aqua/v2/pkg/expr"
 	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/expr-lang/expr/vm"
 	gogithub "github.com/google/go-github/v92/github"
 )
 
@@ -64,27 +66,51 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 	return versions, nil
 }
 
-// filterVersions drops the versions aqua-registry's version_filter rejects.
+// filterVersions drops the tags that aren't versions of the package.
+//
+// Two reasons, and the first applies whether or not aqua-registry says anything. A
+// tag that names a place in a release history rather than a point in it -- stable,
+// latest, nightly -- moves as the repository releases, and what this generates is
+// what a tag points at rather than a template resolved later: the asset name, the
+// checksum, the files inside the archive. Generated for a moving tag, all of that
+// stops being true the next time upstream releases, and a lock file resolved from it
+// fails its checksum on every install after that.
+//
+// The second is aqua-registry's own version_filter, which says which of a repository's
+// tags are versions of the package at all.
 func filterVersions(logger *slog.Logger, versions []string, base *aquaregistry.PackageInfo) ([]string, error) {
-	if base == nil || base.VersionFilter == "" {
-		return versions, nil
-	}
-	prog, err := expr.CompileVersionFilter(base.VersionFilter)
-	if err != nil {
-		return nil, fmt.Errorf("compile the version_filter: %w", err)
+	var prog *vm.Program
+	if base != nil && base.VersionFilter != "" {
+		p, err := expr.CompileVersionFilter(base.VersionFilter)
+		if err != nil {
+			return nil, fmt.Errorf("compile the version_filter: %w", err)
+		}
+		prog = p
 	}
 	filtered := make([]string, 0, len(versions))
 	for _, version := range versions {
-		ok, err := expr.EvaluateVersionFilter(logger, prog, version)
-		if err != nil {
-			// A filter that can't be evaluated for one version says nothing about
-			// it, so the version is kept and the generation decides.
-			logger.Debug("failed to evaluate the version_filter", "version", version, "error", err.Error())
+		if genrgst.IsMovingTag(version) {
+			logger.Debug("the tag moves, so it is no version of the package", "version", version)
 			continue
 		}
-		if ok {
-			filtered = append(filtered, version)
+		if prog != nil && !keepVersion(logger, prog, version) {
+			continue
 		}
+		filtered = append(filtered, version)
 	}
 	return filtered, nil
+}
+
+// keepVersion evaluates the version_filter for one version.
+//
+// A filter that can't be evaluated for a version says nothing about it, so the
+// version is kept and the generation decides. Dropping it would leave the registry
+// without that version and nothing to say why.
+func keepVersion(logger *slog.Logger, prog *vm.Program, version string) bool {
+	ok, err := expr.EvaluateVersionFilter(logger, prog, version)
+	if err != nil {
+		logger.Debug("failed to evaluate the version_filter", "version", version, "error", err.Error())
+		return true
+	}
+	return ok
 }
