@@ -48,7 +48,7 @@ func TestSyncState(t *testing.T) {
 		"aquaproj/aqua": {RepoOwner: "aquaproj", RepoName: "aqua"},
 		"gone/gone":     {RepoOwner: "gone", RepoName: "gone"},
 	}
-	c := New(ghClient(t), nil, nil, starFetcher{stars: map[string]int{"aquaproj/aqua": 42}}, nil)
+	c := New(ghClient(t), nil, nil, starFetcher{stars: map[string]int{"aquaproj/aqua": 42}}, nil, nil)
 
 	changed, err := c.SyncState(t.Context(), discardLogger(), s, pkgInfos)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestSyncState_nothingNew(t *testing.T) {
 	s := &state.State{Packages: map[string]*state.Package{
 		"cli/cli": {RepoOwner: "cli", RepoName: "cli", Stars: 100},
 	}}
-	c := New(ghClient(t), nil, nil, starFetcher{}, nil)
+	c := New(ghClient(t), nil, nil, starFetcher{}, nil, nil)
 	changed, err := c.SyncState(t.Context(), discardLogger(), s, map[string]*aquaregistry.PackageInfo{
 		"cli/cli": {RepoOwner: "cli", RepoName: "cli"},
 	})
@@ -119,7 +119,7 @@ func TestSyncState_joinsTheCurrentLap(t *testing.T) {
 		"cli/cli":      {RepoOwner: "cli", RepoName: "cli"},
 		"junegunn/fzf": {RepoOwner: "junegunn", RepoName: "fzf"},
 	}
-	c := New(ghClient(t), nil, nil, starFetcher{stars: map[string]int{"junegunn/fzf": 50}}, nil)
+	c := New(ghClient(t), nil, nil, starFetcher{stars: map[string]int{"junegunn/fzf": 50}}, nil, nil)
 
 	if _, err := c.SyncState(t.Context(), discardLogger(), s, pkgInfos); err != nil {
 		t.Fatal(err)

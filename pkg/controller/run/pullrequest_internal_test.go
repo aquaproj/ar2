@@ -109,7 +109,7 @@ func discardLogger() *slog.Logger {
 func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil)
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
 	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
@@ -126,7 +126,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil)
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
 	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},

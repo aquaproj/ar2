@@ -9,6 +9,8 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/cli/token"
+	indexctrl "github.com/aquaproj/ar2/pkg/controller/index"
+	renamectrl "github.com/aquaproj/ar2/pkg/controller/rename"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/run"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -84,8 +86,14 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, err
 	}
+	// A run that writes nothing doesn't move a package either: the branch would be
+	// carried over while the files that go with it were only printed.
+	var renamer ctrl.Renamer
+	if !args.SkipPR {
+		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch))
+	}
 	return ctrl.New(gh, generate.New(gh.Repositories), reg,
-		github.NewClient(httpClient), v), nil
+		github.NewClient(httpClient), v, renamer), nil
 }
 
 // verifier builds what downloads an asset and decides whether the entry for it can

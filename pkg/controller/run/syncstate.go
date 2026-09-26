@@ -88,6 +88,12 @@ func newPackages(s *state.State, pkgInfos map[string]*aquaregistry.PackageInfo) 
 		if _, ok := s.Packages[name]; ok {
 			continue
 		}
+		if _, ok := s.Renamed[name]; ok {
+			// The registry moved this package off that name. aqua-registry still
+			// lists it until its own updater notices, and adding it back would
+			// generate into the branch the rename left behind.
+			continue
+		}
 		added[name] = &state.Package{
 			RepoOwner: pkgInfo.RepoOwner,
 			RepoName:  pkgInfo.RepoName,

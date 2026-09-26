@@ -128,3 +128,39 @@ func TestSplitBySource(t *testing.T) {
 		t.Errorf("the tag packages are wrong (-want +got):\n%s", diff)
 	}
 }
+
+// One repository can hold several packages, so a rename of it is a rename of each of
+// them, and what follows the repository in a package's name is kept.
+func TestRename(t *testing.T) {
+	t.Parallel()
+	for _, d := range []struct {
+		pkgName string
+		repo    string
+		to      string
+		want    string
+		ok      bool
+	}{
+		{
+			pkgName: "sst/opencode", repo: "sst/opencode", to: "anomalyco/opencode",
+			want: "anomalyco/opencode", ok: true,
+		},
+		{
+			pkgName: "kubernetes/kubernetes/kubectl", repo: "kubernetes/kubernetes", to: "k8s/kubernetes",
+			want: "k8s/kubernetes/kubectl", ok: true,
+		},
+		// A name that doesn't begin with its repository can't be rewritten this way,
+		// and guessing would move the package to a name nobody chose.
+		{pkgName: "something/else", repo: "sst/opencode", to: "anomalyco/opencode"},
+	} {
+		t.Run(d.pkgName, func(t *testing.T) {
+			t.Parallel()
+			got, ok := rename(d.pkgName, d.repo, d.to)
+			if ok != d.ok {
+				t.Fatalf("ok is %v, want %v", ok, d.ok)
+			}
+			if got != d.want {
+				t.Errorf("got %q, want %q", got, d.want)
+			}
+		})
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,59 @@ type State struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	// Packages is keyed by package name.
 	Packages map[string]*Package `json:"packages"`
+	// Renamed maps a name the registry has stopped holding to the one it holds now.
+	//
+	// A repository that is renamed makes the registry's name for the package the wrong
+	// one, and the package is moved: its branch is carried over and the catalogue is
+	// brought to the new name. What is left is aqua-registry, which still lists the old
+	// name until its own updater notices, and a run reading that would add the package
+	// back under the name it was just moved off.
+	//
+	// It is also what stops the same rename being done twice: the sweep asks about the
+	// repository a package records, so once that is the new one GitHub says nothing has
+	// changed.
+	Renamed map[string]string `json:"renamed,omitempty"`
+}
+
+// Rename records that a package is held under another name now, and moves what is known
+// about it.
+//
+// The turn count comes along, so a renamed package neither loses its place in the order
+// nor jumps to the front of it: it is the same package and has had the same turns.
+func (s *State) Rename(from, to string) {
+	pkg, ok := s.Packages[from]
+	if !ok {
+		return
+	}
+	delete(s.Packages, from)
+	if owner, name, ok := splitRepo(to); ok {
+		pkg.RepoOwner, pkg.RepoName = owner, name
+	}
+	s.Packages[to] = pkg
+	if s.Renamed == nil {
+		s.Renamed = map[string]string{}
+	}
+	s.Renamed[from] = to
+	// A name that was renamed to this one now answers to the newest one, so that a
+	// package renamed twice doesn't leave the oldest name pointing at a name the
+	// registry has stopped holding.
+	for old, current := range s.Renamed {
+		if current == from {
+			s.Renamed[old] = to
+		}
+	}
+}
+
+// splitRepo reads the owner and the repository out of a package name.
+//
+// A package name is usually the repository it comes from, and sometimes a command inside
+// one: kubernetes/kubernetes/kubectl is the kubectl of kubernetes/kubernetes.
+func splitRepo(pkgName string) (string, string, bool) {
+	parts := strings.SplitN(pkgName, "/", 3) //nolint:mnd
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // Package is the state of a single package.
