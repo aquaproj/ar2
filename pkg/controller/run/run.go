@@ -39,6 +39,9 @@ type Controller struct {
 	problems []*summary.Problem
 	// renamed is the repositories the sweep found aren't where the registry says.
 	renamed []*summary.Rename
+	// renamer moves a package to the name its repository has now. Nil reports the
+	// rename and leaves it, which is what a run that can't create a branch does.
+	renamer Renamer
 }
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
@@ -76,11 +79,16 @@ type GraphQL interface {
 // 'ar2 index' lists the branches that have a definition and adds what the catalogue
 // is missing. A run that added it as it went would leave an entry behind whenever a
 // pull request didn't merge, describing a package nothing can install.
-func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier) *Controller {
+func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, renamer Renamer) *Controller {
 	return &Controller{
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
-		attester: attest.New(gh.Repositories), summary: summary.New(),
+		renamer: renamer, attester: attest.New(gh.Repositories), summary: summary.New(),
 	}
+}
+
+// Renamer moves a package to the name its repository has now.
+type Renamer interface {
+	Rename(ctx context.Context, logger *slog.Logger, from, to string) error
 }
 
 // Input holds the parameters of a loop run.
@@ -134,7 +142,10 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 	// What each package's newest versions are, for the whole registry, before any of
 	// it is worked on. It says which packages have anything to do at all, which is
 	// most of what a run decides and used to cost a request each.
-	swept := c.sweep(ctx, logger, candidates, input.PkgInfos)
+	swept, renamed := c.sweep(ctx, logger, candidates, input.PkgInfos)
+	// Before anything is generated: a package whose branch has just been carried over
+	// to another name would otherwise be generated under the name nothing holds.
+	moved := c.moveRenamed(ctx, logger, input, renamed)
 	now := time.Now()
 
 	generated, attempted := 0, 0
@@ -146,7 +157,7 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		// whether there was anything to do, and not whether it worked: a package
 		// that fails every time would otherwise take the same share of every run.
 		candidate.Package.Round++
-		todo, versions := c.todo(logger, candidate, inFlight, swept, now)
+		todo, versions := c.todo(logger, candidate, inFlight, moved, swept, now)
 		if todo == workNone {
 			continue
 		}
@@ -176,7 +187,13 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 
 // todo says what this package needs doing, and on which versions. workNone is
 // everything the run passes over without asking anything about it.
-func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight map[string]struct{}, swept map[string][]string, now time.Time) (work, []string) {
+func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, moved map[string]struct{}, swept map[string][]string, now time.Time) (work, []string) {
+	if _, ok := moved[candidate.Name]; ok {
+		// Its branch is under another name now, and so is what the state says about
+		// it. Generating here would generate under a name nothing holds.
+		logger.Debug("the package was moved to another name this run", "package", candidate.Name)
+		return workNone, nil
+	}
 	if _, ok := inFlight[g2.HeadBranchName(candidate.Name)]; ok {
 		// A pull request for this package is still open. Opening a second one would
 		// target the same package branch and conflict on merge, and if the first is
