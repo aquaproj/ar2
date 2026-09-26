@@ -90,7 +90,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	// carried over while the files that go with it were only printed.
 	var renamer ctrl.Renamer
 	if !args.SkipPR {
-		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch))
+		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch, nil))
 	}
 	return ctrl.New(gh, generate.New(gh.Repositories), reg,
 		github.NewClient(httpClient), v, renamer), nil

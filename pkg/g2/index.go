@@ -22,9 +22,6 @@ const IndexFileName = aquag2.IndexFileName
 // them behind.
 const IndexBranch = HeadBranchPrefix + "index"
 
-// branchesPerPage is the page size used to list branches.
-const branchesPerPage = 100
-
 // Index returns the catalogue, or an empty one when the repository has none yet.
 func (c *Client) Index(ctx context.Context, ref string) (*aquag2.Index, error) {
 	body, err := c.File(ctx, ref, IndexFileName)
@@ -60,35 +57,6 @@ func (c *Client) File(ctx context.Context, ref, path string) (string, error) {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 	return body, nil
-}
-
-// PackageBranches returns every package that has a branch.
-//
-// The repository is the record of what it holds. A package whose branch exists but
-// which never reached the catalogue is exactly what a reconciliation is looking for,
-// so the branches are what it counts.
-func (c *Client) PackageBranches(ctx context.Context) ([]string, error) {
-	pkgNames := []string{}
-	opts := &gogithub.BranchListOptions{}
-	opts.PerPage = branchesPerPage
-	for {
-		branches, resp, err := c.gh.Repositories.ListBranches(ctx, c.owner, c.repo, opts)
-		if err != nil {
-			if resp != nil && resp.StatusCode == http.StatusNotFound {
-				return pkgNames, nil
-			}
-			return nil, fmt.Errorf("list branches: %w", err)
-		}
-		for _, branch := range branches {
-			if pkgName, ok := aquag2.PackageName(branch.GetName()); ok {
-				pkgNames = append(pkgNames, pkgName)
-			}
-		}
-		if resp.NextPage == 0 {
-			return pkgNames, nil
-		}
-		opts.Page = resp.NextPage
-	}
 }
 
 // IndexPullRequest returns the open pull request updating the catalogue, or nil.

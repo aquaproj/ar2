@@ -40,20 +40,6 @@ func (c *Controller) read(ctx context.Context) (*target, error) {
 	return &target{pr: pr, index: index, ref: ref}, nil
 }
 
-// add puts the packages the catalogue doesn't have into it, reading a definition for
-// each one that is missing.
-func (c *Controller) add(ctx context.Context, logger *slog.Logger, pkgNames []string) error {
-	t, err := c.read(ctx)
-	if err != nil {
-		return err
-	}
-	added, err := c.entries(ctx, logger, t.index, pkgNames)
-	if err != nil {
-		return err
-	}
-	return c.write(ctx, logger, t, &change{packages: added})
-}
-
 // addOne puts one package into the catalogue from a definition already in hand.
 func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error {
 	t, err := c.read(ctx)
@@ -66,7 +52,7 @@ func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName st
 	}
 	logger.Info("adding a package to the catalogue", "package", pkgName)
 	return c.write(ctx, logger, t, &change{
-		packages: []*aquag2.IndexPackage{aquag2.NewIndexPackage(pkgName, cfg)},
+		added: []*aquag2.IndexPackage{aquag2.NewIndexPackage(pkgName, cfg)},
 	})
 }
 
@@ -77,7 +63,7 @@ func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName st
 // same, and aren't when a file is added to what a run maintains: the packages were all
 // there already and one of the files was never written, which nothing else would notice.
 func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, change *change) error {
-	t.index.Add(change.packages...)
+	t.index.Add(change.packages()...)
 	files, err := c.differing(ctx, t)
 	if err != nil {
 		return err
@@ -92,38 +78,10 @@ func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, 
 	}
 	if t.pr != nil {
 		logger.Info("added to the open pull request",
-			"number", t.pr.GetNumber(), "num_of_packages", len(change.packages))
+			"number", t.pr.GetNumber(), "num_of_packages", len(change.packages()))
 		return nil
 	}
 	return c.openPullRequest(ctx, logger, change)
-}
-
-// entries reads the definition of each package the catalogue is missing.
-//
-// Only the missing ones: the definition is a request per package, and a run that
-// found nothing missing makes none at all.
-func (c *Controller) entries(ctx context.Context, logger *slog.Logger, index *aquag2.Index, pkgNames []string) ([]*aquag2.IndexPackage, error) {
-	have := index.Names()
-	added := make([]*aquag2.IndexPackage, 0, len(pkgNames))
-	for _, pkgName := range pkgNames {
-		if _, ok := have[pkgName]; ok {
-			continue
-		}
-		cfg, err := c.g2.Config(ctx, pkgName)
-		if err != nil {
-			return nil, fmt.Errorf("get the definition of %s: %w", pkgName, err)
-		}
-		if cfg == nil {
-			// The branch exists but nothing has been generated onto it yet. There
-			// is nothing to describe the package with, and the run that writes its
-			// definition will bring it here.
-			logger.Debug("the package has no definition yet", "package", pkgName)
-			continue
-		}
-		logger.Info("adding a package to the catalogue", "package", pkgName)
-		added = append(added, aquag2.NewIndexPackage(pkgName, cfg))
-	}
-	return added, nil
 }
 
 func (c *Controller) commit(ctx context.Context, logger *slog.Logger, ref string, files []*g2.File, change *change) error {
@@ -189,7 +147,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, c
 		return err //nolint:wrapcheck
 	}
 	logger.Info("opened a pull request",
-		"number", pr.GetNumber(), "num_of_packages", len(change.packages))
+		"number", pr.GetNumber(), "num_of_packages", len(change.packages()))
 
 	// The catalogue is a name, a description and a link per package, read out of
 	// definitions that were reviewed when they arrived. There is nothing here for a
@@ -208,50 +166,73 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, c
 
 // change is what one update does to the catalogue.
 //
-// Whether the entries are new or read again is not something the entries themselves say,
-// and it is the whole difference between the two sentences a commit message can be.
+// The two are kept apart because they are different sentences. A package the catalogue
+// didn't have is news; an entry that has to say something else is a correction, and which
+// of the two happened is not something the entries themselves say.
 type change struct {
-	packages []*aquag2.IndexPackage
-	// refreshed says the entries replace ones the catalogue already had, because a
-	// definition on a package branch was edited after the entry was made from it.
-	refreshed bool
+	added   []*aquag2.IndexPackage
+	updated []*aquag2.IndexPackage
 }
 
-func commitMessage(change *change) string {
-	if change.refreshed {
-		if len(change.packages) == 1 {
-			return fmt.Sprintf("fix(%s): update the index entry", change.packages[0].Name)
-		}
-		return fmt.Sprintf("fix: update the index entries of %d packages", len(change.packages))
-	}
-	switch len(change.packages) {
-	case 0:
+// packages is everything the change writes into the catalogue.
+func (ch *change) packages() []*aquag2.IndexPackage {
+	return append(append([]*aquag2.IndexPackage{}, ch.added...), ch.updated...)
+}
+
+// empty says the change writes nothing, which is what a catalogue already in step with
+// the branches comes to.
+func (ch *change) empty() bool {
+	return len(ch.added) == 0 && len(ch.updated) == 0
+}
+
+func commitMessage(ch *change) string {
+	switch {
+	case ch.empty():
 		// The packages were all there and a file of the catalogue wasn't.
 		return "chore: write the catalogue's files as they are rendered now"
-	case 1:
-		return fmt.Sprintf("feat(%s): add the package to the index", change.packages[0].Name)
+	case len(ch.updated) == 0:
+		if len(ch.added) == 1 {
+			return fmt.Sprintf("feat(%s): add the package to the index", ch.added[0].Name)
+		}
+		return fmt.Sprintf("feat: add %d packages to the index", len(ch.added))
+	case len(ch.added) == 0:
+		if len(ch.updated) == 1 {
+			return fmt.Sprintf("fix(%s): update the index entry", ch.updated[0].Name)
+		}
+		return fmt.Sprintf("fix: update the index entries of %d packages", len(ch.updated))
 	default:
-		return fmt.Sprintf("feat: add %d packages to the index", len(change.packages))
+		return fmt.Sprintf("feat: add %d packages to the index and update %d",
+			len(ch.added), len(ch.updated))
 	}
 }
 
-func prBody(change *change) string {
+func prBody(ch *change) string {
 	var body strings.Builder
 	body.WriteString("Generated by ar2.\n\n")
-	if len(change.packages) == 0 {
+	if ch.empty() {
 		body.WriteString("No package was added. A file of the catalogue wasn't what it is " +
 			"rendered as, which is what a file added to what a run maintains looks like " +
 			"until a run reaches it.\n")
 		return body.String()
 	}
-	for _, pkg := range change.packages {
-		body.WriteString("- " + pkg.Name + "\n")
+	if len(ch.added) > 0 {
+		body.WriteString("Added:\n\n")
+		for _, pkg := range ch.added {
+			body.WriteString("- " + pkg.Name + "\n")
+		}
 	}
-	if change.refreshed {
-		body.WriteString("\nThe entries were read out of the definitions on the packages' branches " +
-			"again, because a definition is edited after the entry was made from it. What an entry " +
-			"holds is the definition's description, link, search words and aliases, so this is what " +
-			"the catalogue and the table of other names beside it say about these packages now.\n")
+	if len(ch.updated) > 0 {
+		if len(ch.added) > 0 {
+			body.WriteString("\n")
+		}
+		body.WriteString("Read out of their definitions again:\n\n")
+		for _, pkg := range ch.updated {
+			body.WriteString("- " + pkg.Name + "\n")
+		}
+		body.WriteString("\nTheir definitions say something else now, because one was edited after " +
+			"the entry was made from it. What an entry holds is the definition's description, link, " +
+			"search words and aliases, so this is what the catalogue and the table of other names " +
+			"beside it say about these packages now.\n")
 	}
 	return body.String()
 }

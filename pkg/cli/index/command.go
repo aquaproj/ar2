@@ -36,32 +36,41 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "index [<package name>...]",
-		Short: "Add the packages missing from aqua-registry-g2's index.json",
-		Long: `Add the packages missing from aqua-registry-g2's index.json.
+		Short: "Make aqua-registry-g2's index.json say what the package branches say",
+		Long: `Make aqua-registry-g2's index.json say what the package branches say.
 
-index.json is what 'aqua g' searches: it holds the name, description and link of
-every package the registry has. Everything else about a package lives on its own
-branch, but searching reads all of them at once, so the catalogue is one file on the
-default branch and has to be kept in step with the branches.
+index.json is what 'aqua g' searches: it holds the name, description, link and other
+names of every package the registry has. Everything else about a package lives on its
+own branch, but searching reads all of them at once, so the catalogue is one file on
+the default branch and has to be kept in step with the branches.
 
 'ar2 run' adds a package as it takes it over, so this command is the reconciliation
-rather than the ordinary path. Every package branch is listed and whatever the
-catalogue doesn't have is added, which is what catches a package whose run failed
-after committing its definition or whose pull request was never merged. Nothing else
-would notice. It belongs on a schedule.
+rather than the ordinary path. It belongs on a schedule.
 
 $ ar2 index
 
-Named packages are read out of their definitions again instead, which is how an entry
-follows a definition that was edited after the entry was made from it. Nothing notices
-that by itself: the reconciliation asks what the catalogue is missing, and a package
-whose description or aliases changed isn't missing.
+Two things it catches. A package whose run failed after committing its definition, or
+whose pull request was never merged, is missing from the catalogue. And a package whose
+definition was edited after its entry was made has an entry describing it as it was --
+which asking what the catalogue is missing would never find.
+
+So every definition is read and every entry is compared against what its definition
+makes now. That costs what listing the branches cost: the definitions come back with
+the branches, a hundred branches to a query.
+
+The aliases are most of why the second one matters. They are what a configuration still
+asking for an old name resolves through, and the table beside the catalogue is rendered
+from them in the same commit, so an alias added by hand reaches aqua only once this has
+run.
+
+Named packages are read out of their definitions again and nothing else is looked at,
+which is the same repair aimed at one package.
 
 $ ar2 index astral-sh/uv
 
-The aliases are most of why it matters. They are what a configuration still asking for
-an old name resolves through, and the table beside the catalogue is rendered from them
-in the same commit, so an alias added by hand reaches aqua only once this has run.
+Nothing is removed. An entry with no definition behind it is either a package waiting
+for the pull request that brings its definition, which a run has already added to the
+catalogue, or an orphan -- and that is somebody's decision rather than this command's.
 
 The update goes into one pull request, and a run finding one already open adds to it
 rather than opening another.
@@ -99,9 +108,9 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 
 	// Auto-merge is turned on with the ordinary token: it needs the pull request the
 	// app just opened, not the app.
-	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo),
-		github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))),
-		args.BaseBranch)
+	graphql := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken})))
+	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo), graphql, args.BaseBranch,
+		graphql.Branches(args.G2Owner, args.G2Repo))
 	if len(pkgNames) > 0 {
 		return c.Refresh(ctx, logger.Logger, pkgNames) //nolint:wrapcheck
 	}

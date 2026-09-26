@@ -12,15 +12,15 @@ import (
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/google/go-cmp/cmp"
 	gogithub "github.com/google/go-github/v92/github"
+	"go.yaml.in/yaml/v3"
 )
 
 // fakeRegistry stands in for aqua-registry-g2 and records what was written to it.
 type fakeRegistry struct {
-	index    *aquag2.Index
-	branches []string
-	configs  map[string]*aquag2.Config
-	openPR   *gogithub.PullRequest
-	readRef  string
+	index   *aquag2.Index
+	configs map[string]*aquag2.Config
+	openPR  *gogithub.PullRequest
+	readRef string
 	// files is what the repository holds, by path, so that a run can be told a file
 	// is already what it renders as.
 	files      map[string]string
@@ -40,10 +40,6 @@ func (f *fakeRegistry) Index(_ context.Context, ref string) (*aquag2.Index, erro
 
 func (f *fakeRegistry) File(_ context.Context, _, path string) (string, error) {
 	return f.files[path], nil
-}
-
-func (f *fakeRegistry) PackageBranches(_ context.Context) ([]string, error) {
-	return f.branches, nil
 }
 
 func (f *fakeRegistry) Config(_ context.Context, pkgName string) (*aquag2.Config, error) {
@@ -70,6 +66,37 @@ func (f *fakeRegistry) CreateIndexPullRequest(_ context.Context, _, _, _ string)
 	return &gogithub.PullRequest{Number: new(1), NodeID: new("PR_node")}, nil
 }
 
+// fakeDefinitions is what every package branch holds, as the branch reader returns it.
+type fakeDefinitions struct {
+	files map[string]string
+	read  int
+}
+
+func (f *fakeDefinitions) Files(_ context.Context, _ *slog.Logger, _, _ string) (map[string]string, error) {
+	f.read++
+	return f.files, nil
+}
+
+// definitions renders each package's definition onto its branch, the way the repository
+// holds it.
+func definitions(t *testing.T, configs map[string]*aquag2.Config) *fakeDefinitions {
+	t.Helper()
+	files := make(map[string]string, len(configs))
+	for pkgName, cfg := range configs {
+		if cfg == nil {
+			// A branch with nothing generated onto it yet holds no definition at all,
+			// which the reader leaves out rather than reporting.
+			continue
+		}
+		b, err := yaml.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[aquag2.BranchName(pkgName)] = string(b)
+	}
+	return &fakeDefinitions{files: files}
+}
+
 func config(description string) *aquag2.Config {
 	return &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{Description: description}}
 }
@@ -81,7 +108,7 @@ func logger() *slog.Logger {
 func TestController_AddPackage(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +138,7 @@ func TestController_AddPackage(t *testing.T) {
 func TestController_AddPackage_alreadyThere(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{index: &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}}
-	err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -124,25 +151,86 @@ func TestController_AddPackage_alreadyThere(t *testing.T) {
 	}
 }
 
+// The catalogue is made to say what the branches say: a package it doesn't have is added,
+// and an entry whose definition says something else now is read out of it again.
 func TestController_Sync(t *testing.T) {
 	t.Parallel()
-	reg := &fakeRegistry{
-		branches: []string{"cli/cli", "suzuki-shunsuke/tfcmt"},
-		index:    &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}},
-		configs: map[string]*aquag2.Config{
-			"suzuki-shunsuke/tfcmt": config("Fork of tfnotify"),
-		},
-	}
-	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "what it said when it arrived"},
+	}}
+	reg := &fakeRegistry{index: index, files: rendered(t, index)}
+	defs := definitions(t, map[string]*aquag2.Config{
+		"cli/cli":               config("what the definition says now"),
+		"suzuki-shunsuke/tfcmt": config("Fork of tfnotify"),
+	})
+
+	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
-	// Only what the catalogue is missing: the definition of a package it has isn't
-	// worth a request.
-	if diff := cmp.Diff([]string{"suzuki-shunsuke/tfcmt"}, reg.configRead); diff != "" {
-		t.Errorf("the definitions read are wrong (-want +got):\n%s", diff)
+	if defs.read != 1 {
+		t.Errorf("read the branches %d times, want once", defs.read)
+	}
+	if len(reg.committed) == 0 {
+		t.Fatal("committed nothing")
+	}
+	got, err := aquag2.ReadIndex(strings.NewReader(reg.committed[0].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "what the definition says now"},
+		{Name: "suzuki-shunsuke/tfcmt", Description: "Fork of tfnotify"},
+	}
+	if diff := cmp.Diff(want, got.Packages); diff != "" {
+		t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
 	}
 	if reg.createdPRs != 1 {
 		t.Errorf("opened %d pull requests, want 1", reg.createdPRs)
+	}
+}
+
+// A catalogue already saying what every branch says is committed nothing, which is what
+// the reconciliation comes to on almost every run.
+func TestController_Sync_upToDate(t *testing.T) {
+	t.Parallel()
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "GitHub's official command line tool"},
+	}}
+	reg := &fakeRegistry{index: index, files: rendered(t, index)}
+	defs := definitions(t, map[string]*aquag2.Config{
+		"cli/cli": config("GitHub's official command line tool"),
+	})
+
+	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	if reg.committed != nil {
+		t.Errorf("committed %+v, want nothing", reg.committed)
+	}
+	if reg.createdPRs != 0 {
+		t.Errorf("opened %d pull requests, want none", reg.createdPRs)
+	}
+}
+
+// An entry is not removed because a branch has no definition. It is a package waiting for
+// the pull request that brings one, which a run has already added to the catalogue, and
+// removing it would undo that.
+func TestController_Sync_keepsWhatHasNoDefinition(t *testing.T) {
+	t.Parallel()
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "GitHub's official command line tool"},
+		{Name: "sst/opencode"},
+	}}
+	reg := &fakeRegistry{index: index, files: rendered(t, index)}
+	defs := definitions(t, map[string]*aquag2.Config{
+		"cli/cli": config("GitHub's official command line tool"),
+	})
+
+	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	if reg.committed != nil {
+		t.Errorf("committed %+v, want nothing", reg.committed)
 	}
 }
 
@@ -154,7 +242,7 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 		openPR: &gogithub.PullRequest{Number: new(7)},
 		index:  &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "aquaproj/aqua"}}},
 	}
-	err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -173,12 +261,13 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 	}
 }
 
-// A branch with nothing generated onto it yet has no definition to describe the
-// package with. The run that writes one brings it here.
+// A branch with nothing generated onto it yet has no definition to describe the package
+// with. The run that writes one brings it here.
 func TestController_Sync_noConfigYet(t *testing.T) {
 	t.Parallel()
-	reg := &fakeRegistry{branches: []string{"cli/cli"}, files: rendered(t, &aquag2.Index{})}
-	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
+	reg := &fakeRegistry{files: rendered(t, &aquag2.Index{})}
+	defs := definitions(t, map[string]*aquag2.Config{"cli/cli": nil})
+	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if reg.committed != nil {
@@ -195,12 +284,17 @@ func TestController_Sync_noConfigYet(t *testing.T) {
 // never notice.
 func TestController_Sync_fileMissing(t *testing.T) {
 	t.Parallel()
-	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "GitHub's official command line tool"},
+	}}
 	files := rendered(t, index)
 	delete(files, aquag2.AliasesFileName)
-	reg := &fakeRegistry{index: index, branches: []string{"cli/cli"}, files: files}
+	reg := &fakeRegistry{index: index, files: files}
+	defs := definitions(t, map[string]*aquag2.Config{
+		"cli/cli": config("GitHub's official command line tool"),
+	})
 
-	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
+	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if len(reg.committed) != 1 || reg.committed[0].Path != aquag2.AliasesFileName {
@@ -241,7 +335,7 @@ func TestController_AddPackage_autoMerge(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	merger := &fakeMerger{}
-	if err := New(reg, merger, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	if err := New(reg, merger, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool")); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +350,7 @@ func TestController_AddPackage_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	merger := &fakeMerger{err: errors.New("auto-merge is off for this repository")}
-	if err := New(reg, merger, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	if err := New(reg, merger, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool")); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +363,7 @@ func TestController_AddPackage_autoMergeFails(t *testing.T) {
 func TestController_AddPackage_noAutoMerger(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	if err := New(reg, nil, "main").AddPackage(t.Context(), logger(), "cli/cli",
+	if err := New(reg, nil, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool")); err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +383,7 @@ func TestController_AddPackage_aliases(t *testing.T) {
 	reg := &fakeRegistry{}
 	cfg := config("The AI coding agent built for the terminal")
 	cfg.Aliases = []*aquaregistry.Alias{{Name: "sst/opencode"}}
-	if err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(),
+	if err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(),
 		"anomalyco/opencode", cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +412,7 @@ func TestController_Rename(t *testing.T) {
 	cfg := config("The AI coding agent built for the terminal")
 	cfg.Aliases = []*aquaregistry.Alias{{Name: "sst/opencode"}}
 
-	if err := New(reg, &fakeMerger{}, "main").Rename(t.Context(), logger(),
+	if err := New(reg, &fakeMerger{}, "main", nil).Rename(t.Context(), logger(),
 		"sst/opencode", "anomalyco/opencode", cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +457,7 @@ func TestController_Refresh(t *testing.T) {
 		configs: map[string]*aquag2.Config{"cli/cli": cfg},
 	}
 
-	if err := New(reg, &fakeMerger{}, "main").Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
+	if err := New(reg, &fakeMerger{}, "main", nil).Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(reg.committed) == 0 {
@@ -404,7 +498,7 @@ func TestController_Refresh_unchanged(t *testing.T) {
 		files:   rendered(t, index),
 		configs: map[string]*aquag2.Config{"cli/cli": cfg},
 	}
-	if err := New(reg, &fakeMerger{}, "main").Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
+	if err := New(reg, &fakeMerger{}, "main", nil).Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(reg.committed) != 0 {
@@ -421,7 +515,7 @@ func TestController_Refresh_unchanged(t *testing.T) {
 func TestController_Refresh_noDefinition(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{configs: map[string]*aquag2.Config{}}
-	err := New(reg, &fakeMerger{}, "main").Refresh(t.Context(), logger(), []string{"cli/cli"})
+	err := New(reg, &fakeMerger{}, "main", nil).Refresh(t.Context(), logger(), []string{"cli/cli"})
 	if !errors.Is(err, errNoDefinition) {
 		t.Fatalf("a package without a definition should be refused, got %v", err)
 	}
@@ -432,18 +526,52 @@ func TestController_Refresh_noDefinition(t *testing.T) {
 
 // What the commit says is the difference between an entry that is new and one that was
 // read again, which the entries themselves don't say.
-func TestCommitMessage_refreshed(t *testing.T) {
+func TestCommitMessage(t *testing.T) {
 	t.Parallel()
-	one := &change{packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}, refreshed: true}
-	if got, want := commitMessage(one), "fix(cli/cli): update the index entry"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	cli := &aquag2.IndexPackage{Name: "cli/cli"}
+	opencode := &aquag2.IndexPackage{Name: "sst/opencode"}
+	tests := []struct {
+		name   string
+		change *change
+		want   string
+	}{
+		{
+			name:   "one added",
+			change: &change{added: []*aquag2.IndexPackage{cli}},
+			want:   "feat(cli/cli): add the package to the index",
+		},
+		{
+			name:   "two added",
+			change: &change{added: []*aquag2.IndexPackage{cli, opencode}},
+			want:   "feat: add 2 packages to the index",
+		},
+		{
+			name:   "one updated",
+			change: &change{updated: []*aquag2.IndexPackage{cli}},
+			want:   "fix(cli/cli): update the index entry",
+		},
+		{
+			name:   "two updated",
+			change: &change{updated: []*aquag2.IndexPackage{cli, opencode}},
+			want:   "fix: update the index entries of 2 packages",
+		},
+		{
+			name:   "both",
+			change: &change{added: []*aquag2.IndexPackage{cli}, updated: []*aquag2.IndexPackage{opencode}},
+			want:   "feat: add 1 packages to the index and update 1",
+		},
+		{
+			name:   "neither",
+			change: &change{},
+			want:   "chore: write the catalogue's files as they are rendered now",
+		},
 	}
-	two := &change{packages: []*aquag2.IndexPackage{{Name: "cli/cli"}, {Name: "sst/opencode"}}, refreshed: true}
-	if got, want := commitMessage(two), "fix: update the index entries of 2 packages"; got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-	added := &change{packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}
-	if got, want := commitMessage(added), "feat(cli/cli): add the package to the index"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := commitMessage(tt.change); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
