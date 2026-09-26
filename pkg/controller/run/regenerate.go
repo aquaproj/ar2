@@ -55,7 +55,9 @@ type RegenerateInput struct {
 // this overwrites what the registry already publishes. A flag on 'ar2 run' would put
 // that within reach of whatever runs the loop unattended.
 func (c *Controller) Regenerate(ctx context.Context, logger *slog.Logger, in *RegenerateInput) (int, error) {
-	defer c.reportProblems(logger)
+	// A regeneration takes no turn, so there is no progress to report: what it says is
+	// what it couldn't generate.
+	defer c.report(logger, nil)
 	logger = logger.With("package", in.PkgName)
 
 	if err := c.noPullRequestInFlight(ctx, in.PkgName); err != nil {
