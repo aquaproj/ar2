@@ -51,7 +51,7 @@ func (c *Controller) add(ctx context.Context, logger *slog.Logger, pkgNames []st
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, logger, t, added)
+	return c.write(ctx, logger, t, &change{packages: added})
 }
 
 // addOne puts one package into the catalogue from a definition already in hand.
@@ -65,7 +65,9 @@ func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName st
 		return nil
 	}
 	logger.Info("adding a package to the catalogue", "package", pkgName)
-	return c.write(ctx, logger, t, []*aquag2.IndexPackage{aquag2.NewIndexPackage(pkgName, cfg)})
+	return c.write(ctx, logger, t, &change{
+		packages: []*aquag2.IndexPackage{aquag2.NewIndexPackage(pkgName, cfg)},
+	})
 }
 
 // write commits the catalogue and takes it to a pull request.
@@ -74,8 +76,8 @@ func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName st
 // they are rendered, rather than whichever packages were added. The two are usually the
 // same, and aren't when a file is added to what a run maintains: the packages were all
 // there already and one of the files was never written, which nothing else would notice.
-func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, added []*aquag2.IndexPackage) error {
-	t.index.Add(added...)
+func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, change *change) error {
+	t.index.Add(change.packages...)
 	files, err := c.differing(ctx, t)
 	if err != nil {
 		return err
@@ -85,15 +87,15 @@ func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, 
 		return nil
 	}
 
-	if err := c.commit(ctx, logger, t.ref, files, added); err != nil {
+	if err := c.commit(ctx, logger, t.ref, files, change); err != nil {
 		return err
 	}
 	if t.pr != nil {
 		logger.Info("added to the open pull request",
-			"number", t.pr.GetNumber(), "num_of_packages", len(added))
+			"number", t.pr.GetNumber(), "num_of_packages", len(change.packages))
 		return nil
 	}
-	return c.openPullRequest(ctx, logger, added)
+	return c.openPullRequest(ctx, logger, change)
 }
 
 // entries reads the definition of each package the catalogue is missing.
@@ -124,13 +126,13 @@ func (c *Controller) entries(ctx context.Context, logger *slog.Logger, index *aq
 	return added, nil
 }
 
-func (c *Controller) commit(ctx context.Context, logger *slog.Logger, ref string, files []*g2.File, added []*aquag2.IndexPackage) error {
+func (c *Controller) commit(ctx context.Context, logger *slog.Logger, ref string, files []*g2.File, change *change) error {
 	parent, err := c.g2.BranchSHA(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("get the branch to commit onto: %w", err)
 	}
 	logger.Debug("committing the catalogue", "branch", g2.IndexBranch, "parent", parent)
-	if err := c.g2.Commit(ctx, g2.IndexBranch, parent, commitMessage(added), files); err != nil {
+	if err := c.g2.Commit(ctx, g2.IndexBranch, parent, commitMessage(change), files); err != nil {
 		return fmt.Errorf("commit the catalogue: %w", err)
 	}
 	return nil
@@ -181,13 +183,13 @@ func catalogue(index *aquag2.Index) ([]*g2.File, error) {
 	}, nil
 }
 
-func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, added []*aquag2.IndexPackage) error {
-	pr, err := c.g2.CreateIndexPullRequest(ctx, c.baseBranch, commitMessage(added), prBody(added))
+func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, change *change) error {
+	pr, err := c.g2.CreateIndexPullRequest(ctx, c.baseBranch, commitMessage(change), prBody(change))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
 	logger.Info("opened a pull request",
-		"number", pr.GetNumber(), "num_of_packages", len(added))
+		"number", pr.GetNumber(), "num_of_packages", len(change.packages))
 
 	// The catalogue is a name, a description and a link per package, read out of
 	// definitions that were reviewed when they arrived. There is nothing here for a
@@ -204,29 +206,52 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, a
 	return nil
 }
 
-func commitMessage(added []*aquag2.IndexPackage) string {
-	switch len(added) {
+// change is what one update does to the catalogue.
+//
+// Whether the entries are new or read again is not something the entries themselves say,
+// and it is the whole difference between the two sentences a commit message can be.
+type change struct {
+	packages []*aquag2.IndexPackage
+	// refreshed says the entries replace ones the catalogue already had, because a
+	// definition on a package branch was edited after the entry was made from it.
+	refreshed bool
+}
+
+func commitMessage(change *change) string {
+	if change.refreshed {
+		if len(change.packages) == 1 {
+			return fmt.Sprintf("fix(%s): update the index entry", change.packages[0].Name)
+		}
+		return fmt.Sprintf("fix: update the index entries of %d packages", len(change.packages))
+	}
+	switch len(change.packages) {
 	case 0:
 		// The packages were all there and a file of the catalogue wasn't.
 		return "chore: write the catalogue's files as they are rendered now"
 	case 1:
-		return fmt.Sprintf("feat(%s): add the package to the index", added[0].Name)
+		return fmt.Sprintf("feat(%s): add the package to the index", change.packages[0].Name)
 	default:
-		return fmt.Sprintf("feat: add %d packages to the index", len(added))
+		return fmt.Sprintf("feat: add %d packages to the index", len(change.packages))
 	}
 }
 
-func prBody(added []*aquag2.IndexPackage) string {
+func prBody(change *change) string {
 	var body strings.Builder
 	body.WriteString("Generated by ar2.\n\n")
-	if len(added) == 0 {
+	if len(change.packages) == 0 {
 		body.WriteString("No package was added. A file of the catalogue wasn't what it is " +
 			"rendered as, which is what a file added to what a run maintains looks like " +
 			"until a run reaches it.\n")
 		return body.String()
 	}
-	for _, pkg := range added {
+	for _, pkg := range change.packages {
 		body.WriteString("- " + pkg.Name + "\n")
+	}
+	if change.refreshed {
+		body.WriteString("\nThe entries were read out of the definitions on the packages' branches " +
+			"again, because a definition is edited after the entry was made from it. What an entry " +
+			"holds is the definition's description, link, search words and aliases, so this is what " +
+			"the catalogue and the table of other names beside it say about these packages now.\n")
 	}
 	return body.String()
 }

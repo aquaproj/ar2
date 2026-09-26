@@ -35,7 +35,7 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		GlobalFlags: gFlags,
 	}
 	cmd := &cobra.Command{
-		Use:   "index",
+		Use:   "index [<package name>...]",
 		Short: "Add the packages missing from aqua-registry-g2's index.json",
 		Long: `Add the packages missing from aqua-registry-g2's index.json.
 
@@ -52,13 +52,24 @@ would notice. It belongs on a schedule.
 
 $ ar2 index
 
+Named packages are read out of their definitions again instead, which is how an entry
+follows a definition that was edited after the entry was made from it. Nothing notices
+that by itself: the reconciliation asks what the catalogue is missing, and a package
+whose description or aliases changed isn't missing.
+
+$ ar2 index astral-sh/uv
+
+The aliases are most of why it matters. They are what a configuration still asking for
+an old name resolves through, and the table beside the catalogue is rendered from them
+in the same commit, so an alias added by hand reaches aqua only once this has run.
+
 The update goes into one pull request, and a run finding one already open adds to it
 rather than opening another.
 
 The GitHub access token is read from the GITHUB_TOKEN environment variable.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return action(cmd.Context(), logger, args)
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, pkgNames []string) error {
+			return action(cmd.Context(), logger, args, pkgNames)
 		},
 	}
 	fs := cmd.Flags()
@@ -68,7 +79,7 @@ The GitHub access token is read from the GITHUB_TOKEN environment variable.`,
 	return cmd
 }
 
-func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
+func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames []string) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
@@ -91,5 +102,8 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo),
 		github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))),
 		args.BaseBranch)
+	if len(pkgNames) > 0 {
+		return c.Refresh(ctx, logger.Logger, pkgNames) //nolint:wrapcheck
+	}
 	return c.Sync(ctx, logger.Logger) //nolint:wrapcheck
 }
