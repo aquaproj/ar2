@@ -2,12 +2,11 @@ package run
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"os"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/ar2/pkg/cli/statefile"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	indexctrl "github.com/aquaproj/ar2/pkg/controller/index"
 	renamectrl "github.com/aquaproj/ar2/pkg/controller/rename"
@@ -29,9 +28,9 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 	if args.SkipPR && args.OutputDir == "" {
 		return errOutputDirRequired
 	}
-	s, err := readState(ctx, logger, args)
+	s, err := statefile.Read(ctx, logger, args.Flags(), args.StateFile)
 	if err != nil {
-		return err
+		return err //nolint:wrapcheck // the error already names what it failed to read
 	}
 
 	logger.Info("downloading the aqua-registry definitions", "ref", args.RegistryRef)
@@ -69,8 +68,8 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 	// next run would sweep the registry and find every package looking as though it
 	// had never been looked at.
 	if !args.SkipPR {
-		if err := writeState(ctx, logger, args, s); err != nil {
-			return err
+		if err := statefile.Write(ctx, logger, args.Flags(), args.StateFile, s); err != nil {
+			return err //nolint:wrapcheck // the error already names what it failed to write
 		}
 	}
 	return nil
@@ -126,7 +125,7 @@ func syncState(ctx context.Context, logger *slogutil.Logger, c *ctrl.Controller,
 	if !changed {
 		return nil
 	}
-	return writeState(ctx, logger, args, s)
+	return statefile.Write(ctx, logger, args.Flags(), args.StateFile, s) //nolint:wrapcheck
 }
 
 // registryClient builds the client that reads and writes aqua-registry-g2.
@@ -144,68 +143,4 @@ func registryClient(gh *gogithub.Client, args *Args) (*g2.Client, error) {
 		return nil, err //nolint:wrapcheck // the error already names the token it is for
 	}
 	return g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo), nil
-}
-
-// readState reads the state that orders the work.
-//
-// It comes from the container registry, where 'ar2 init' put it. --state reads a
-// local file instead, which is what makes a run reproducible while working on it.
-func readState(ctx context.Context, logger *slogutil.Logger, args *Args) (*state.State, error) {
-	if args.StateFile != "" {
-		logger.Info("reading the state from a file", "path", args.StateFile)
-		return readStateFile(args.StateFile)
-	}
-	reg, err := args.Flags().Resolve()
-	if err != nil {
-		return nil, fmt.Errorf("resolve the container registry: %w", err)
-	}
-	token := os.Getenv("GITHUB_TOKEN")
-	logger.Info("pulling the state from the container registry",
-		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
-	s, err := state.Fetch(ctx, reg, token)
-	if err == nil {
-		return s, nil
-	}
-	if !errors.Is(err, state.ErrNotFound) {
-		return nil, fmt.Errorf("pull the state: %w", err)
-	}
-	// Nothing has been pushed yet, which is what a repository looks like before
-	// 'ar2 init' has ever run. An empty state is enough: every package aqua-registry
-	// has is new to it, so the sync that follows builds the whole thing.
-	logger.Info("the container registry holds no state; building it from scratch")
-	return state.New(), nil
-}
-
-// writeState stores the state where it was read from.
-func writeState(ctx context.Context, logger *slogutil.Logger, args *Args, s *state.State) error {
-	if args.StateFile != "" {
-		logger.Info("writing the state to a file", "path", args.StateFile)
-		if err := state.Write(args.StateFile, s); err != nil {
-			return fmt.Errorf("write the state: %w", err)
-		}
-		return nil
-	}
-	reg, err := args.Flags().Resolve()
-	if err != nil {
-		return fmt.Errorf("resolve the container registry: %w", err)
-	}
-	logger.Info("pushing the state to the container registry",
-		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
-	if err := state.Store(ctx, reg, os.Getenv("GITHUB_TOKEN"), s); err != nil {
-		return fmt.Errorf("push the state: %w", err)
-	}
-	return nil
-}
-
-func readStateFile(path string) (*state.State, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open the state file: %w", err)
-	}
-	defer f.Close()
-	s, err := state.Read(f)
-	if err != nil {
-		return nil, fmt.Errorf("read the state file: %w", err)
-	}
-	return s, nil
 }
