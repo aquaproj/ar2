@@ -116,22 +116,39 @@ func (c *Controller) entries(ctx context.Context, logger *slog.Logger, index *aq
 }
 
 func (c *Controller) commit(ctx context.Context, logger *slog.Logger, index *aquag2.Index, ref string, added []*aquag2.IndexPackage) error {
-	content, err := index.Marshal()
+	files, err := catalogue(index)
 	if err != nil {
-		return err //nolint:wrapcheck
+		return err
 	}
 	parent, err := c.g2.BranchSHA(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("get the branch to commit onto: %w", err)
 	}
 	logger.Debug("committing the catalogue", "branch", g2.IndexBranch, "parent", parent)
-	if err := c.g2.Commit(ctx, g2.IndexBranch, parent, commitMessage(added), []*g2.File{{
-		Path:    g2.IndexFileName,
-		Content: content,
-	}}); err != nil {
+	if err := c.g2.Commit(ctx, g2.IndexBranch, parent, commitMessage(added), files); err != nil {
 		return fmt.Errorf("commit the catalogue: %w", err)
 	}
 	return nil
+}
+
+// catalogue renders the files the catalogue is made of.
+//
+// The table of other names is written with it rather than beside it. It holds the same
+// aliases the catalogue does, inverted into something a name can be looked up in, so
+// writing them in one commit is what keeps them from describing different registries.
+func catalogue(index *aquag2.Index) ([]*g2.File, error) {
+	indexContent, err := index.Marshal()
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	aliasContent, err := aquag2.NewAliases(index).Marshal()
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	return []*g2.File{
+		{Path: g2.IndexFileName, Content: indexContent},
+		{Path: aquag2.AliasesFileName, Content: aliasContent},
+	}, nil
 }
 
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, added []*aquag2.IndexPackage) error {

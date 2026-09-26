@@ -74,5 +74,53 @@ func entries(index *aquag2.Index) []string {
 		}
 		seen[pkg.Name] = struct{}{}
 	}
+	return append(problems, aliases(index, seen)...)
+}
+
+// aliases reports the aliases that don't name one package.
+//
+// An alias is another name for a package, usually the one its repository had before it
+// was renamed, and it is how someone whose aqua.yaml still says the old name reaches
+// the package at all: what resolves it is a table built from these, and a table needs
+// one answer per name.
+//
+// Which answer is right can't be settled by a rule -- reading the real package first,
+// say -- because a name that is both is a mistake in the registry either way, and a
+// rule would give that mistake a meaning. So it is reported here instead, where the
+// catalogue is written rather than where it is read.
+func aliases(index *aquag2.Index, packages map[string]struct{}) []string {
+	var problems []string
+	// The package each alias names, so that two packages claiming one alias are
+	// reported against the second of them rather than counted twice.
+	claimed := map[string]string{}
+	for _, pkg := range index.Packages {
+		if pkg == nil {
+			continue
+		}
+		for _, alias := range pkg.Aliases {
+			switch {
+			case alias == "":
+				problems = append(problems, pkg.Name+" has an alias with no name")
+			case alias == pkg.Name:
+				problems = append(problems, pkg.Name+" is its own alias")
+			case len(packages) > 0 && isPackage(packages, alias):
+				problems = append(problems,
+					alias+" is an alias of "+pkg.Name+" and a package of its own")
+			default:
+				if first, ok := claimed[alias]; ok {
+					problems = append(problems,
+						alias+" is an alias of both "+first+" and "+pkg.Name)
+					continue
+				}
+				claimed[alias] = pkg.Name
+			}
+		}
+	}
 	return problems
+}
+
+// isPackage reports whether the catalogue lists a package under that name.
+func isPackage(packages map[string]struct{}, name string) bool {
+	_, ok := packages[name]
+	return ok
 }

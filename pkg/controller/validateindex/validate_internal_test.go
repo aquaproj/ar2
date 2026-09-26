@@ -60,6 +60,36 @@ func TestValidate(t *testing.T) { //nolint:funlen
 			content: `{"packages":[]}{"packages":[]}`,
 			wantErr: true,
 		},
+		{
+			// An alias is how someone whose aqua.yaml still says the old name reaches
+			// the package. The table that resolves it needs one answer per name.
+			name:    "an alias",
+			content: `{"packages":[{"name":"anomalyco/opencode","aliases":["sst/opencode"]}]}`,
+		},
+		{
+			name:    "an alias that is a package of its own",
+			content: `{"packages":[{"name":"c/d","aliases":["a/b"]},{"name":"a/b"}]}`,
+			wantErr: true,
+			says:    "a/b is an alias of c/d and a package of its own",
+		},
+		{
+			name:    "an alias claimed twice",
+			content: `{"packages":[{"name":"c/d","aliases":["a/b"]},{"name":"e/f","aliases":["a/b"]}]}`,
+			wantErr: true,
+			says:    "a/b is an alias of both c/d and e/f",
+		},
+		{
+			name:    "a package aliasing itself",
+			content: `{"packages":[{"name":"c/d","aliases":["c/d"]}]}`,
+			wantErr: true,
+			says:    "c/d is its own alias",
+		},
+		{
+			name:    "an alias with no name",
+			content: `{"packages":[{"name":"c/d","aliases":[""]}]}`,
+			wantErr: true,
+			says:    "c/d has an alias with no name",
+		},
 	}
 	for _, d := range data {
 		t.Run(d.name, func(t *testing.T) {
