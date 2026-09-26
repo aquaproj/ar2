@@ -137,12 +137,35 @@ func applyScaffold(cfg *g2.Config, scaffold *genrgst.RawConfig) {
 		return
 	}
 	cfg.AllAssetsFilter = scaffold.AllAssetsFilter
+	cfg.AssetFilters = assetFilters(scaffold.VersionOverrides)
 	if cfg.VersionFilter == "" {
 		cfg.VersionFilter = scaffold.VersionFilter
 	}
 	if cfg.VersionPrefix == "" {
 		cfg.VersionPrefix = scaffold.VersionPrefix
 	}
+}
+
+// assetFilters carries the scaffold's version axis into the definition.
+//
+// Which asset is the command can change over a package's history, and the definition on
+// the branch is what later runs read: the scaffold in aqua-registry is fetched only
+// while the definition is being converted for the first time.
+func assetFilters(overrides []*genrgst.RawVersionOverride) []*g2.AssetFilter {
+	if len(overrides) == 0 {
+		return nil
+	}
+	out := make([]*g2.AssetFilter, 0, len(overrides))
+	for _, vo := range overrides {
+		if vo == nil {
+			continue
+		}
+		out = append(out, &g2.AssetFilter{
+			VersionConstraint: vo.VersionConstraint,
+			AllAssetsFilter:   vo.AllAssetsFilter,
+		})
+	}
+	return out
 }
 
 // allEmpty reports whether every override says nothing beyond which versions it is

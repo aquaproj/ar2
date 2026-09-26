@@ -420,3 +420,45 @@ func TestConfig_noDuplicateFallback(t *testing.T) {
 		t.Fatalf("got %d overrides, want the 3 the registry has", got)
 	}
 }
+
+// A scaffold's version axis has to reach the definition on the package's branch: the
+// scaffold in aqua-registry is fetched only while the definition is being converted for
+// the first time, and every run after that reads the branch.
+func TestConfig_carriesTheAssetFilters(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "openai",
+		RepoName:           "codex",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: "true", Format: "tar.gz"},
+		},
+	}, &genrgst.RawConfig{
+		Package:         "openai/codex",
+		AllAssetsFilter: `Asset matches "^never-"`,
+		VersionOverrides: []*genrgst.RawVersionOverride{
+			{
+				VersionConstraint: `semver("> 0.133.0-alpha.1")`,
+				AllAssetsFilter:   `Asset matches "^codex-package-"`,
+			},
+			{
+				VersionConstraint: "true",
+				AllAssetsFilter:   `Asset matches "^codex-(x86_64|aarch64)-"`,
+			},
+		},
+	})
+
+	if cfg.AllAssetsFilter != `Asset matches "^never-"` {
+		t.Errorf("the top-level filter is %q", cfg.AllAssetsFilter)
+	}
+	if len(cfg.AssetFilters) != 2 {
+		t.Fatalf("got %d asset filters, want the 2 the scaffold has", len(cfg.AssetFilters))
+	}
+	if got := cfg.AssetFilters[0].VersionConstraint; got != `semver("> 0.133.0-alpha.1")` {
+		t.Errorf("the first constraint is %q", got)
+	}
+	if got := cfg.AssetFilters[0].AllAssetsFilter; got != `Asset matches "^codex-package-"` {
+		t.Errorf("the first filter is %q", got)
+	}
+}
