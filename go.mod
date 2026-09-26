@@ -3,7 +3,7 @@ module github.com/aquaproj/ar2
 go 1.27.1
 
 require (
-	github.com/aquaproj/aqua/v2 v2.63.1-0.20260926084137-4992f017d0e5
+	github.com/aquaproj/aqua/v2 v2.63.1-0.20260926150915-2b01e62a8f8f
 	github.com/expr-lang/expr v1.17.8
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v92 v92.0.0
@@ -85,9 +85,9 @@ require (
 	github.com/suzuki-shunsuke/go-github-device-flow v0.0.2 // indirect
 	github.com/suzuki-shunsuke/go-retryablehttp v0.7.8-2 // indirect
 	github.com/suzuki-shunsuke/go-revoke-github-access-token v0.0.2 // indirect
-	github.com/suzuki-shunsuke/urfave-cli-v3-util v0.2.3 // indirect
+	github.com/suzuki-shunsuke/urfave-cli-v3-util v0.2.4 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
-	github.com/urfave/cli/v3 v3.12.0 // indirect
+	github.com/urfave/cli/v3 v3.13.0 // indirect
 	github.com/zalando/go-keyring v0.2.8 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
