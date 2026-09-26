@@ -9,6 +9,7 @@ import (
 	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/aquaproj/ar2/pkg/summary"
@@ -115,13 +116,24 @@ func (c *Controller) moveRenamed(ctx context.Context, logger *slog.Logger, input
 			continue
 		}
 		if err := c.renamer.Rename(ctx, logger, name, newName); err != nil {
-			// The next run sweeps the same repository and finds the same rename, so
-			// this is worth reporting rather than stopping for.
-			slogerr.WithError(logger, err).Warn("failed to move the package to its new name",
+			if !g2.ErrNoBranchToRename(err) {
+				// The next run sweeps the same repository and finds the same rename, so
+				// this is worth reporting rather than stopping for.
+				slogerr.WithError(logger, err).Warn("failed to move the package to its new name",
+					"package", name, "renamed_to", newName)
+				continue
+			}
+			// The registry doesn't hold the package yet, so there is nothing to carry
+			// over: the name moves here and the registry only ever sees the new one.
+			// Recording it is what stops every later run from finding the same rename
+			// and saying the same thing about it.
+			logger.Info("the package isn't in the registry yet, so only its name moves",
 				"package", name, "renamed_to", newName)
-			continue
 		}
 		input.State.Rename(name, newName)
+		// Whether or not anything moved, this run must not generate the package: the
+		// candidate it holds is the old name, and what it would create is a branch
+		// nothing reads.
 		moved[name] = struct{}{}
 	}
 	return moved

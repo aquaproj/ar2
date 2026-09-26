@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // SweepDepth is how many versions of each package a sweep looks at.
@@ -100,7 +101,7 @@ func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read fu
 		batch := repos[start:end]
 		record := func(repo Repo, r *repository) {
 			out.Versions[repo.String()] = read(r)
-			if r.NameWithOwner != "" && r.NameWithOwner != repo.String() {
+			if renamed(repo.String(), r.NameWithOwner) {
 				out.Names[repo.String()] = r.NameWithOwner
 			}
 		}
@@ -126,4 +127,16 @@ func tags(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
 		"repository(owner: $%s, name: $%s) { nameWithOwner refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
 		ownerVar, nameVar, SweepDepth)
+}
+
+// renamed says GitHub answered for a repository under another name.
+//
+// Case doesn't count. GitHub answers a query made in any case and replies with the owner
+// and the repository as they are spelled, so Arriven/db1000n comes back as
+// arriven/db1000n -- the same repository, written the way its owner writes it now.
+// Treating that as a rename would move the package to a name that differs from the old one
+// only in case, and leave the old one behind as an alias of it, which says nothing anybody
+// needs to know.
+func renamed(asked, answered string) bool {
+	return answered != "" && !strings.EqualFold(asked, answered)
 }

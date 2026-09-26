@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -12,6 +14,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/migrate"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
+	"github.com/aquaproj/ar2/pkg/state"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -112,7 +115,41 @@ func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger,
 		logger.Warn("a version_constraint couldn't be turned into a boundary",
 			"package", pkgName, "version_constraint", constraint)
 	}
+	addFormerNames(logger, converted, pkgName, input.State)
 	return &definition{config: converted, unconverted: unconverted}, nil
+}
+
+// addFormerNames makes the definition say which names the package used to answer to.
+//
+// A package whose repository is renamed after the registry holds it keeps the old name as
+// an alias, because the rename carries its branch over and writes the alias as it goes.
+// A package renamed before it was ever generated has no branch to carry, so the rename
+// moved its name and nothing else, and the only record of the old name is the one the
+// state keeps. Without this the package arrives under its new name alone, and a
+// configuration asking for the old one -- which is the name aqua-registry still has --
+// resolves to nothing.
+func addFormerNames(logger *slog.Logger, cfg *aquag2.Config, pkgName string, s *state.State) {
+	if cfg == nil || cfg.PackageInfo == nil || s == nil {
+		return
+	}
+	for _, former := range slices.Sorted(maps.Keys(s.Renamed)) {
+		if s.Renamed[former] != pkgName || hasAlias(cfg, former) {
+			continue
+		}
+		logger.Info("the package answers to a name it had before",
+			"package", pkgName, "former_name", former)
+		cfg.Aliases = append(cfg.Aliases, &aquaregistry.Alias{Name: former})
+	}
+}
+
+// hasAlias says the definition already lists the name.
+func hasAlias(cfg *aquag2.Config, name string) bool {
+	for _, alias := range cfg.Aliases {
+		if alias != nil && alias.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // yamlIndent is how far a registry file indents, which is what aqua-registry uses.

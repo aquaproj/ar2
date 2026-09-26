@@ -105,3 +105,29 @@ func TestClient_Versions_renamed(t *testing.T) {
 		t.Errorf("the renames are wrong (-want +got):\n%s", diff)
 	}
 }
+
+// GitHub answers a query made in any case and replies with the names as they are spelled,
+// so the owner's own capitalisation comes back. That is the same repository, not a rename.
+func TestRenamed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		asked, answered string
+		want            bool
+	}{
+		{asked: "Arriven/db1000n", answered: "arriven/db1000n", want: false},
+		{asked: "CrociDB/bulletty", answered: "crocidb/bulletty", want: false},
+		{asked: "sst/opencode", answered: "anomalyco/opencode", want: true},
+		{asked: "mgechev/revive", answered: "revive-lint/revive", want: true},
+		{asked: "cli/cli", answered: "cli/cli", want: false},
+		// A repository that couldn't be read says nothing about its name.
+		{asked: "cli/cli", answered: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.asked+" -> "+tt.answered, func(t *testing.T) {
+			t.Parallel()
+			if got := renamed(tt.asked, tt.answered); got != tt.want {
+				t.Errorf("renamed(%q, %q) = %v, want %v", tt.asked, tt.answered, got, tt.want)
+			}
+		})
+	}
+}
