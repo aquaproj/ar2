@@ -16,11 +16,14 @@ import (
 
 // fakeRegistry stands in for aqua-registry-g2 and records what was written to it.
 type fakeRegistry struct {
-	index      *aquag2.Index
-	branches   []string
-	configs    map[string]*aquag2.Config
-	openPR     *gogithub.PullRequest
-	readRef    string
+	index    *aquag2.Index
+	branches []string
+	configs  map[string]*aquag2.Config
+	openPR   *gogithub.PullRequest
+	readRef  string
+	// files is what the repository holds, by path, so that a run can be told a file
+	// is already what it renders as.
+	files      map[string]string
 	committed  []*g2.File
 	parent     string
 	createdPRs int
@@ -33,6 +36,10 @@ func (f *fakeRegistry) Index(_ context.Context, ref string) (*aquag2.Index, erro
 		return &aquag2.Index{}, nil
 	}
 	return f.index, nil
+}
+
+func (f *fakeRegistry) File(_ context.Context, _, path string) (string, error) {
+	return f.files[path], nil
 }
 
 func (f *fakeRegistry) PackageBranches(_ context.Context) ([]string, error) {
@@ -170,7 +177,7 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 // package with. The run that writes one brings it here.
 func TestController_Sync_noConfigYet(t *testing.T) {
 	t.Parallel()
-	reg := &fakeRegistry{branches: []string{"cli/cli"}}
+	reg := &fakeRegistry{branches: []string{"cli/cli"}, files: rendered(t, &aquag2.Index{})}
 	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +187,42 @@ func TestController_Sync_noConfigYet(t *testing.T) {
 	if reg.createdPRs != 0 {
 		t.Errorf("opened %d pull requests, want none", reg.createdPRs)
 	}
+}
+
+// A catalogue whose packages are all there, but one of whose files the registry was
+// never written with, is committed anyway. That is what a file added to what a run
+// maintains looks like until a run reaches it, and counting the packages it added would
+// never notice.
+func TestController_Sync_fileMissing(t *testing.T) {
+	t.Parallel()
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}
+	files := rendered(t, index)
+	delete(files, aquag2.AliasesFileName)
+	reg := &fakeRegistry{index: index, branches: []string{"cli/cli"}, files: files}
+
+	if err := New(reg, &fakeMerger{}, "main").Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.committed) != 1 || reg.committed[0].Path != aquag2.AliasesFileName {
+		t.Fatalf("committed %+v, want the file that was missing", reg.committed)
+	}
+	if reg.createdPRs != 1 {
+		t.Errorf("opened %d pull requests, want 1", reg.createdPRs)
+	}
+}
+
+// rendered is what the repository holds when it holds a catalogue as this renders it.
+func rendered(t *testing.T, index *aquag2.Index) map[string]string {
+	t.Helper()
+	files, err := catalogue(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make(map[string]string, len(files))
+	for _, file := range files {
+		out[file.Path] = file.Content
+	}
+	return out
 }
 
 type fakeMerger struct {

@@ -20,6 +20,7 @@ import (
 // Registry is what the catalogue is built from and written to.
 type Registry interface {
 	Index(ctx context.Context, ref string) (*aquag2.Index, error)
+	File(ctx context.Context, ref, path string) (string, error)
 	PackageBranches(ctx context.Context) ([]string, error)
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
