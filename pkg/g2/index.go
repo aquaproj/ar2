@@ -27,23 +27,39 @@ const branchesPerPage = 100
 
 // Index returns the catalogue, or an empty one when the repository has none yet.
 func (c *Client) Index(ctx context.Context, ref string) (*aquag2.Index, error) {
-	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, IndexFileName,
-		&gogithub.RepositoryContentGetOptions{Ref: ref})
+	body, err := c.File(ctx, ref, IndexFileName)
 	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return &aquag2.Index{}, nil
-		}
-		return nil, fmt.Errorf("get the catalogue: %w", err)
+		return nil, err
 	}
-	body, err := content.GetContent()
-	if err != nil {
-		return nil, fmt.Errorf("read the catalogue: %w", err)
+	if body == "" {
+		return &aquag2.Index{}, nil
 	}
 	index, err := aquag2.ReadIndex(strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("read the catalogue: %w", err)
 	}
 	return index, nil
+}
+
+// File returns a file of the repository, or an empty string when there is none.
+//
+// Absent isn't a failure. A file the registry hasn't been written with yet -- one added
+// to what a run maintains after the registry was created -- is missing rather than
+// wrong, and what reads it is deciding whether to write it.
+func (c *Client) File(ctx context.Context, ref, path string) (string, error) {
+	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, path,
+		&gogithub.RepositoryContentGetOptions{Ref: ref})
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return "", nil
+		}
+		return "", fmt.Errorf("get %s: %w", path, err)
+	}
+	body, err := content.GetContent()
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return body, nil
 }
 
 // PackageBranches returns every package that has a branch.
