@@ -248,3 +248,67 @@ func TestPinSigner_noIdentity(t *testing.T) {
 		t.Errorf("a pattern was recorded as a signer: %+v", cfg.Cosign)
 	}
 }
+
+// An environment the version before it covered and this one doesn't is what an asset
+// renamed to a spelling the parser doesn't know looks like: no entry at all, rather than
+// a wrong one.
+func TestLostEnvironments(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		older, newer *aquag2.Registry
+		want         []string
+	}{
+		{
+			name:  "an environment that went",
+			older: registryOf(signed("linux", "amd64"), signed("darwin", "arm64")),
+			newer: registryOf(signed("darwin", "arm64")),
+			want:  []string{"linux/amd64"},
+		},
+		{
+			name:  "every environment still there",
+			older: registryOf(signed("linux", "amd64")),
+			newer: registryOf(signed("linux", "amd64"), signed("darwin", "arm64")),
+			want:  nil,
+		},
+		{
+			name:  "a variant is an environment of its own",
+			older: withVariant(registryOf(signed("linux", "amd64")), "libc", "musl"),
+			newer: registryOf(signed("linux", "amd64")),
+			want:  []string{"linux/amd64/libc=musl"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, lostEnvironments(tt.older, tt.newer)); diff != "" {
+				t.Errorf("what went is wrong (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// withVariant marks every asset of the registry as one build among several.
+func withVariant(reg *aquag2.Registry, key, value string) *aquag2.Registry {
+	for _, a := range reg.Assets {
+		a.Variants = map[string]string{key: value}
+	}
+	return reg
+}
+
+// A version that stopped covering an environment is left for review, so that nobody
+// finds out by installing the package where it says it no longer runs.
+func TestCheckSigning_lostEnvironment(t *testing.T) {
+	t.Parallel()
+	versions := []*version{
+		{Version: "v1.1.0", Registry: registryOf(signed("darwin", "arm64"))},
+	}
+	baseline := registryOf(signed("linux", "amd64"), signed("darwin", "arm64"))
+	checkSigning(discardLogger(), "luau-lang/luau", versions, baseline)
+	if !versions[0].NeedsReview {
+		t.Error("a version that lost an environment should be left for review")
+	}
+	if diff := cmp.Diff([]string{"linux/amd64"}, versions[0].LostEnvironments); diff != "" {
+		t.Errorf("what it lost is wrong (-want +got):\n%s", diff)
+	}
+}
