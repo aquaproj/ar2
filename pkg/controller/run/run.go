@@ -131,7 +131,7 @@ type Input struct {
 // failures.
 func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input) (int, error) {
 	// Whatever the run leaves out is written where the run is read, however it ends.
-	defer c.reportProblems(logger)
+	defer c.report(logger, input.State)
 
 	inFlight, err := c.g2.PackagesInFlight(ctx)
 	if err != nil {
@@ -278,13 +278,19 @@ func ignore(logger *slog.Logger, candidates []*Candidate, ignored map[string]str
 	return out
 }
 
-// reportProblems writes the versions the run didn't publish to the job summary.
+// report writes what the run left out, what it moved, and how far the registry has got.
 //
-// Failing to say so isn't worth failing the run over: the versions are still in the
-// log, and the run generated whatever else it could.
-func (c *Controller) reportProblems(logger *slog.Logger) {
+// Failing to say any of it isn't worth failing the run over: the versions are still in
+// the log, and the run generated whatever else it could.
+func (c *Controller) report(logger *slog.Logger, s *state.State) {
 	if c.summary == nil {
 		return
+	}
+	if s != nil {
+		// After the run rather than before it, so the turns include the ones it took.
+		if err := c.summary.Progress(s.Progress()); err != nil {
+			slogerr.WithError(logger, err).Warn("write the summary of how far the registry has got")
+		}
 	}
 	if err := c.summary.Problems(c.problems); err != nil {
 		slogerr.WithError(logger, err).Warn("write the summary of what wasn't published")
