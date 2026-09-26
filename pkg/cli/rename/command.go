@@ -99,6 +99,8 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, from, to s
 	// No auto-merge: a rename is dispatched by a person, and the catalogue's pull
 	// request is the last place it can be looked at before the old name stops being
 	// listed.
-	index := indexctrl.New(registry, nil, args.BaseBranch)
+	// No reader of the package branches either: a rename brings one package, and
+	// reconciling the whole catalogue isn't what was asked for.
+	index := indexctrl.New(registry, nil, args.BaseBranch, nil)
 	return ctrl.New(registry, index).Rename(ctx, logger.Logger, from, to) //nolint:wrapcheck
 }

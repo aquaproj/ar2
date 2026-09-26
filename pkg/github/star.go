@@ -234,31 +234,39 @@ func errorsByAlias(errs []graphQLError) map[string]string {
 // request sends one GraphQL query asking the same thing about each repository.
 func (c *Client) request(ctx context.Context, repos []Repo, sel selection) (*graphQLResponse, error) {
 	query, vars := buildQuery(repos, sel)
+	result := &graphQLResponse{}
+	if err := c.post(ctx, query, vars, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// post sends one GraphQL query and reads the answer into out.
+func (c *Client) post(ctx context.Context, query string, vars map[string]any, out any) error {
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": vars,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal a GraphQL request: %w", err)
+		return fmt.Errorf("marshal a GraphQL request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create a GraphQL request: %w", err)
+		return fmt.Errorf("create a GraphQL request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send a GraphQL request: %w", err)
+		return fmt.Errorf("send a GraphQL request: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("send a GraphQL request: status code %d", resp.StatusCode)
+		return fmt.Errorf("send a GraphQL request: status code %d", resp.StatusCode)
 	}
-	result := &graphQLResponse{}
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return nil, fmt.Errorf("read a GraphQL response as JSON: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("read a GraphQL response as JSON: %w", err)
 	}
-	return result, nil
+	return nil
 }
 
 // limitedAliases returns the aliases that failed with RESOURCE_LIMITS_EXCEEDED.
