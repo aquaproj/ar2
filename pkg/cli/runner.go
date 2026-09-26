@@ -11,6 +11,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/index"
 	"github.com/aquaproj/ar2/pkg/cli/initcmd"
 	"github.com/aquaproj/ar2/pkg/cli/regenerate"
+	"github.com/aquaproj/ar2/pkg/cli/remove"
 	"github.com/aquaproj/ar2/pkg/cli/rename"
 	"github.com/aquaproj/ar2/pkg/cli/run"
 	"github.com/aquaproj/ar2/pkg/cli/test"
@@ -49,6 +50,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		add.New(logger, gFlags),
 		rename.New(logger, gFlags),
 		regenerate.New(logger, gFlags),
+		remove.New(logger, gFlags),
 		index.New(logger, gFlags),
 		test.New(logger, gFlags),
 		validateindex.New(logger, gFlags),
