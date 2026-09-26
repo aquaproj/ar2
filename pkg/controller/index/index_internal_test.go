@@ -308,7 +308,7 @@ func TestController_Sync_fileMissing(t *testing.T) {
 // rendered is what the repository holds when it holds a catalogue as this renders it.
 func rendered(t *testing.T, index *aquag2.Index) map[string]string {
 	t.Helper()
-	files, err := catalogue(index)
+	files, err := g2.CatalogueFiles(index)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -51,11 +51,20 @@ func (c *Client) PackagesInFlight(ctx context.Context) (map[string]struct{}, err
 // CreatePullRequest opens a pull request from the package's head branch into its
 // package branch.
 func (c *Client) CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error) {
+	return c.CreatePullRequestFrom(ctx, HeadBranchName(pkgName), BranchName(pkgName), title, body)
+}
+
+// CreatePullRequestFrom opens a pull request from head into base.
+//
+// It is the pull request client that opens it rather than the reading one, whatever the
+// branches are: a pull request opened with GITHUB_TOKEN gets its checks in an
+// approval-required state, so nothing would check it until a person pressed a button.
+func (c *Client) CreatePullRequestFrom(ctx context.Context, head, base, title, body string) (*gogithub.PullRequest, error) {
 	pr, _, err := c.prGH.PullRequests.Create(ctx, c.owner, c.repo, gogithub.CreatePullRequest{
 		Title: new(title),
 		Body:  new(body),
-		Head:  HeadBranchName(pkgName),
-		Base:  BranchName(pkgName),
+		Head:  head,
+		Base:  base,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create a pull request: %w", err)

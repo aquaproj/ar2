@@ -13,6 +13,9 @@ type File struct {
 	// versions/v1.2.3/registry-1.json.
 	Path    string
 	Content string
+	// Deleted takes the path out of the tree instead of writing it. The entry is sent
+	// with a null sha, which is how the Git data API says a path is gone.
+	Deleted bool
 }
 
 const (
@@ -43,6 +46,12 @@ func (c *Client) Commit(ctx context.Context, branch, parent, message string, fil
 
 	entries := make([]*gogithub.TreeEntry, 0, len(files))
 	for _, file := range files {
+		if file.Deleted {
+			// Only the path: an entry with no content and no sha is serialized with
+			// "sha": null, which the API reads as taking that path out.
+			entries = append(entries, &gogithub.TreeEntry{Path: new(file.Path)})
+			continue
+		}
 		entries = append(entries, &gogithub.TreeEntry{
 			Path:    new(file.Path),
 			Mode:    new(blobMode),

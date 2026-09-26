@@ -73,3 +73,13 @@ const HeadBranchPrefix = "ar2_"
 func HeadBranchName(pkgName string) string {
 	return HeadBranchPrefix + EncodePackageName(pkgName)
 }
+
+// RemoveBranchName returns the branch the pull request that stops serving the package is
+// opened from.
+//
+// Its own branch rather than the one a version's pull request uses, because it goes the
+// other way: into the default branch, carrying the registry's configuration and the
+// catalogue. A package could have both open at once, and they must not be the same ref.
+func RemoveBranchName(pkgName string) string {
+	return HeadBranchPrefix + "remove_" + EncodePackageName(pkgName)
+}

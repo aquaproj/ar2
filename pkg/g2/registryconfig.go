@@ -84,14 +84,6 @@ func (b *Breadth) GetAttempts() int {
 	return b.Attempts
 }
 
-// IgnoredPackage is a package to leave alone, and why.
-type IgnoredPackage struct {
-	Name string `yaml:"name"`
-	// Reason is for whoever reads the file later, which is usually the person
-	// wondering why a package they expected isn't there.
-	Reason string `yaml:"reason,omitempty"`
-}
-
 // Ignored returns the names to leave alone, as a set.
 func (c *RegistryConfig) Ignored() map[string]struct{} {
 	if c == nil {

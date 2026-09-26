@@ -103,9 +103,9 @@ func (c *Controller) commit(ctx context.Context, logger *slog.Logger, ref string
 // never written with is committed the first time a run reaches it, and one that is
 // already right is not committed again.
 func (c *Controller) differing(ctx context.Context, t *target) ([]*g2.File, error) {
-	files, err := catalogue(t.index)
+	files, err := g2.CatalogueFiles(t.index)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // the error already names what it failed to render
 	}
 	out := make([]*g2.File, 0, len(files))
 	for _, file := range files {
@@ -119,26 +119,6 @@ func (c *Controller) differing(ctx context.Context, t *target) ([]*g2.File, erro
 		out = append(out, file)
 	}
 	return out, nil
-}
-
-// catalogue renders the files the catalogue is made of.
-//
-// The table of other names is written with it rather than beside it. It holds the same
-// aliases the catalogue does, inverted into something a name can be looked up in, so
-// writing them in one commit is what keeps them from describing different registries.
-func catalogue(index *aquag2.Index) ([]*g2.File, error) {
-	indexContent, err := index.Marshal()
-	if err != nil {
-		return nil, err //nolint:wrapcheck
-	}
-	aliasContent, err := aquag2.NewAliases(index).Marshal()
-	if err != nil {
-		return nil, err //nolint:wrapcheck
-	}
-	return []*g2.File{
-		{Path: g2.IndexFileName, Content: indexContent},
-		{Path: aquag2.AliasesFileName, Content: aliasContent},
-	}, nil
 }
 
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, change *change) error {
