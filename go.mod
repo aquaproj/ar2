@@ -10,7 +10,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
-	github.com/suzuki-shunsuke/cobra-util v0.0.4
+	github.com/suzuki-shunsuke/cobra-util v0.0.5
 	github.com/suzuki-shunsuke/go-osenv v0.1.0
 	github.com/suzuki-shunsuke/slog-error v0.2.2
 	github.com/suzuki-shunsuke/slog-util v0.3.2
