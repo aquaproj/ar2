@@ -37,6 +37,8 @@ type Controller struct {
 	// problems are the versions this run didn't publish. A run is read through its
 	// summary, so what it left out belongs there rather than only in the log.
 	problems []*summary.Problem
+	// renamed is the repositories the sweep found aren't where the registry says.
+	renamed []*summary.Rename
 }
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
@@ -62,8 +64,8 @@ type GraphQL interface {
 	FillForbiddenStars(ctx context.Context, stars map[string]int, reasons map[string]string)
 	// Versions and Tags are the sweep: they say what each package's newest
 	// versions are, fifty packages to a request.
-	Versions(ctx context.Context, repos []github.Repo) (map[string][]string, map[string]string, error)
-	Tags(ctx context.Context, repos []github.Repo) (map[string][]string, map[string]string, error)
+	Versions(ctx context.Context, repos []github.Repo) (*github.Sweep, error)
+	Tags(ctx context.Context, repos []github.Repo) (*github.Sweep, error)
 }
 
 // New creates a Controller.
@@ -266,6 +268,9 @@ func (c *Controller) reportProblems(logger *slog.Logger) {
 	}
 	if err := c.summary.Problems(c.problems); err != nil {
 		slogerr.WithError(logger, err).Warn("write the summary of what wasn't published")
+	}
+	if err := c.summary.Renames(c.renamed); err != nil {
+		slogerr.WithError(logger, err).Warn("write the summary of what was renamed")
 	}
 }
 

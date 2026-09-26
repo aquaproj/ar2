@@ -75,12 +75,12 @@ func (failingAutoMerger) FillForbiddenStars(_ context.Context, _ map[string]int,
 
 // These tests reach the work a package needs, not the sweep that decides which
 // packages need any.
-func (failingAutoMerger) Versions(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
-	return nil, nil, nil
+func (failingAutoMerger) Versions(_ context.Context, _ []github.Repo) (*github.Sweep, error) {
+	return &github.Sweep{}, nil
 }
 
-func (failingAutoMerger) Tags(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
-	return nil, nil, nil
+func (failingAutoMerger) Tags(_ context.Context, _ []github.Repo) (*github.Sweep, error) {
+	return &github.Sweep{}, nil
 }
 
 // ghClient is a client that is never called: these tests don't reach anything that
