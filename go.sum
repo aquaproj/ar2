@@ -167,8 +167,6 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/suzuki-shunsuke/cobra-util v0.0.4 h1:wjHCQNDNXvZCfw1V1fY++Q3NubiagbOkS0/azBF//YE=
-github.com/suzuki-shunsuke/cobra-util v0.0.4/go.mod h1:L5YbE333knVy60BdR1MxePKzsglMuiJgR6R0hb3PQ8Y=
 github.com/suzuki-shunsuke/cobra-util v0.0.5 h1:/zJiPce7KnGZkfxFad2lXYS4Z2mQb14Aua8Q6u2eyJo=
 github.com/suzuki-shunsuke/cobra-util v0.0.5/go.mod h1:L5YbE333knVy60BdR1MxePKzsglMuiJgR6R0hb3PQ8Y=
 github.com/suzuki-shunsuke/flute v1.0.1 h1:qzxSX2WQ8ih378zeCrjDMW5mVCsYyEmjicYuCy4aiLk=
