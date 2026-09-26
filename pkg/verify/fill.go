@@ -25,6 +25,16 @@ const ChecksumAlgorithm = "sha256"
 func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, version string, reg *generate.Registry, extract bool) (bool, error) {
 	needsReview := false
 	for _, asset := range reg.Assets {
+		if !fetches(asset) {
+			// The entry builds the package rather than fetching one, so there is no
+			// artifact: nothing to open, nothing to hash, and nothing for a person to
+			// look at. Trying was reported as a failure to check the files, which left
+			// every version of a cargo package waiting for a review that had nothing
+			// to decide.
+			logger.Debug("the entry builds the package rather than fetching it",
+				"os", asset.OS, "arch", asset.Arch, "type", asset.Type)
+			continue
+		}
 		if extract && !Extractable(asset.Format) {
 			// Nothing is wrong with the package; this machine has no tool to open
 			// the format. The checksum below is still recorded, so the entry is
@@ -75,7 +85,7 @@ func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pk
 
 // fillChecksum downloads the asset only when its checksum is still missing.
 func (v *Verifier) fillChecksum(ctx context.Context, logger *slog.Logger, version string, asset *generate.Asset) error {
-	if asset.Checksum != "" || !needsChecksum(asset) {
+	if asset.Checksum != "" || !fetches(asset) {
 		return nil
 	}
 	logger.Debug("the release reports no digest; hashing the asset",
@@ -102,12 +112,12 @@ func setChecksum(asset *generate.Asset, checksum string) error {
 	return nil
 }
 
-// needsChecksum reports whether the package type has bytes to checksum.
+// fetches reports whether the entry installs by downloading an artifact.
 //
 // go_install and cargo build from source through another tool, which does its own
-// verification, so there is no artifact for ar2 to hash. Every other type downloads
-// something, and that something must be checksummed.
-func needsChecksum(asset *generate.Asset) bool {
+// verification, so there is nothing for ar2 to open and nothing to hash. Every other type
+// downloads something, and that something is what is checked.
+func fetches(asset *generate.Asset) bool {
 	switch asset.Type {
 	case aquaregistry.PkgInfoTypeGoInstall, aquaregistry.PkgInfoTypeCargo:
 		return false
