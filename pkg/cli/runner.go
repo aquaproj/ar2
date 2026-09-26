@@ -9,6 +9,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/index"
 	"github.com/aquaproj/ar2/pkg/cli/initcmd"
+	"github.com/aquaproj/ar2/pkg/cli/rename"
 	"github.com/aquaproj/ar2/pkg/cli/run"
 	"github.com/aquaproj/ar2/pkg/cli/test"
 	"github.com/aquaproj/ar2/pkg/cli/validateindex"
@@ -43,6 +44,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 	cmd.AddCommand(
 		initcmd.New(logger, gFlags),
 		run.New(logger, gFlags),
+		rename.New(logger, gFlags),
 		index.New(logger, gFlags),
 		test.New(logger, gFlags),
 		validateindex.New(logger, gFlags),

@@ -57,6 +57,23 @@ func (c *Controller) AddPackage(ctx context.Context, logger *slog.Logger, pkgNam
 	return c.addOne(ctx, logger, pkgName, cfg)
 }
 
+// Rename lists a package under its new name and stops listing it under the old one.
+//
+// Both in one commit. A catalogue holding the old name as a package and the new one as a
+// package whose alias is that name says two things about one name, and nothing can decide
+// which of them answers -- which is a state it is checked for rather than resolved.
+func (c *Controller) Rename(ctx context.Context, logger *slog.Logger, from, to string, cfg *aquag2.Config) error {
+	t, err := c.read(ctx)
+	if err != nil {
+		return err
+	}
+	t.index.Remove(from)
+	t.index.Remove(to)
+	added := []*aquag2.IndexPackage{aquag2.NewIndexPackage(to, cfg)}
+	logger.Info("listing the package under its new name", "package", from, "renamed_to", to)
+	return c.write(ctx, logger, t, added)
+}
+
 // Sync puts every package that has a branch into the catalogue.
 //
 // This is what catches what the other path missed. A package whose run failed after

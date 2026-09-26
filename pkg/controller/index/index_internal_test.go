@@ -304,3 +304,44 @@ func TestController_AddPackage_aliases(t *testing.T) {
 		t.Errorf("the old name resolves to %q", got)
 	}
 }
+
+// A renamed package is listed under its new name and stops being listed under the old
+// one, in one commit. A catalogue holding the old name as a package and the new one as a
+// package whose alias is that name says two things about one name.
+func TestController_Rename(t *testing.T) {
+	t.Parallel()
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli"},
+		{Name: "sst/opencode"},
+	}}
+	reg := &fakeRegistry{index: index, files: rendered(t, index)}
+	cfg := config("The AI coding agent built for the terminal")
+	cfg.Aliases = []*aquaregistry.Alias{{Name: "sst/opencode"}}
+
+	if err := New(reg, &fakeMerger{}, "main").Rename(t.Context(), logger(),
+		"sst/opencode", "anomalyco/opencode", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.committed) == 0 {
+		t.Fatal("committed nothing")
+	}
+	got, err := aquag2.ReadIndex(strings.NewReader(reg.committed[0].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(got.Packages))
+	for _, pkg := range got.Packages {
+		names = append(names, pkg.Name)
+	}
+	if diff := cmp.Diff([]string{"anomalyco/opencode", "cli/cli"}, names); diff != "" {
+		t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
+	}
+	// And the table beside it resolves the old name, which is the point of the alias.
+	aliases, err := aquag2.ReadAliases(strings.NewReader(reg.committed[1].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := aliases.Resolve("sst/opencode"); got != "anomalyco/opencode" {
+		t.Errorf("the old name resolves to %q", got)
+	}
+}
