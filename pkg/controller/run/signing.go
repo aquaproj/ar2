@@ -79,6 +79,36 @@ func lostSigning(older, newer *aquag2.Registry) []string {
 	return lost
 }
 
+// lostEnvironments returns the environments the newer version doesn't cover and the
+// older one did.
+//
+// Which is what an asset the release renamed looks like. The names of the assets are
+// read from the release rather than from a template, so a spelling the parser doesn't
+// know -- luau-lang/luau calling its Linux build luau-ubuntu.zip -- produces no entry
+// for that environment at all rather than a wrong one. Nothing else about the generated
+// file would look wrong: what it says is true, it just stops saying anything about
+// Linux, and whoever installs the package there is told the package doesn't support it.
+//
+// The definition is where the answer goes, as a replacement naming the spelling, and
+// that is a person's job: a spelling nobody has seen before can't be derived from the
+// release that uses it.
+//
+// Gaining an environment is not a loss, and neither is a package that never had one.
+func lostEnvironments(older, newer *aquag2.Registry) []string {
+	now := make(map[string]struct{}, len(newer.Assets))
+	for _, a := range newer.Assets {
+		now[assetKey(a)] = struct{}{}
+	}
+	var lost []string
+	for _, a := range older.Assets {
+		if _, ok := now[assetKey(a)]; !ok {
+			lost = append(lost, assetKey(a))
+		}
+	}
+	sort.Strings(lost)
+	return lost
+}
+
 // checkSigning marks the versions that can be verified with less than the one
 // before them, so that they are left for review instead of merging themselves.
 //
@@ -95,14 +125,18 @@ func checkSigning(logger *slog.Logger, pkgName string, versions []*version, base
 		versions = versions[:len(versions)-1]
 	}
 	for _, v := range versions {
-		lost := lostSigning(baseline, v.Registry)
-		if len(lost) == 0 {
-			continue
+		if lost := lostSigning(baseline, v.Registry); len(lost) > 0 {
+			logger.Warn("this version can be verified with less than the one before it",
+				"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
+			v.NeedsReview = true
+			v.LostSigning = lost
 		}
-		logger.Warn("this version can be verified with less than the one before it",
-			"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
-		v.NeedsReview = true
-		v.LostSigning = lost
+		if lost := lostEnvironments(baseline, v.Registry); len(lost) > 0 {
+			logger.Warn("this version covers fewer environments than the one before it",
+				"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
+			v.NeedsReview = true
+			v.LostEnvironments = lost
+		}
 	}
 }
 

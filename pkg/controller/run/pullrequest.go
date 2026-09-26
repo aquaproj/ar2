@@ -20,6 +20,9 @@ type version struct {
 	// LostSigning names what this version can no longer be verified with that the
 	// version before it could, as "<environment>: <kind>".
 	LostSigning []string
+	// LostEnvironments names the environments the version before it covered and this
+	// one doesn't.
+	LostEnvironments []string
 }
 
 // openPullRequest commits every version generated for a package and opens one pull
@@ -156,6 +159,17 @@ func lostLines(versions []*version) []string {
 	return lines
 }
 
+// lostEnvironmentLines describes which environments each version stopped covering.
+func lostEnvironmentLines(versions []*version) []string {
+	var lines []string
+	for _, v := range versions {
+		for _, lost := range v.LostEnvironments {
+			lines = append(lines, v.Version+" "+lost)
+		}
+	}
+	return lines
+}
+
 func prTitle(pkgName string, versions []*version) string {
 	if len(versions) == 1 {
 		return fmt.Sprintf("feat(%s): add %s", pkgName, versions[0].Version)
@@ -173,33 +187,60 @@ func prBody(versions []*version, unconverted []string, needsReview bool) string 
 		}
 		b.WriteString("\n")
 	}
-	if lost := lostLines(versions); len(lost) > 0 {
-		b.WriteString("\nThese versions can be verified with less than the version before them:\n\n")
-		for _, line := range lost {
-			b.WriteString("- " + line + "\n")
-		}
-		b.WriteString("\nA release that stops carrying its signatures is what an attacker publishing one " +
-			"would look like from here, so this has to be looked at before it merges.\n")
-	}
-	if len(unconverted) > 0 {
-		b.WriteString("\nThese version_constraints of the definition couldn't be turned into boundaries, " +
-			"so the overrides are carried over in the order aqua-registry had them:\n\n")
-		for _, constraint := range unconverted {
-			b.WriteString("- `" + constraint + "`\n")
-		}
-		b.WriteString("\nThe conversion reverses the overrides and gives each one the lower bound of the " +
-			"range it covers, which it can't do for a constraint that names versions rather than a range. " +
-			"Keeping the original order resolves the same way; it is here to be read rather than because " +
-			"anything is wrong.\n")
-	}
-	if needsReview {
-		b.WriteString("\nAuto-merge is off. What it is waiting on is above")
-		if len(unconverted) == 0 {
-			b.WriteString(", or in the run's log: a version may have lost the signing the one before it had, " +
-				"`files[].src` may not have matched the archive and been relocated by name, which is a guess, " +
-				"or the archive may not have been checkable at all")
-		}
-		b.WriteString(".\n")
-	}
+	writeLost(&b, lostLines(versions),
+		"These versions can be verified with less than the version before them:",
+		"A release that stops carrying its signatures is what an attacker publishing one would "+
+			"look like from here, so this has to be looked at before it merges.")
+	writeLost(&b, lostEnvironmentLines(versions),
+		"These versions cover fewer environments than the version before them:",
+		"The asset names are read from the release rather than from a template, so an asset renamed "+
+			"to a spelling the parser doesn't know produces no entry for that environment at all. The "+
+			"definition is where the answer goes, as a replacement naming the spelling. A release that "+
+			"stopped building for the environment is the other reason, and then there is nothing to fix.")
+	writeUnconverted(&b, unconverted)
+	writeWaiting(&b, unconverted, needsReview)
 	return b.String()
+}
+
+// writeLost says which versions lost something, and what losing it means. Nothing is
+// written when nothing was lost.
+func writeLost(b *strings.Builder, lost []string, heading, meaning string) {
+	if len(lost) == 0 {
+		return
+	}
+	b.WriteString("\n" + heading + "\n\n")
+	for _, line := range lost {
+		b.WriteString("- " + line + "\n")
+	}
+	b.WriteString("\n" + meaning + "\n")
+}
+
+// writeUnconverted says which version_constraints were carried over as they were.
+func writeUnconverted(b *strings.Builder, unconverted []string) {
+	if len(unconverted) == 0 {
+		return
+	}
+	b.WriteString("\nThese version_constraints of the definition couldn't be turned into boundaries, " +
+		"so the overrides are carried over in the order aqua-registry had them:\n\n")
+	for _, constraint := range unconverted {
+		b.WriteString("- `" + constraint + "`\n")
+	}
+	b.WriteString("\nThe conversion reverses the overrides and gives each one the lower bound of the " +
+		"range it covers, which it can't do for a constraint that names versions rather than a range. " +
+		"Keeping the original order resolves the same way; it is here to be read rather than because " +
+		"anything is wrong.\n")
+}
+
+// writeWaiting says that auto-merge is off, and where to find out why when the body
+// doesn't already say.
+func writeWaiting(b *strings.Builder, unconverted []string, needsReview bool) {
+	if !needsReview {
+		return
+	}
+	b.WriteString("\nAuto-merge is off. What it is waiting on is above")
+	if len(unconverted) == 0 {
+		b.WriteString(", or in the run's log: `files[].src` may not have matched the archive and been " +
+			"relocated by name, which is a guess, or the archive may not have been checkable at all")
+	}
+	b.WriteString(".\n")
 }
