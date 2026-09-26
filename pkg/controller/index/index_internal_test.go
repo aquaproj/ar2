@@ -82,8 +82,13 @@ func TestController_AddPackage(t *testing.T) {
 	if reg.createdPRs != 1 {
 		t.Errorf("opened %d pull requests, want 1", reg.createdPRs)
 	}
-	if len(reg.committed) != 1 || reg.committed[0].Path != g2.IndexFileName {
-		t.Fatalf("committed %+v, want the catalogue", reg.committed)
+	// The catalogue and the table of other names go in one commit, so that they
+	// can't describe different registries.
+	if len(reg.committed) != 2 {
+		t.Fatalf("committed %d files, want the catalogue and the aliases", len(reg.committed))
+	}
+	if reg.committed[0].Path != g2.IndexFileName || reg.committed[1].Path != aquag2.AliasesFileName {
+		t.Fatalf("committed %s and %s", reg.committed[0].Path, reg.committed[1].Path)
 	}
 	if !strings.Contains(reg.committed[0].Content, "cli/cli") {
 		t.Errorf("the catalogue doesn't hold the package:\n%s", reg.committed[0].Content)
@@ -227,5 +232,32 @@ func TestController_AddPackage_noAutoMerger(t *testing.T) {
 	}
 	if reg.createdPRs != 1 {
 		t.Fatalf("opened %d pull requests, want 1", reg.createdPRs)
+	}
+}
+
+// The table of other names is inverted from the catalogue, so a package that carries an
+// alias produces one a name can be looked up in.
+//
+// It is what resolves the old name for somebody whose aqua.yaml still says it, and this
+// registry addresses a package by name: nothing can be fetched before the name is
+// resolved.
+func TestController_AddPackage_aliases(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	cfg := config("The AI coding agent built for the terminal")
+	cfg.Aliases = []*aquaregistry.Alias{{Name: "sst/opencode"}}
+	if err := New(reg, &fakeMerger{}, "main").AddPackage(t.Context(), logger(),
+		"anomalyco/opencode", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.committed) != 2 {
+		t.Fatalf("committed %d files", len(reg.committed))
+	}
+	aliases, err := aquag2.ReadAliases(strings.NewReader(reg.committed[1].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := aliases.Resolve("sst/opencode"); got != "anomalyco/opencode" {
+		t.Errorf("the old name resolves to %q", got)
 	}
 }
