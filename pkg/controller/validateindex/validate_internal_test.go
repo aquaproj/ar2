@@ -90,6 +90,19 @@ func TestValidate(t *testing.T) { //nolint:funlen
 			wantErr: true,
 			says:    "c/d has an alias with no name",
 		},
+		{
+			// A rename records the name it replaced and keeps the ones that name had
+			// replaced, so every old name points at the current one and the table
+			// needs no chain followed. A rename that recorded only the name before
+			// it would leave one, and it shows up here: the middle name has to be a
+			// package to have claimed the oldest, which is what this reports. There
+			// is no separate check for a chain because there is no chain without it.
+			name: "a chain of aliases",
+			content: `{"packages":[{"name":"b/b","aliases":["a/a"]},
+				{"name":"c/c","aliases":["b/b"]}]}`,
+			wantErr: true,
+			says:    "b/b is an alias of c/c and a package of its own",
+		},
 	}
 	for _, d := range data {
 		t.Run(d.name, func(t *testing.T) {
