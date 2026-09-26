@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,31 @@ func (s *State) Rename(from, to string) {
 			s.Renamed[old] = to
 		}
 	}
+}
+
+// Front is the fewest turns anything in the order has had: the packages waiting for
+// this lap's turn.
+//
+// It is where a package the registry has just gained joins. Starting from none instead
+// would put it ahead of the whole registry until it caught up -- a turn in every run for
+// as long as that took, which is what counting turns is there to stop -- and starting
+// from the most would cost it a lap for no reason but having arrived late. A package
+// nothing has been generated for is the last thing to hold back, and it still takes one
+// turn a lap like everything else.
+//
+// The counts in the order are never more than one apart, so this is a choice between this
+// lap and the next. In a registry that is caught up there is no difference at all: a run
+// reaches every package, so every count is the same.
+func (s *State) Front() int {
+	front := math.MaxInt
+	for _, pkg := range s.Packages {
+		front = min(front, pkg.Round)
+	}
+	if front == math.MaxInt {
+		// An empty state, which is what the first run works from.
+		return 0
+	}
+	return front
 }
 
 // splitRepo reads the owner and the repository out of a package name.

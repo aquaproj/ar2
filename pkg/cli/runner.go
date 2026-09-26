@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 
+	"github.com/aquaproj/ar2/pkg/cli/add"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/index"
 	"github.com/aquaproj/ar2/pkg/cli/initcmd"
@@ -45,6 +46,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 	cmd.AddCommand(
 		initcmd.New(logger, gFlags),
 		run.New(logger, gFlags),
+		add.New(logger, gFlags),
 		rename.New(logger, gFlags),
 		regenerate.New(logger, gFlags),
 		index.New(logger, gFlags),
