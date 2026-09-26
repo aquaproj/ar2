@@ -145,6 +145,16 @@ func hasAlias(cfg *aquag2.Config, name string) bool {
 	return false
 }
 
+// ErrNoBranchToRename says the rename failed because the registry doesn't hold the
+// package.
+//
+// Which is not a failure of the rename so much as a rename with nothing to do: what the
+// caller has to move is the package's place in its own records, and the registry only ever
+// sees the new name.
+func ErrNoBranchToRename(err error) bool {
+	return errors.Is(err, errNoBranchToRename)
+}
+
 var (
 	// errNoBranchToRename is what a rename of a package the registry doesn't hold gets.
 	// There is nothing to carry over, and generating it under the new name is what the

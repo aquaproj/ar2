@@ -7,6 +7,8 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestPackageConfig(t *testing.T) {
@@ -71,5 +73,40 @@ func TestPackageConfig(t *testing.T) {
 				t.Fatalf("the definition doesn't carry the filter:\n%s", got.file.Content)
 			}
 		})
+	}
+}
+
+// A package renamed before it was ever generated has no branch to carry the alias, so the
+// definition it arrives with has to say the old name itself. Otherwise a configuration
+// asking for the name aqua-registry still has resolves to nothing.
+func TestAddFormerNames(t *testing.T) {
+	t.Parallel()
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	s := &state.State{Renamed: map[string]string{
+		"mgechev/revive": "revive-lint/revive",
+		"docker/cagent":  "docker/docker-agent",
+		"block/goose":    "revive-lint/revive",
+	}}
+	addFormerNames(discardLogger(), cfg, "revive-lint/revive", s)
+
+	names := make([]string, 0, len(cfg.Aliases))
+	for _, alias := range cfg.Aliases {
+		names = append(names, alias.Name)
+	}
+	if diff := cmp.Diff([]string{"block/goose", "mgechev/revive"}, names); diff != "" {
+		t.Errorf("the aliases are wrong (-want +got):\n%s", diff)
+	}
+}
+
+// A name the definition already lists is not listed twice.
+func TestAddFormerNames_alreadyThere(t *testing.T) {
+	t.Parallel()
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
+		Aliases: []*aquaregistry.Alias{{Name: "mgechev/revive"}},
+	}}
+	s := &state.State{Renamed: map[string]string{"mgechev/revive": "revive-lint/revive"}}
+	addFormerNames(discardLogger(), cfg, "revive-lint/revive", s)
+	if len(cfg.Aliases) != 1 {
+		t.Errorf("the aliases are %+v, want the one that was there", cfg.Aliases)
 	}
 }
