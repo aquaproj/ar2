@@ -8,7 +8,8 @@ reading it is the normal case, and the trust in it comes from that check rather 
 from anyone's judgement.
 
 So a pull request waiting for a human is a pull request ar2 decided it could not answer
-for. Its body says which case it is. This is what to do about each.
+for -- or one a person asked for, which `ar2 regenerate` opens and never auto-merges. Its
+body says which case it is. This is what to do about each.
 
 ## What not to check
 
@@ -91,6 +92,23 @@ older.
 
 It is unreachable as long as the list ends in a catch-all, which aqua-registry's lists
 do. Step 4 is checking that it does.
+
+## The pull request replaces what the registry already serves
+
+> Generated again by `ar2 regenerate`, from the definition on the package's branch
+
+Not a version being added: a version being replaced. Somebody found a definition wrong
+and fixed it, and these are the files that were generated under the old one.
+
+Auto-merge is never on for these, whatever the files look like, because what CI
+establishes is the same as always — the assets download, the checksums match, the
+archives open, the signatures verify — and none of that says replacing the old file was
+right. Only the versions whose file actually changed are in it.
+
+What to check is the definition rather than the release: read the change that prompted
+it on the package's branch, and confirm the new files are what that change should
+produce. `git diff` between the pull request and the package branch shows what moved in
+each version; the old file stays in the branch's history either way.
 
 ## What CI cannot catch
 

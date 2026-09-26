@@ -50,6 +50,9 @@ type Registry interface {
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
 	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
+	// File is the bytes a ref holds at a path, or "" when it holds nothing there.
+	// A regeneration compares what it would commit against them.
+	File(ctx context.Context, ref, path string) (string, error)
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
