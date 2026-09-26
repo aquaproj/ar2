@@ -110,6 +110,11 @@ it on the package's branch, and confirm the new files are what that change shoul
 produce. `git diff` between the pull request and the package branch shows what moved in
 each version; the old file stays in the branch's history either way.
 
+If that definition change also touched what the catalogue holds -- the description, the
+link, the search words, the aliases -- `ar2 index <package>` brings the entry along.
+Nothing else notices: the reconciliation asks which packages the catalogue is missing,
+and a package whose description changed isn't missing.
+
 ## What CI cannot catch
 
 The asset names are not read from the definition. aqua-registry's `asset` is dropped

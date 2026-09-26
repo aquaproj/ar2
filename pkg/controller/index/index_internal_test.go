@@ -345,3 +345,105 @@ func TestController_Rename(t *testing.T) {
 		t.Errorf("the old name resolves to %q", got)
 	}
 }
+
+// An entry follows the definition it was made from. A definition edited after the
+// package arrived left the catalogue describing the package as it was, and nothing
+// noticed: the reconciliation asks what the catalogue is missing, and this isn't.
+func TestController_Refresh(t *testing.T) {
+	t.Parallel()
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "what it said when it arrived"},
+		{Name: "sst/opencode"},
+	}}
+	cfg := config("what the definition says now")
+	cfg.Aliases = []*aquaregistry.Alias{{Name: "github/hub"}}
+	reg := &fakeRegistry{
+		index:   index,
+		files:   rendered(t, index),
+		configs: map[string]*aquag2.Config{"cli/cli": cfg},
+	}
+
+	if err := New(reg, &fakeMerger{}, "main").Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.committed) == 0 {
+		t.Fatal("committed nothing")
+	}
+	got, err := aquag2.ReadIndex(strings.NewReader(reg.committed[0].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "what the definition says now", Aliases: []string{"github/hub"}},
+		{Name: "sst/opencode"},
+	}
+	if diff := cmp.Diff(want, got.Packages); diff != "" {
+		t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
+	}
+	// The table beside it is rendered from the same entries, which is why an alias
+	// added by hand reaches aqua only once this has run.
+	aliases, err := aquag2.ReadAliases(strings.NewReader(reg.committed[1].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := aliases.Resolve("github/hub"); got != "cli/cli" {
+		t.Errorf("the alias resolves to %q", got)
+	}
+}
+
+// Refreshing a package whose entry is already what its definition says commits
+// nothing. It is what pointing the command at a package to find out comes to.
+func TestController_Refresh_unchanged(t *testing.T) {
+	t.Parallel()
+	cfg := config("the same as ever")
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", Description: "the same as ever"},
+	}}
+	reg := &fakeRegistry{
+		index:   index,
+		files:   rendered(t, index),
+		configs: map[string]*aquag2.Config{"cli/cli": cfg},
+	}
+	if err := New(reg, &fakeMerger{}, "main").Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.committed) != 0 {
+		t.Errorf("committed %d files", len(reg.committed))
+	}
+	if reg.createdPRs != 0 {
+		t.Errorf("opened %d pull requests", reg.createdPRs)
+	}
+}
+
+// A name that has no definition on its branch is said rather than skipped: named
+// explicitly, it is a name that is wrong rather than a package waiting for its first
+// run.
+func TestController_Refresh_noDefinition(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{configs: map[string]*aquag2.Config{}}
+	err := New(reg, &fakeMerger{}, "main").Refresh(t.Context(), logger(), []string{"cli/cli"})
+	if !errors.Is(err, errNoDefinition) {
+		t.Fatalf("a package without a definition should be refused, got %v", err)
+	}
+	if len(reg.committed) != 0 {
+		t.Errorf("committed %d files", len(reg.committed))
+	}
+}
+
+// What the commit says is the difference between an entry that is new and one that was
+// read again, which the entries themselves don't say.
+func TestCommitMessage_refreshed(t *testing.T) {
+	t.Parallel()
+	one := &change{packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}, refreshed: true}
+	if got, want := commitMessage(one), "fix(cli/cli): update the index entry"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	two := &change{packages: []*aquag2.IndexPackage{{Name: "cli/cli"}, {Name: "sst/opencode"}}, refreshed: true}
+	if got, want := commitMessage(two), "fix: update the index entries of 2 packages"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	added := &change{packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}
+	if got, want := commitMessage(added), "feat(cli/cli): add the package to the index"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
