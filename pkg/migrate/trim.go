@@ -51,7 +51,7 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		Checksum:                   signedChecksum(pkgInfo.Checksum),
 
 		Format:       correctedFormat(pkgInfo.Asset, pkgInfo.Format),
-		Replacements: pkgInfo.Replacements,
+		Replacements: unguessableSpellings(pkgInfo.Replacements),
 		AppendExt:    pkgInfo.AppendExt,
 		WindowsExt:   pkgInfo.WindowsExt,
 
@@ -87,7 +87,7 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		Checksum:                   signedChecksum(vo.Checksum),
 
 		Format:       correctedFormat(asset, vo.Format),
-		Replacements: vo.Replacements,
+		Replacements: unguessableSpellings(vo.Replacements),
 		AppendExt:    vo.AppendExt,
 		WindowsExt:   vo.WindowsExt,
 
@@ -182,7 +182,7 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		Checksum:                   signedChecksum(ov.Checksum),
 
 		Format:       correctedFormat(asset, ov.Format),
-		Replacements: ov.Replacements,
+		Replacements: unguessableSpellings(ov.Replacements),
 		WindowsExt:   ov.WindowsExt,
 		AppendExt:    ov.AppendExt,
 		Vars:         ov.Vars,
@@ -206,4 +206,36 @@ func Attestations(a *aquaregistry.GitHubArtifactAttestations) *aquaregistry.GitH
 	out.SignerWorkflow2 = a.SignerWorkflow()
 	out.SignerWorkflow3 = ""
 	return &out
+}
+
+// unguessableSpellings keeps the replacements that say something the release can't be
+// read for, and drops the rest.
+//
+// A replacement says how a release writes a platform: darwin as osx, amd64 as x86_64.
+// aqua-registry's definitions say it because aqua resolves an asset name from a template
+// there, and every spelling the template uses has to be declared. Here nothing is
+// resolved from a template: the asset names are read off the release, and the parser works
+// most of those spellings out for itself. Carrying them over would fill the definition
+// with copies of something that can be looked at -- and with something that can go wrong
+// later, when a spelling the definition insists on stops being the one the release uses.
+//
+// What can't be worked out stays. luau-lang/luau calls its Linux build luau-ubuntu.zip,
+// and the replacement is the only thing that makes that asset Linux at all. A spelling
+// nobody has taught the parser can't be derived from the release that uses it, so that
+// line is a person's and it is kept.
+//
+// Dropping one that mattered would show up as a version covering fewer environments than
+// the one before it, which is left for review rather than merged.
+func unguessableSpellings(replacements aquaregistry.Replacements) aquaregistry.Replacements {
+	out := aquaregistry.Replacements{}
+	for platform, spelling := range replacements {
+		if aquaasset.KnowsSpelling(platform, spelling) {
+			continue
+		}
+		out[platform] = spelling
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

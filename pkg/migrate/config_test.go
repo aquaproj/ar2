@@ -200,7 +200,7 @@ func TestConfig_someOverridesEmpty(t *testing.T) {
 			{VersionConstraints: `semver("< 2.0.0")`, Asset: "gh_{{.Version}}.tar.gz", Format: "tar.gz"},
 			{
 				VersionConstraints: `semver(">= 2.0.0")`, Asset: "gh_{{.Version}}.tar.gz", Format: "tar.gz",
-				Replacements: aquaregistry.Replacements{"darwin": "macOS"},
+				Replacements: aquaregistry.Replacements{"linux": "ubuntu"},
 			},
 		},
 	}, nil)
@@ -257,10 +257,10 @@ func TestConfig_topLevelIsACandidate(t *testing.T) {
 		RepoOwner:          "BurntSushi",
 		RepoName:           "xsv",
 		VersionConstraints: `semver(">= 0.10.3")`,
-		Replacements:       aquaregistry.Replacements{"linux": "unknown-linux-musl"},
+		Replacements:       aquaregistry.Replacements{"linux": "ubuntu-musl"},
 		VersionOverrides: []*aquaregistry.VersionOverride{
-			{VersionConstraints: `semver(">= 0.10.0")`, Replacements: aquaregistry.Replacements{"linux": "unknown-linux-gnu"}},
-			{VersionConstraints: `semver("< 0.10.0")`, Replacements: aquaregistry.Replacements{"linux": "linux"}},
+			{VersionConstraints: `semver(">= 0.10.0")`, Replacements: aquaregistry.Replacements{"linux": "ubuntu-gnu"}},
+			{VersionConstraints: `semver("< 0.10.0")`, Replacements: aquaregistry.Replacements{"linux": "ubuntu-old"}},
 		},
 	}, nil)
 
@@ -273,7 +273,7 @@ func TestConfig_topLevelIsACandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resolved.Replacements["linux"]; got != "unknown-linux-musl" {
+	if got := resolved.Replacements["linux"]; got != "ubuntu-musl" {
 		t.Errorf("0.10.3 resolved to %q, want the top level's", got)
 	}
 }
@@ -351,8 +351,8 @@ func TestConfig_fallbackCarriesTheCatchAll(t *testing.T) {
 		RepoName:           "microsandbox",
 		VersionConstraints: "false",
 		VersionOverrides: []*aquaregistry.VersionOverride{
-			{VersionConstraints: `semver("<= 0.5.10")`, Replacements: aquaregistry.Replacements{"arm64": "aarch64"}},
-			{VersionConstraints: "true", Replacements: aquaregistry.Replacements{"amd64": "x86_64", "arm64": "aarch64"}},
+			{VersionConstraints: `semver("<= 0.5.10")`, Replacements: aquaregistry.Replacements{"arm64": "ubuntu-arm"}},
+			{VersionConstraints: "true", Replacements: aquaregistry.Replacements{"amd64": "ubuntu-x86", "arm64": "ubuntu-arm"}},
 		},
 	}, nil)
 
@@ -360,7 +360,7 @@ func TestConfig_fallbackCarriesTheCatchAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resolved.Replacements["amd64"]; got != "x86_64" {
+	if got := resolved.Replacements["amd64"]; got != "ubuntu-x86" {
 		t.Errorf("a tag that is no version resolved to %q, want what the catch-all said", got)
 	}
 }
@@ -374,9 +374,9 @@ func TestConfig_fallbackInheritsTheBase(t *testing.T) {
 		RepoOwner:          "bazelbuild",
 		RepoName:           "bazel-watcher",
 		VersionConstraints: "false",
-		Replacements:       aquaregistry.Replacements{"darwin": "Darwin"},
+		Replacements:       aquaregistry.Replacements{"darwin": "macbook"},
 		VersionOverrides: []*aquaregistry.VersionOverride{
-			{VersionConstraints: `semver("<= 0.4.0")`, Replacements: aquaregistry.Replacements{"darwin": "old"}},
+			{VersionConstraints: `semver("<= 0.4.0")`, Replacements: aquaregistry.Replacements{"darwin": "oldmac"}},
 		},
 	}, nil)
 
@@ -384,7 +384,7 @@ func TestConfig_fallbackInheritsTheBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resolved.Replacements["darwin"]; got != "Darwin" {
+	if got := resolved.Replacements["darwin"]; got != "macbook" {
 		t.Errorf("a version that matches nothing resolved to %q, want the base's", got)
 	}
 }
