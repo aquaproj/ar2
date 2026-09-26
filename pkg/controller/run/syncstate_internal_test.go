@@ -92,12 +92,12 @@ func TestSyncState_nothingNew(t *testing.T) {
 }
 
 // The star fetcher's tests are about the state, not the sweep.
-func (starFetcher) Versions(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
-	return nil, nil, nil
+func (starFetcher) Versions(_ context.Context, _ []github.Repo) (*github.Sweep, error) {
+	return &github.Sweep{}, nil
 }
 
-func (starFetcher) Tags(_ context.Context, _ []github.Repo) (map[string][]string, map[string]string, error) {
-	return nil, nil, nil
+func (starFetcher) Tags(_ context.Context, _ []github.Repo) (*github.Sweep, error) {
+	return &github.Sweep{}, nil
 }
 
 // TestSyncState_joinsTheCurrentLap checks that a package the registry has just gained

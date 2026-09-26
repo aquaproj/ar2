@@ -18,6 +18,20 @@ import (
 // history to find.
 const SweepDepth = 10
 
+// Sweep is what one look at the registry's repositories found, keyed throughout by the
+// name that was asked for.
+type Sweep struct {
+	// Versions is the newest versions of each repository, newest first.
+	Versions map[string][]string
+	// Names is what each repository is called now. It differs from the key when the
+	// repository has been renamed or transferred since the registry recorded it:
+	// GitHub answers a query made with the old name and says which name it answered
+	// for, so a sweep finds this out without asking anything extra.
+	Names map[string]string
+	// Reasons says why a repository couldn't be read.
+	Reasons map[string]string
+}
+
 // Versions returns the newest versions of each repository, newest first, and why any
 // of them couldn't be read.
 //
@@ -31,7 +45,7 @@ const SweepDepth = 10
 // downloads one, so its ETag changes with it: the packages a sweep most wants to
 // skip are the ones whose ETag never holds. GraphQL doesn't support ETags at all,
 // and doesn't need them, because it returns only the fields that were asked for.
-func (c *Client) Versions(ctx context.Context, repos []Repo) (map[string][]string, map[string]string, error) {
+func (c *Client) Versions(ctx context.Context, repos []Repo) (*Sweep, error) {
 	return c.sweep(ctx, repos, releases, releaseVersions)
 }
 
@@ -58,7 +72,7 @@ func releaseVersions(r *repository) []string {
 // Some packages are versioned by their tags rather than their releases — flutter
 // tags every build and publishes the SDK elsewhere — and aqua-registry says so with
 // version_source.
-func (c *Client) Tags(ctx context.Context, repos []Repo) (map[string][]string, map[string]string, error) {
+func (c *Client) Tags(ctx context.Context, repos []Repo) (*Sweep, error) {
 	return c.sweep(ctx, repos, tags, tagNames)
 }
 
@@ -75,33 +89,41 @@ func tagNames(r *repository) []string {
 }
 
 // sweep asks the same thing about every repository, fifty at a time.
-func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read func(*repository) []string) (map[string][]string, map[string]string, error) {
-	versions := make(map[string][]string, len(repos))
-	reasons := map[string]string{}
+func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read func(*repository) []string) (*Sweep, error) {
+	out := &Sweep{
+		Versions: make(map[string][]string, len(repos)),
+		Names:    map[string]string{},
+		Reasons:  map[string]string{},
+	}
 	for start := 0; start < len(repos); start += BatchSize {
 		end := min(start+BatchSize, len(repos))
 		batch := repos[start:end]
-		record := func(repo Repo, r *repository) { versions[repo.String()] = read(r) }
-		if err := c.fetch(ctx, batch, sel, record, reasons); err != nil {
+		record := func(repo Repo, r *repository) {
+			out.Versions[repo.String()] = read(r)
+			if r.NameWithOwner != "" && r.NameWithOwner != repo.String() {
+				out.Names[repo.String()] = r.NameWithOwner
+			}
+		}
+		if err := c.fetch(ctx, batch, sel, record, out.Reasons); err != nil {
 			// One failing batch must not throw away what the others answered: a
 			// package nothing is known about is looked at rather than skipped, which
 			// is the safe way round.
 			for _, repo := range batch {
-				reasons[repo.String()] = err.Error()
+				out.Reasons[repo.String()] = err.Error()
 			}
 		}
 	}
-	return versions, reasons, nil
+	return out, nil
 }
 
 func releases(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
-		"repository(owner: $%s, name: $%s) { releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
+		"repository(owner: $%s, name: $%s) { nameWithOwner releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
 		ownerVar, nameVar, SweepDepth)
 }
 
 func tags(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
-		"repository(owner: $%s, name: $%s) { refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
+		"repository(owner: $%s, name: $%s) { nameWithOwner refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
 		ownerVar, nameVar, SweepDepth)
 }

@@ -123,7 +123,11 @@ type graphQLResponse struct {
 // fields it selected and leaves the rest empty.
 type repository struct {
 	StargazerCount int `json:"stargazerCount"`
-	Releases       *struct {
+	// NameWithOwner is what the repository is called now. GitHub answers a query made
+	// with an old name, so this differs from what was asked when the repository has
+	// been renamed or transferred since the registry recorded it.
+	NameWithOwner string `json:"nameWithOwner"`
+	Releases      *struct {
 		Nodes []struct {
 			TagName      string `json:"tagName"`
 			IsDraft      bool   `json:"isDraft"`

@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"slices"
 	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/summary"
 )
 
 // deepCheckAge is how long a package's history stands before it is walked again.
@@ -28,12 +30,13 @@ const deepCheckAge = 7 * 24 * time.Hour
 // whatever fraction of it a run's rate limit allowed.
 func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates []*Candidate, pkgInfos map[string]*aquaregistry.PackageInfo) map[string][]string {
 	byRepo := make(map[string][]string, len(candidates))
+	renamed := map[string]string{}
 	releases, tags := splitBySource(candidates, pkgInfos)
 
 	for _, q := range []struct {
 		name  string
 		repos []github.Repo
-		fn    func(context.Context, []github.Repo) (map[string][]string, map[string]string, error)
+		fn    func(context.Context, []github.Repo) (*github.Sweep, error)
 	}{
 		{"releases", releases, c.graphql.Versions},
 		{"tags", tags, c.graphql.Tags},
@@ -41,18 +44,40 @@ func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates 
 		if len(q.repos) == 0 {
 			continue
 		}
-		found, reasons, err := q.fn(ctx, q.repos)
+		found, err := q.fn(ctx, q.repos)
 		if err != nil {
 			logger.Warn("failed to sweep the registry", "source", q.name, "error", err.Error())
 			continue
 		}
-		maps.Copy(byRepo, found)
-		for repo, reason := range reasons {
+		maps.Copy(byRepo, found.Versions)
+		maps.Copy(renamed, found.Names)
+		for repo, reason := range found.Reasons {
 			logger.Debug("couldn't read a package's versions", "repository", repo, "reason", reason)
 		}
 	}
 	logger.Info("swept the registry", "num_of_packages", len(byRepo))
+	c.reportRenamed(logger, renamed)
 	return byRepo
+}
+
+// reportRenamed says which repositories aren't where the registry says they are.
+//
+// The sweep asks every repository what it is called and GitHub answers a query made
+// with an old name, so this is found without asking anything extra. Nothing is done
+// about it yet: the branch holding the package's generated versions is named after the
+// old name, and moving it is a run of its own.
+//
+// Said here rather than left in the log because it is the registry being out of date
+// about what a package is, which is the kind of thing that stays that way until
+// somebody reads it.
+func (c *Controller) reportRenamed(logger *slog.Logger, renamed map[string]string) {
+	if len(renamed) == 0 {
+		return
+	}
+	for _, from := range slices.Sorted(maps.Keys(renamed)) {
+		logger.Warn("the repository has been renamed", "repository", from, "renamed_to", renamed[from])
+		c.renamed = append(c.renamed, &summary.Rename{From: from, To: renamed[from]})
+	}
 }
 
 // splitBySource divides the candidates by where their versions are published.
