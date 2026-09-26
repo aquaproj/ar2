@@ -48,6 +48,11 @@ func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, erro
 	return nil, nil //nolint:nilnil
 }
 
+// File is never asked for: nothing here regenerates a version the branch holds.
+func (f *fakeRegistry) File(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
+
 func (f *fakeRegistry) Commit(_ context.Context, _, _, _ string, files []*g2.File) error {
 	f.committed = files
 	return nil
