@@ -224,6 +224,9 @@ func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
 
 // byName is where in the archive a file of that name is, with or without the Windows
 // extension.
+//
+// On Windows the extension is looked for first. git-bug's archive holds git-bug.exe
+// beside a completion script called git-bug, and the name alone finds the script.
 func (r *resolver) byName(name string) (string, bool) {
 	if r.index == nil {
 		index, err := indexByName(r.dir)
@@ -232,11 +235,20 @@ func (r *resolver) byName(name string) (string, bool) {
 		}
 		r.index = index
 	}
-	if found, ok := r.index[name]; ok {
-		return found, true
+	for _, candidate := range r.candidates(name) {
+		if found, ok := r.index[candidate]; ok {
+			return found, true
+		}
 	}
-	found, ok := r.index[name+windowsExt]
-	return found, ok
+	return "", false
+}
+
+// candidates is the names to look for, in the order the environment makes likely.
+func (r *resolver) candidates(name string) []string {
+	if r.goos == "windows" {
+		return []string{name + windowsExt, name}
+	}
+	return []string{name, name + windowsExt}
 }
 
 // resolveFiles checks each files[].src against the extracted archive and relocates

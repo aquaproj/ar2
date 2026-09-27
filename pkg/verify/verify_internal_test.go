@@ -100,6 +100,17 @@ func resolveCases() []resolveCase {
 			want:    []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
 		},
 		{
+			// A release can ship a file of the command's name that isn't the command:
+			// git-bug's archive holds git-bug.exe beside a completion script called
+			// git-bug. On Windows the executable is the one with the extension.
+			name:        "a windows archive holds the name and the executable",
+			goos:        "windows",
+			archive:     []string{"git-bug_0.11.0_windows_amd64/git-bug.exe", "git-bug_0.11.0_windows_amd64/completion/bash/git-bug"},
+			files:       []*generate.File{{Name: "git-bug", Src: "git-bug.exe"}},
+			want:        []*generate.File{{Name: "git-bug", Src: "git-bug_0.11.0_windows_amd64/git-bug.exe"}},
+			needsReview: true,
+		},
+		{
 			// A raw asset has no src; the name alone locates it.
 			name:    "no src",
 			archive: []string{"gh"},
