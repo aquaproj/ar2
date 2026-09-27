@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
@@ -80,3 +81,39 @@ func (c *Client) Versions(ctx context.Context, logger *slog.Logger, pkgName stri
 	}
 	return out, nil
 }
+
+// VersionsOnRef returns the versions a ref holds a registry.json for.
+//
+// Which for a package branch is what the registry holds, and for the head branch of a pull
+// request is what that pull request would add. The second is what a regeneration of something
+// not yet merged works from: the versions are on the branch and nowhere else.
+func (c *Client) VersionsOnRef(ctx context.Context, logger *slog.Logger, ref string) (map[string]struct{}, error) {
+	// The Git Data API rather than the Contents API, which stops at 1,000 entries in a
+	// directory and says so only by returning fewer.
+	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, ref+":"+aquag2.VersionDir, false)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			// The branch holds no versions directory, which is a branch carrying nothing
+			// but a definition.
+			return map[string]struct{}{}, nil
+		}
+		return nil, fmt.Errorf("get the versions directory of %s: %w", ref, err)
+	}
+	if tree.GetTruncated() {
+		// The limit is 100,000 entries, so reaching it means something other than a
+		// package's version history. A partial list would quietly leave versions out.
+		return nil, fmt.Errorf("%w: %s", errTreeTruncated, ref)
+	}
+	logger.Debug("listed the versions of a ref", "ref", ref, "num_of_entries", len(tree.Entries))
+	out := make(map[string]struct{}, len(tree.Entries))
+	for _, entry := range tree.Entries {
+		if entry.GetType() != "tree" {
+			continue
+		}
+		out[entry.GetPath()] = struct{}{}
+	}
+	return out, nil
+}
+
+// errTreeTruncated is what a listing GitHub wouldn't give whole gets.
+var errTreeTruncated = errors.New("the versions directory has more entries than GitHub returns")

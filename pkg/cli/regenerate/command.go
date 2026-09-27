@@ -33,6 +33,7 @@ type Args struct {
 	RegistryRef string
 	Verify      bool
 	DryRun      bool
+	Pending     bool
 	G2Owner     string
 	G2Repo      string
 }
@@ -73,6 +74,17 @@ A package with an open pull request is refused. The commit is written against th
 package branch and the head branch is pointed at it, so an open pull request's
 commits would be discarded.
 
+--pending is the other way round, and is for the pull request a run opens when a version
+names a file its archive doesn't hold. What is regenerated is what that pull request holds,
+from the definition it carries, and the result is committed onto it: a version and the
+definition that makes it true merge together or not at all. Put the definition on the branch
+first -- a version_overrides entry with its own files -- and then:
+
+$ ar2 regenerate ogham/exa --pending
+
+Nothing else about it changes. Only the versions whose file actually changes are committed, so
+a definition that didn't help comes to nothing and says so.
+
 Three tokens are read from the environment. GITHUB_TOKEN reads the repositories,
 AR2_BRANCH_TOKEN is unused here beyond being accepted, and AR2_PR_TOKEN commits and
 opens the pull request.`,
@@ -81,13 +93,19 @@ opens the pull request.`,
 			return action(cmd.Context(), logger, args, as[0], as[1:])
 		},
 	}
+	setFlags(cmd, args)
+	return cmd
+}
+
+// setFlags registers what the command takes beyond the package and its versions.
+func setFlags(cmd *cobra.Command, args *Args) {
 	fs := cmd.Flags()
 	fs.StringVar(&args.RegistryRef, "registry-ref", "main", "the aqua-registry ref the package definition is read from")
 	fs.BoolVar(&args.Verify, "verify", true, "download and extract every asset to check that files[].src matches the archive and to read which libc its executables need")
 	fs.BoolVar(&args.DryRun, "dry-run", false, "say which versions would change without committing anything")
+	fs.BoolVar(&args.Pending, "pending", false, "generate again what the package's open pull request of versions waiting for a definition holds, from the definition it carries")
 	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
 	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
-	return cmd
 }
 
 func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName string, versions []string) error {
@@ -120,6 +138,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 		Base:        base,
 		RegistryRef: args.RegistryRef,
 		DryRun:      args.DryRun,
+		Pending:     args.Pending,
 	})
 	if err != nil {
 		return fmt.Errorf("generate registry.json again: %w", err)
