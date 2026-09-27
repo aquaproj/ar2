@@ -176,13 +176,67 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 	}
 
 	result := &Result{Checksum: checksum}
-	result.Files, result.NeedsReview, result.Unresolved, result.Holds = resolveFiles(logger, dest, asset.Files)
+	result.Files, result.NeedsReview, result.Unresolved, result.Holds = resolveFiles(logger, dest, asset.OS, asset.Files)
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.
 	if asset.OS == "linux" {
 		result.LinkedLibc = linkedLibc(logger, dest, result.Files)
 	}
 	return result, nil
+}
+
+// resolver answers where one files[] entry is in an extracted archive. The index of
+// the archive's contents is built the first time something has to be looked up in it,
+// since an archive whose entries are all where the definition says need never be
+// walked.
+type resolver struct {
+	logger *slog.Logger
+	dir    string
+	goos   string
+	index  map[string]string
+}
+
+// resolve returns the entry to record, and whether finding it took a guess. It
+// returns nil when the archive holds nothing of the name.
+func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
+	src := file.Src
+	if src == "" {
+		src = file.Name
+	}
+	if exists(r.dir, src) {
+		return file, false
+	}
+	// aqua completes the Windows extension when it resolves files[].src, and at
+	// install time renames the extracted file to match. The archive holds the name
+	// without it, and that is what the entry has to say: nothing has renamed anything
+	// by the time the next reader looks for it.
+	if bare, ok := withoutWindowsExt(r.goos, src); ok && exists(r.dir, bare) {
+		return &generate.File{Name: file.Name, Src: bare}, false
+	}
+	found, ok := r.byName(file.Name)
+	if !ok {
+		return nil, false
+	}
+	r.logger.Warn("files[].src doesn't match the archive; relocating it",
+		"name", file.Name, "old_src", src, "new_src", found)
+	return &generate.File{Name: file.Name, Src: found}, true
+}
+
+// byName is where in the archive a file of that name is, with or without the Windows
+// extension.
+func (r *resolver) byName(name string) (string, bool) {
+	if r.index == nil {
+		index, err := indexByName(r.dir)
+		if err != nil {
+			r.logger.Warn("failed to index the extracted archive", "error", err.Error())
+		}
+		r.index = index
+	}
+	if found, ok := r.index[name]; ok {
+		return found, true
+	}
+	found, ok := r.index[name+windowsExt]
+	return found, ok
 }
 
 // resolveFiles checks each files[].src against the extracted archive and relocates
@@ -192,42 +246,23 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 // extracted files is a command. The name comes from registry.yaml and doesn't change
 // when an upstream reorganizes its archive, so looking for it is a far narrower
 // guess than picking a binary out of the tree.
-func resolveFiles(logger *slog.Logger, dir string, files []*generate.File) ([]*generate.File, bool, []string, []string) {
+func resolveFiles(logger *slog.Logger, dir, goos string, files []*generate.File) ([]*generate.File, bool, []string, []string) {
 	var (
 		needsReview bool
 		unresolved  []string
 	)
+	r := &resolver{logger: logger, dir: dir, goos: goos}
 	out := make([]*generate.File, 0, len(files))
-	var index map[string]string
 	for _, file := range files {
-		src := file.Src
-		if src == "" {
-			src = file.Name
-		}
-		if exists(dir, src) {
-			out = append(out, file)
-			continue
-		}
-		if index == nil {
-			var err error
-			if index, err = indexByName(dir); err != nil {
-				logger.Warn("failed to index the extracted archive", "error", err.Error())
-			}
-		}
-		found, ok := index[file.Name]
-		if !ok {
-			found, ok = index[file.Name+".exe"]
-		}
-		if !ok {
+		resolved, relocated := r.resolve(file)
+		if resolved == nil {
 			unresolved = append(unresolved, file.Name)
 			needsReview = true
 			out = append(out, file)
 			continue
 		}
-		logger.Warn("files[].src doesn't match the archive; relocating it",
-			"name", file.Name, "old_src", src, "new_src", found)
-		needsReview = true
-		out = append(out, &generate.File{Name: file.Name, Src: found})
+		needsReview = needsReview || relocated
+		out = append(out, resolved)
 	}
 	if len(unresolved) == 0 {
 		return out, needsReview, nil, nil
@@ -235,7 +270,7 @@ func resolveFiles(logger *slog.Logger, dir string, files []*generate.File) ([]*g
 	// What the archive does hold, because that is what whoever writes the definition
 	// needs and there is no other way to see it: the asset is downloaded by a run and
 	// gone by the time anybody reads about it.
-	return out, needsReview, unresolved, holds(index)
+	return out, needsReview, unresolved, holds(r.index)
 }
 
 // holdsLimit is how many of an archive's files are worth saying. A release that packs a
@@ -253,6 +288,20 @@ func holds(index map[string]string) []string {
 		return append(paths[:holdsLimit:holdsLimit], fmt.Sprintf("and %d more", len(paths)-holdsLimit))
 	}
 	return paths
+}
+
+// windowsExt is the extension aqua gives an executable on Windows.
+const windowsExt = ".exe"
+
+// withoutWindowsExt returns src with the Windows executable extension removed, and
+// whether it had one. Only .exe is considered: a definition can name another
+// extension with windows_ext, but the entry generated here carries no trace of it.
+func withoutWindowsExt(goos, src string) (string, bool) {
+	if goos != "windows" {
+		return src, false
+	}
+	bare := strings.TrimSuffix(src, windowsExt)
+	return bare, bare != src
 }
 
 // exists reports whether src is present under dir.
