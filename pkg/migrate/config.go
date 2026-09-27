@@ -117,7 +117,8 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 		// One bare constraint is the same file with one case in it.
 		overrides = nil
 	}
-	pkgInfo.VersionOverrides = withFallback(topLevelFirst(base.VersionConstraints, overrides), pkgInfo.VersionOverrides)
+	pkgInfo.VersionOverrides = collapseTrailingEmpty(
+		withFallback(topLevelFirst(base.VersionConstraints, overrides), pkgInfo.VersionOverrides))
 
 	cfg := &g2.Config{PackageInfo: pkgInfo}
 	applyScaffold(cfg, scaffold)
@@ -179,6 +180,35 @@ func allEmpty(overrides []*aquaregistry.VersionOverride) bool {
 		}
 	}
 	return true
+}
+
+// collapseTrailingEmpty drops the empty overrides at the end of the list, keeping the
+// last of them.
+//
+// An empty override says a version inherits the base. A version that matched one of these
+// matches the one kept instead, which is also empty, so it inherits the base either way.
+// qdrant/qdrant had three in a row -- Version == "v1.3.0", semver("< 1.8.0") and the
+// catch-all -- which is two constraints a reader has to work out the consequences of
+// before finding that there are none.
+//
+// The last of them stays, and it is not optional. A version matching none of the overrides
+// takes the first, and the first can be an entry saying no_asset: qdrant's is. Dropping
+// the entry that catches everything would resolve every recent version to no asset at all.
+func collapseTrailingEmpty(overrides []*aquaregistry.VersionOverride) []*aquaregistry.VersionOverride {
+	last := len(overrides) - 1
+	if last < 1 || !emptyOverride(overrides[last]) {
+		return overrides
+	}
+	first := last
+	for first > 0 && emptyOverride(overrides[first-1]) {
+		first--
+	}
+	if first == last {
+		return overrides
+	}
+	// The capacity is capped so that appending writes a new array rather than over the
+	// entry that follows.
+	return append(overrides[:first:first], overrides[last])
 }
 
 // emptyOverride reports whether an override carries anything but its constraint.
