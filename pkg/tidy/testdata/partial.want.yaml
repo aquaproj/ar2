@@ -1,0 +1,5 @@
+type: github_release
+repo_owner: luau-lang
+repo_name: luau
+replacements:
+  linux: ubuntu

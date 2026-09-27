@@ -1,0 +1,8 @@
+type: github_release
+repo_owner: astral-sh
+repo_name: uv
+replacements:
+  amd64: x86_64
+  darwin: apple-darwin
+files:
+  - name: uv

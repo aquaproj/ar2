@@ -1,75 +1,40 @@
 package tidy_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/tidy"
 	"github.com/google/go-cmp/cmp"
 )
 
-// definitionCase is one definition, and what tidying it should make of it.
+// definitionCase is one definition on disk, and what tidying it should make of it.
+//
+// The fixtures are files rather than strings in the table, so that what a definition looks
+// like is what the test reads: a definition is a file on a package branch, and a fixture
+// shortened to fit in a function stops being one.
 type definitionCase struct {
 	name    string
-	in      string
-	want    string
+	fixture string
 	removed []string
 }
 
 func definitionCases() []definitionCase {
 	return []definitionCase{
 		{
-			name: "a block of nothing but known spellings goes altogether",
-			in: `type: github_release
-repo_owner: astral-sh
-replacements:
-  amd64: x86_64
-  darwin: apple-darwin
-files:
-  - name: uv
-`,
-			want: `type: github_release
-repo_owner: astral-sh
-files:
-  - name: uv
-`,
+			name:    "a block of nothing but known spellings goes altogether",
+			fixture: "known",
 			removed: []string{"amd64: x86_64", "darwin: apple-darwin"},
 		},
 		{
-			name: "what the parser can't guess stays, and the rest goes",
-			in: `type: github_release
-repo_owner: luau-lang
-replacements:
-  amd64: x86_64
-  linux: ubuntu
-`,
-			want: `type: github_release
-repo_owner: luau-lang
-replacements:
-  linux: ubuntu
-`,
+			name:    "what the parser can't guess stays, and the rest goes",
+			fixture: "partial",
 			removed: []string{"amd64: x86_64"},
 		},
 		{
-			name: "every block is reached, wherever the definition puts one",
-			in: `type: github_release
-version_overrides:
-  - version_constraint: "true"
-    replacements:
-      arm64: aarch64
-      linux: ubuntu
-    overrides:
-      - goos: windows
-        replacements:
-          windows: pc-windows-msvc
-`,
-			want: `type: github_release
-version_overrides:
-  - version_constraint: "true"
-    replacements:
-      linux: ubuntu
-    overrides:
-      - goos: windows
-`,
+			name:    "every block is reached, wherever the definition puts one",
+			fixture: "nested",
 			removed: []string{"arm64: aarch64", "windows: pc-windows-msvc"},
 		},
 	}
@@ -80,11 +45,13 @@ func TestReplacements(t *testing.T) {
 	for _, tt := range definitionCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, removed, err := tidy.Replacements(tt.in)
+			in := fixture(t, tt.fixture+".in.yaml")
+			want := fixture(t, tt.fixture+".want.yaml")
+			got, removed, err := tidy.Replacements(in)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if diff := cmp.Diff(tt.want, got); diff != "" {
+			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("the definition is wrong (-want +got):\n%s", diff)
 			}
 			if diff := cmp.Diff(tt.removed, removed); diff != "" {
@@ -92,6 +59,16 @@ func TestReplacements(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fixture reads one of the definitions beside the test.
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 // A spelling the parser can't read is the only thing that makes such an asset belong to a
