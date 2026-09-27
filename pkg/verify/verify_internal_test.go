@@ -36,6 +36,7 @@ func discardLogger() *slog.Logger {
 // should make of them.
 type resolveCase struct {
 	name        string
+	goos        string
 	archive     []string
 	files       []*generate.File
 	want        []*generate.File
@@ -65,6 +66,7 @@ func resolveCases() []resolveCase {
 		{
 			// Windows executables carry an extension the registry's name doesn't.
 			name:        "src moved to a windows executable",
+			goos:        "windows",
 			archive:     []string{"bin/gh.exe"},
 			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
 			want:        []*generate.File{{Name: "gh", Src: "bin/gh.exe"}},
@@ -78,6 +80,24 @@ func resolveCases() []resolveCase {
 			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
 			needsReview: true,
 			unresolved:  []string{"gh"},
+		},
+		{
+			// aqua resolves files[].src with the Windows extension added, and renames
+			// the extracted file to match when it installs it. The entry has to name
+			// the file the archive holds, since nothing has been renamed yet.
+			name:    "the archive holds the name without the windows extension",
+			goos:    "windows",
+			archive: []string{"tree-sitter-windows-x64"},
+			files:   []*generate.File{{Name: "tree-sitter", Src: "tree-sitter-windows-x64.exe"}},
+			want:    []*generate.File{{Name: "tree-sitter", Src: "tree-sitter-windows-x64"}},
+		},
+		{
+			// The archive does carry the extension, so the resolved src is what it says.
+			name:    "the archive holds the windows executable",
+			goos:    "windows",
+			archive: []string{"gh_2.1.0_windows_amd64/bin/gh.exe"},
+			files:   []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
+			want:    []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
 		},
 		{
 			// A raw asset has no src; the name alone locates it.
@@ -95,7 +115,7 @@ func TestResolveFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			dir := newArchive(t, tt.archive...)
-			files, needsReview, unresolved, holds := resolveFiles(discardLogger(), dir, tt.files)
+			files, needsReview, unresolved, holds := resolveFiles(discardLogger(), dir, tt.goos, tt.files)
 			if diff := cmp.Diff(tt.want, files); diff != "" {
 				t.Errorf("files are wrong (-want +got):\n%s", diff)
 			}
