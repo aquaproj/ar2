@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -22,8 +23,11 @@ const ChecksumAlgorithm = "sha256"
 // Extracting is optional because it costs a download per asset even when the release
 // reports digests, which is what makes a backfill bandwidth-bound. Hashing is not
 // optional: a registry.json without a checksum would defeat the lock file.
-func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, version string, reg *generate.Registry, extract bool) (bool, error) {
+func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, version string, reg *generate.Registry, extract bool) (bool, []string, error) {
 	needsReview := false
+	// unresolved names the environments whose entry points at a file the archive doesn't
+	// hold, as "<os>/<arch>: <file>, <file>".
+	var unresolved []string
 	for _, asset := range reg.Assets {
 		if !fetches(asset) {
 			// The entry builds the package rather than fetching one, so there is no
@@ -42,7 +46,14 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 			logger.Warn("can't open this format here, so its files go unchecked",
 				"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
 		} else if extract {
-			review, err := v.fillByExtracting(ctx, logger, pkgName, version, asset)
+			review, missing, err := v.fillByExtracting(ctx, logger, pkgName, version, asset)
+			if len(missing) > 0 {
+				// The entry names a file the archive doesn't hold anywhere, so what it
+				// says about this environment can't be true. The caller decides what
+				// becomes of such a version; what this reports is which files those are.
+				unresolved = append(unresolved, asset.OS+"/"+asset.Arch+": "+strings.Join(missing, ", "))
+				continue
+			}
 			if err == nil {
 				needsReview = needsReview || review
 				continue
@@ -59,28 +70,35 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 		// A checksum is not optional the way extracting is: an entry without one
 		// would be installed unverified, which is what the lock file exists to stop.
 		if err := v.fillChecksum(ctx, logger, version, asset); err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
-	return needsReview, nil
+	return needsReview, unresolved, nil
 }
 
-// fillByExtracting extracts the asset, resolves its files, and records the checksum.
-func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (bool, error) {
+// fillByExtracting extracts the asset, resolves its files, and records the checksum. It
+// reports whether what it resolved has to be looked at, and which files it couldn't resolve
+// at all.
+func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (bool, []string, error) {
 	result, err := v.Verify(ctx, logger, pkgName, version, asset)
 	if err != nil {
-		return false, fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
+		return false, nil, fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
 	}
 	asset.Files = result.Files
 	asset.LinkedLibc = result.LinkedLibc
 	if err := setChecksum(asset, result.Checksum); err != nil {
-		return false, err
+		return false, nil, err
+	}
+	if len(result.Unresolved) > 0 {
+		logger.Warn("the archive holds no file of this name, anywhere",
+			"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
+		return false, result.Unresolved, nil
 	}
 	if result.NeedsReview {
 		logger.Warn("the files of this asset don't match the archive",
-			"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
+			"os", asset.OS, "arch", asset.Arch)
 	}
-	return result.NeedsReview, nil
+	return result.NeedsReview, nil, nil
 }
 
 // fillChecksum downloads the asset only when its checksum is still missing.

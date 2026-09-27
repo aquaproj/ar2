@@ -67,12 +67,15 @@ func TestFill_buildsRatherThanFetches(t *testing.T) {
 		{OS: "linux", Arch: "amd64", Type: aquaregistry.PkgInfoTypeCargo, Crate: "bat"},
 		{OS: "darwin", Arch: "arm64", Type: aquaregistry.PkgInfoTypeGoInstall},
 	}}
-	needsReview, err := New(nil, nil).Fill(t.Context(), discardLogger(), "crates.io/bat", "0.25.0", reg, true)
+	needsReview, unresolved, err := New(nil, nil).Fill(t.Context(), discardLogger(), "crates.io/bat", "0.25.0", reg, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if needsReview {
 		t.Error("an entry with no artifact has nothing to review")
+	}
+	if len(unresolved) != 0 {
+		t.Errorf("an entry with no artifact has no files to resolve, got %v", unresolved)
 	}
 	for _, a := range reg.Assets {
 		if a.Checksum != "" {

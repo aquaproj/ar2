@@ -103,6 +103,26 @@ func (c *Client) label(ctx context.Context, logger *slog.Logger, number int) {
 	}
 }
 
+// NeedsDefinitionLabel marks the pull requests whose versions are waiting for a definition.
+//
+// What it is for is finding them together: they are the one kind of pull request that doesn't
+// merge itself, and a maintainer who has half an hour for the registry wants the list.
+const NeedsDefinitionLabel = "needs-definition"
+
+// Label puts a label on a pull request, making it first when the repository hasn't got it.
+//
+// Said rather than failed for, like the label of the release: what the pull request carries
+// matters more than what it is filed under.
+func (c *Client) Label(ctx context.Context, logger *slog.Logger, number int, name string) {
+	if err := c.ensureLabel(ctx, name); err != nil {
+		slogerr.WithError(logger, err).Warn("create a label", "label", name)
+		return
+	}
+	if _, _, err := c.prGH.Issues.AddLabelsToIssue(ctx, c.owner, c.repo, number, []string{name}); err != nil {
+		slogerr.WithError(logger, err).Warn("label the pull request", "number", number, "label", name)
+	}
+}
+
 // labelName is what the label is called: ar2:v0.0.30, whichever way the version was written.
 func labelName(version string) string {
 	if strings.HasPrefix(version, "v") {
@@ -121,9 +141,8 @@ func (c *Client) ensureLabel(ctx context.Context, name string) error {
 		return nil
 	}
 	_, resp, err := c.prGH.Issues.CreateLabel(ctx, c.owner, c.repo, gogithub.CreateIssueLabelRequest{
-		Name:        name,
-		Color:       new(labelColor),
-		Description: new("Opened by this release of ar2"),
+		Name:  name,
+		Color: new(labelColor),
 	})
 	if err == nil {
 		return nil

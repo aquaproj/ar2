@@ -74,6 +74,22 @@ func HeadBranchName(pkgName string) string {
 	return HeadBranchPrefix + EncodePackageName(pkgName)
 }
 
+// VersionHeadBranchName returns the branch a pull request for one version alone is opened
+// from.
+//
+// One version has a branch of its own when what was generated for it can't merge: it names a
+// file the archive doesn't hold, so the definition has to say something it doesn't, and until
+// somebody writes that the version waits. In the pull request with the rest it would keep the
+// versions that were right from merging, which is the whole reason for a branch per version
+// here and one per package everywhere else.
+//
+// Two of these don't conflict with each other or with the package's own, because a pull
+// request into the package branch moves it only when it merges, and this one doesn't until a
+// person has been.
+func VersionHeadBranchName(pkgName, version string) string {
+	return HeadBranchName(pkgName) + "_" + EncodePackageName(version)
+}
+
 // RemoveBranchName returns the branch the pull request that stops serving the package is
 // opened from.
 //

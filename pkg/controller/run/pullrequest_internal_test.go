@@ -12,12 +12,20 @@ import (
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/google/go-cmp/cmp"
 	gogithub "github.com/google/go-github/v92/github"
 )
 
 type fakeRegistry struct {
 	committed []*g2.File
 	created   int
+	// fromBranch is the branch the last pull request was opened from, which for a version
+	// waiting for a definition is one of its own.
+	fromBranch string
+	// commitBranch is where the last commit went.
+	commitBranch string
+	// labels are what was put on the pull requests.
+	labels []string
 }
 
 func (f *fakeRegistry) Versions(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
@@ -53,9 +61,21 @@ func (f *fakeRegistry) File(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 
-func (f *fakeRegistry) Commit(_ context.Context, _, _, _ string, files []*g2.File) error {
+func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g2.File) error {
+	f.commitBranch = branch
 	f.committed = files
 	return nil
+}
+
+func (f *fakeRegistry) Label(_ context.Context, _ *slog.Logger, _ int, name string) {
+	f.labels = append(f.labels, name)
+}
+
+// CreatePullRequestFrom is what a version waiting for a definition is opened with.
+func (f *fakeRegistry) CreatePullRequestFrom(_ context.Context, _ *slog.Logger, head, _, _, _ string) (*gogithub.PullRequest, error) {
+	f.fromBranch = head
+	f.created++
+	return &gogithub.PullRequest{Number: new(2), NodeID: new("node")}, nil
 }
 
 func (f *fakeRegistry) CreatePullRequest(_ context.Context, _ *slog.Logger, _, _, _ string) (*gogithub.PullRequest, error) {
@@ -159,5 +179,88 @@ func TestPRBodyReason(t *testing.T) {
 	}
 	if strings.Contains(body, "run's log") {
 		t.Fatalf("the body sends the reader to the log although it says the reason:\n%s", body)
+	}
+}
+
+// The versions that can't merge go together, on a branch named after the oldest, and the ones
+// that can are left for the pull request of the package.
+func TestOpenUnresolved(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	// Newest first, the way a run holds them.
+	versions := []*version{
+		{Version: "v0.9.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
+		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
+	}
+	if err := c.openUnresolved(t.Context(), discardLogger(), "ogham/exa", versions, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := "ar2_ogham_2fexa_v0.8.0"; reg.commitBranch != want {
+		t.Errorf("committed to %q, want the branch of the oldest of them, %q", reg.commitBranch, want)
+	}
+	if reg.fromBranch != reg.commitBranch {
+		t.Errorf("opened from %q, want %q", reg.fromBranch, reg.commitBranch)
+	}
+	if len(reg.committed) != 2 {
+		t.Fatalf("committed %d files, want both versions", len(reg.committed))
+	}
+	if reg.created != 1 {
+		t.Errorf("opened %d pull requests, want one for the two of them", reg.created)
+	}
+	if diff := cmp.Diff([]string{g2.NeedsDefinitionLabel}, reg.labels); diff != "" {
+		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
+	}
+}
+
+// A package whose versions are already waiting is left alone: committing would reset the
+// branch, and what is on it may be the definition somebody is in the middle of writing.
+func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	inFlight := map[string]struct{}{"ar2_ogham_2fexa_v0.7.0": {}}
+	versions := []*version{
+		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
+	}
+	if err := c.openUnresolved(t.Context(), discardLogger(), "ogham/exa", versions, inFlight); err != nil {
+		t.Fatal(err)
+	}
+	if reg.created != 0 || reg.committed != nil {
+		t.Errorf("opened %d pull requests and committed %+v, want neither", reg.created, reg.committed)
+	}
+}
+
+// The pull request of the package itself is not one of these, so it doesn't stop them.
+func TestWaiting(t *testing.T) {
+	t.Parallel()
+	own := map[string]struct{}{"ar2_ogham_2fexa": {}}
+	if branch, ok := waiting("ogham/exa", own); ok {
+		t.Errorf("the package's own branch counted as one waiting: %q", branch)
+	}
+	version := map[string]struct{}{"ar2_ogham_2fexa_v0.7.0": {}}
+	if _, ok := waiting("ogham/exa", version); !ok {
+		t.Error("a version's branch should count as one waiting")
+	}
+	other := map[string]struct{}{"ar2_cli_2fcli_v2.0.0": {}}
+	if _, ok := waiting("ogham/exa", other); ok {
+		t.Error("another package's branch counted as this one's")
+	}
+}
+
+// What a run does with a mixture: the ones that can merge and the ones that can't are told
+// apart by whether anything went unresolved.
+func TestPartition(t *testing.T) {
+	t.Parallel()
+	sound, unresolved := partition([]*version{
+		{Version: "v0.10.0"},
+		{Version: "v0.9.0", Unresolved: []string{"darwin/arm64: exa"}},
+		{Version: "v0.8.0", Unresolved: []string{"darwin/arm64: exa"}},
+	})
+	if len(sound) != 1 || sound[0].Version != "v0.10.0" {
+		t.Errorf("the sound ones are %+v", sound)
+	}
+	if len(unresolved) != 2 || unresolved[1].Version != "v0.8.0" {
+		t.Errorf("the ones waiting are %+v", unresolved)
 	}
 }

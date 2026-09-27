@@ -166,9 +166,12 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	if err != nil {
 		return err
 	}
-	needsReview, err := v.Fill(ctx, logger.Logger, pkgName, version, reg, args.Verify)
+	needsReview, unresolved, err := v.Fill(ctx, logger.Logger, pkgName, version, reg, args.Verify)
 	if err != nil {
 		return fmt.Errorf("complete registry.json: %w", err)
+	}
+	for _, env := range unresolved {
+		logger.Warn("the archive holds no file of the name the definition gives", "environment", env)
 	}
 	if needsReview {
 		// The caller creating a pull request has to keep it out of auto-merge.
