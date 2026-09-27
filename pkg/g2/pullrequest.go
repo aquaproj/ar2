@@ -169,7 +169,6 @@ const labelColor = "ededed"
 // pull request a run opens for everything it generated is on the package's own branch, and
 // this is the other kind.
 func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogithub.PullRequest, error) {
-	prefix := HeadBranchName(pkgName) + "_"
 	opts := &gogithub.PullRequestListOptions{State: stateOpen}
 	opts.PerPage = pullRequestsPerPage
 	for {
@@ -178,7 +177,7 @@ func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogit
 			return nil, fmt.Errorf("list open pull requests: %w", err)
 		}
 		for _, pr := range prs {
-			if strings.HasPrefix(pr.GetHead().GetRef(), prefix) {
+			if IsVersionHeadBranch(pkgName, pr.GetHead().GetRef()) {
 				return pr, nil
 			}
 		}

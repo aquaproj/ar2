@@ -60,3 +60,34 @@ func TestEncodePackageName_prefixPairs(t *testing.T) {
 		}
 	}
 }
+
+// One package's name can be the beginning of another's, and the parent's branch prefix
+// then matches the child's version branches. GoogleCloudPlatform/terraformer was
+// regenerated onto GoogleCloudPlatform/terraformer/aws's branch for it.
+func TestIsVersionHeadBranch(t *testing.T) {
+	t.Parallel()
+	data := []struct {
+		pkg    string
+		branch string
+		exp    bool
+	}{
+		{"GoogleCloudPlatform/terraformer", "ar2_GoogleCloudPlatform_2fterraformer_0.8.20", true},
+		{"GoogleCloudPlatform/terraformer", "ar2_GoogleCloudPlatform_2fterraformer_2faws_0.8.20", false},
+		{"GoogleCloudPlatform/terraformer/aws", "ar2_GoogleCloudPlatform_2fterraformer_2faws_0.8.20", true},
+		// A version can hold a slash of its own, which encodes the same way a package's does.
+		{"kubernetes-sigs/kustomize", "ar2_kubernetes-sigs_2fkustomize_kustomize_2fv5.8.1", true},
+		// The package's own branch carries no version.
+		{"cli/cli", "ar2_cli_2fcli", false},
+		{"cli/cli", "ar2_cli_2fcli_", false},
+		{"cli/cli", "ar2_cli_2fcli_v2.1.0", true},
+		{"cli/cli", "pkg_cli_2fcli", false},
+	}
+	for _, d := range data {
+		t.Run(d.pkg+" "+d.branch, func(t *testing.T) {
+			t.Parallel()
+			if got := g2.IsVersionHeadBranch(d.pkg, d.branch); got != d.exp {
+				t.Fatalf("got %v, want %v", got, d.exp)
+			}
+		})
+	}
+}

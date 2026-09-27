@@ -90,6 +90,47 @@ func VersionHeadBranchName(pkgName, version string) string {
 	return HeadBranchName(pkgName) + "_" + EncodePackageName(version)
 }
 
+// IsVersionHeadBranch reports whether the branch is one of the package's version branches.
+//
+// A prefix match isn't enough, because one package's name can be the beginning of
+// another's: GoogleCloudPlatform/terraformer/aws encodes to
+// GoogleCloudPlatform_2fterraformer_2faws, which the parent's prefix
+// GoogleCloudPlatform_2fterraformer_ matches. What tells them apart is what follows the
+// separator -- an encoded version, in which an underscore only ever begins an escape.
+func IsVersionHeadBranch(pkgName, branch string) bool {
+	prefix := HeadBranchName(pkgName) + "_"
+	if !strings.HasPrefix(branch, prefix) {
+		return false
+	}
+	return isEncoded(strings.TrimPrefix(branch, prefix))
+}
+
+// isEncoded reports whether s is what EncodePackageName produces: characters it leaves
+// alone, and underscores each beginning a two-digit hex escape.
+func isEncoded(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '_' {
+			if !isSafe(c) {
+				return false
+			}
+			continue
+		}
+		if i+2 >= len(s) || !isHexDigit(s[i+1]) || !isHexDigit(s[i+2]) {
+			return false
+		}
+		i += 2
+	}
+	return true
+}
+
+func isHexDigit(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f'
+}
+
 // RemoveBranchName returns the branch the pull request that stops serving the package is
 // opened from.
 //

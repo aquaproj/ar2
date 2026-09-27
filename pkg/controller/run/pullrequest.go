@@ -315,9 +315,8 @@ func (c *Controller) openUnresolved(ctx context.Context, logger *slog.Logger, pk
 // Any branch of the package's but its own: the one a run opens for every version it generated
 // is the package's own, and these are named after a version.
 func waiting(pkgName string, inFlight map[string]struct{}) (string, bool) {
-	prefix := g2.HeadBranchName(pkgName) + "_"
 	for branch := range inFlight {
-		if strings.HasPrefix(branch, prefix) {
+		if g2.IsVersionHeadBranch(pkgName, branch) {
 			return branch, true
 		}
 	}
