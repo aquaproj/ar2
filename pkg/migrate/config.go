@@ -99,7 +99,6 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 			unreachable = append(unreachable, vo.VersionConstraints)
 		}
 		cfg := &g2.Config{PackageInfo: pkgInfo}
-		cfg.VersionOverrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
 		applyScaffold(cfg, scaffold)
 		return cfg, unreachable
 	}
@@ -107,17 +106,16 @@ func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Co
 	// The trimmed overrides, not the source ones: reversing the originals would put
 	// back everything the trim just took out.
 	overrides, unconverted := ReverseVersionOverrides(pkgInfo.VersionOverrides)
-	if len(overrides) == 0 || allEmpty(overrides) {
-		// A package whose definition is entirely at the top level still needs an
-		// override, because that is where g2 looks. An empty one inherits the whole
-		// base, which is what the top level meant on its own.
+	if allEmpty(overrides) {
+		// A list whose entries all say nothing is the same thing said many times, and
+		// the same thing is nothing: the top level is what the overrides inherit from,
+		// so a definition with none of them answers for every version on its own.
 		//
-		// A list whose entries all say nothing is the same thing said many times.
-		// Arriven/db1000n's ten overrides turned into ten bare constraints once
-		// what a release can be read for was taken out of them, which is a file
-		// that tells a reader there are ten cases to think about and then describes
-		// none of them.
-		overrides = []*aquaregistry.VersionOverride{{VersionConstraints: catchAll}}
+		// Arriven/db1000n's ten overrides turned into ten bare constraints once what a
+		// release can be read for was taken out of them, which is a file that tells a
+		// reader there are ten cases to think about and then describes none of them.
+		// One bare constraint is the same file with one case in it.
+		overrides = nil
 	}
 	pkgInfo.VersionOverrides = withFallback(topLevelFirst(base.VersionConstraints, overrides), pkgInfo.VersionOverrides)
 

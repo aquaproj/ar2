@@ -69,14 +69,12 @@ func TestConfig_noVersionOverride(t *testing.T) {
 		RepoName:  "cli",
 		Asset:     "gh.tar.gz",
 	}, nil)
-	if len(cfg.VersionOverrides) != 1 {
-		t.Fatalf("got %d overrides, want 1", len(cfg.VersionOverrides))
-	}
-	if diff := cmp.Diff("true", cfg.VersionOverrides[0].VersionConstraints); diff != "" {
-		t.Errorf("the constraint is wrong (-want +got):\n%s", diff)
-	}
-	if cfg.VersionOverrides[0].Files != nil {
-		t.Errorf("the override carries %v, want nothing", cfg.VersionOverrides[0].Files)
+	// None at all: the top level is what the overrides inherit from, so a definition
+	// with nothing else to say answers for every version on its own. One override
+	// carrying a catch-all and nothing else said the same thing and told a reader there
+	// was a case to think about.
+	if len(cfg.VersionOverrides) != 0 {
+		t.Errorf("got %d overrides, want none:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
 	}
 }
 
@@ -153,7 +151,13 @@ func TestConfig_format(t *testing.T) {
 					{VersionConstraints: "true", Asset: tt.asset, Format: tt.format},
 				},
 			}, nil)
-			if diff := cmp.Diff(tt.want, cfg.VersionOverrides[0].Format); diff != "" {
+			// An override left with nothing goes altogether, so a format that was
+			// trimmed leaves no override to read it from.
+			got := ""
+			if len(cfg.VersionOverrides) > 0 {
+				got = cfg.VersionOverrides[0].Format
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("the format is wrong (-want +got):\n%s", diff)
 			}
 		})
@@ -178,11 +182,9 @@ func TestConfig_allOverridesEmpty(t *testing.T) {
 		},
 	}, nil)
 
-	if len(cfg.VersionOverrides) != 1 {
-		t.Fatalf("got %d overrides, want the one that catches everything:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
-	}
-	if got := cfg.VersionOverrides[0].VersionConstraints; got != "true" {
-		t.Errorf("the constraint is %q, want the one that always matches", got)
+	// The same thing said many times is still nothing, so the key goes altogether.
+	if len(cfg.VersionOverrides) != 0 {
+		t.Errorf("got %d overrides, want none:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
 	}
 }
 
@@ -225,17 +227,28 @@ func TestConfig_someOverridesEmpty(t *testing.T) {
 // nothing.
 func TestConfig_catchAllEvaluates(t *testing.T) {
 	t.Parallel()
+	// A definition whose overrides say something, so the list is converted and the entry
+	// every version falls through to is appended. A definition that says nothing gets no
+	// overrides at all, and then there is no constraint to evaluate.
 	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
-		Type:      "github_release",
-		RepoOwner: "cli",
-		RepoName:  "cli",
+		Type:               "github_release",
+		RepoOwner:          "cli",
+		RepoName:           "cli",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{
+				VersionConstraints: `semver("< 2.0.0")`, Asset: "gh_{{.Version}}.tar.gz",
+				Replacements: aquaregistry.Replacements{"linux": "ubuntu"},
+			},
+		},
 	}, nil)
-	if len(cfg.VersionOverrides) != 1 {
-		t.Fatalf("got %d overrides, want one", len(cfg.VersionOverrides))
+	if len(cfg.VersionOverrides) == 0 {
+		t.Fatal("got no overrides, want the one every version falls through to")
 	}
 
+	last := cfg.VersionOverrides[len(cfg.VersionOverrides)-1]
 	got, err := expr.EvaluateVersionConstraints(
-		slog.New(slog.DiscardHandler), cfg.VersionOverrides[0].VersionConstraints, "v1.0.0", "1.0.0")
+		slog.New(slog.DiscardHandler), last.VersionConstraints, "v1.0.0", "1.0.0")
 	if err != nil {
 		t.Fatalf("the catch-all constraint doesn't evaluate: %v", err)
 	}
@@ -319,14 +332,13 @@ func TestConfig_unreachableOverrides(t *testing.T) {
 		},
 	}, nil)
 
-	if len(cfg.VersionOverrides) != 1 {
-		t.Fatalf("got %d overrides, want the one that catches everything", len(cfg.VersionOverrides))
+	// None at all, and in particular not the one that never applied: the top level is
+	// what every version resolves from, which is what v1 did with it.
+	if len(cfg.VersionOverrides) != 0 {
+		t.Errorf("got %d overrides, want none:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
 	}
-	if got := cfg.VersionOverrides[0].VersionConstraints; got != "true" {
-		t.Errorf("the constraint is %q, want the one that always matches", got)
-	}
-	if cfg.VersionOverrides[0].NoAsset != nil {
-		t.Error("an override that never applied became the one every version falls back to")
+	if cfg.NoAsset {
+		t.Error("an override that never applied became what every version resolves from")
 	}
 	// Someone wrote it meaning it to work, so it is reported rather than dropped
 	// quietly.
