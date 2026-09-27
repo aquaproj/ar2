@@ -45,9 +45,17 @@ type Controller struct {
 }
 
 // Registry is aqua-registry-g2: what it holds, and how work is added to it.
+//
+// The two halves are separate because they are read differently. What the registry holds
+// decides what a run does; the pull requests are how what it did reaches a person.
 type Registry interface {
+	Contents
+	PullRequests
+}
+
+// Contents is what aqua-registry-g2 holds, and how a branch of it is written.
+type Contents interface {
 	Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error)
-	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
 	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	// File is the bytes a ref holds at a path, or "" when it holds nothing there.
@@ -56,7 +64,18 @@ type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+}
+
+// PullRequests is how a run puts what it generated to a person, and how it sees what is
+// already waiting for one.
+type PullRequests interface {
+	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
+	// CreatePullRequestFrom opens one from a branch of its own, which is what the versions
+	// waiting for a definition are on.
+	CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error)
+	// Label is how the pull requests waiting for a definition are found together.
+	Label(ctx context.Context, logger *slog.Logger, number int, name string)
 }
 
 // GraphQL is the part of GitHub's GraphQL API a run uses.
@@ -164,7 +183,7 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		if todo == workNone {
 			continue
 		}
-		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions, cfg.Breadth)
+		n, tried, err := c.runPackage(ctx, logger, input, candidate, input.Limit-attempted, todo, versions, cfg.Breadth, inFlight)
 		if err != nil && tried == 0 {
 			// A package that failed before reaching any version still cost API calls
 			// and still has to move the run forward, or a failure every package
@@ -302,7 +321,7 @@ func (c *Controller) report(logger *slog.Logger, s *state.State) {
 
 // runPackage generates the missing versions of one package, newest first, up to
 // budget. It returns how many were generated and how many were attempted.
-func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string, breadth *g2.Breadth) (int, int, error) {
+func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, budget int, todo work, swept []string, breadth *g2.Breadth, inFlight map[string]struct{}) (int, int, error) {
 	pkg := candidate.Package
 	if pkg.RepoOwner == "" || pkg.RepoName == "" {
 		// Versions can only be listed for a GitHub repository. Packages without one
@@ -341,10 +360,27 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if input.SkipPR {
 		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
-	if err := c.openPullRequest(ctx, logger, def, candidate.Name, generated); err != nil {
+
+	if err := c.openPullRequests(ctx, logger, def, candidate.Name, generated, inFlight); err != nil {
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil
+}
+
+// openPullRequests takes what a package's turn generated to the pull requests it belongs in.
+//
+// Two of them at most: the versions that can merge go to the package's own, and the ones whose
+// entry names a file the archive doesn't hold go together to one of their own. Neither waits
+// for the other, which is the point of telling them apart.
+func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, generated []*version, inFlight map[string]struct{}) error {
+	sound, unresolved := partition(generated)
+	if err := c.openUnresolved(ctx, logger, pkgName, unresolved, inFlight); err != nil {
+		return err
+	}
+	if len(sound) == 0 {
+		return nil
+	}
+	return c.openPullRequest(ctx, logger, def, pkgName, sound)
 }
 
 // reviewLostSigning leaves for review any version that can be verified with less
@@ -449,7 +485,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
-	needsReview, err := c.verifier.Fill(ctx, logger, pkgName, tag, reg, input.Verify)
+	needsReview, unresolved, err := c.verifier.Fill(ctx, logger, pkgName, tag, reg, input.Verify)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
 	}
@@ -468,7 +504,8 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	return &version{
 		Version:     tag,
 		Registry:    reg,
-		NeedsReview: needsReview || dropped,
+		NeedsReview: needsReview || dropped || len(unresolved) > 0,
+		Unresolved:  unresolved,
 	}, nil
 }
 
@@ -503,3 +540,16 @@ func write(dir, pkgName, version string, reg *generate.Registry) error {
 }
 
 const dirPerm = 0o750
+
+// partition splits the versions into the ones that can merge and the ones that have to wait
+// for a definition.
+func partition(versions []*version) (sound, unresolved []*version) {
+	for _, v := range versions {
+		if len(v.Unresolved) > 0 {
+			unresolved = append(unresolved, v)
+			continue
+		}
+		sound = append(sound, v)
+	}
+	return sound, unresolved
+}
