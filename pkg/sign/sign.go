@@ -28,6 +28,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
 	"github.com/aquaproj/aqua/v2/pkg/slsa"
+	aquatemplate "github.com/aquaproj/aqua/v2/pkg/template"
 	"github.com/aquaproj/aqua/v2/pkg/unarchive"
 	"github.com/aquaproj/aqua/v2/pkg/vacuum"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -149,44 +150,8 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 	// pattern is replaced by a name and the entry records what actually signed.
 	v.pin(ctx, logger, version, asset)
 
-	for _, check := range []struct {
-		kind string
-		// tool is what the check is run with, and what has to be installed before
-		// it can be. The attestations are checked by a gh the machine already has.
-		tool    string
-		enabled bool
-		verify  func() error
-	}{
-		{"cosign", toolCosign, asset.Cosign.GetEnabled(), func() error {
-			return v.cosign.Verify(ctx, logger, rt, file, asset.Cosign, art, path)
-		}},
-		{"slsa_provenance", toolSLSA, asset.SLSAProvenance.GetEnabled(), func() error {
-			return v.slsa.Verify(ctx, logger, rt, asset.SLSAProvenance, art, file, &slsa.ParamVerify{
-				SourceURI:    pkg.PackageInfo.SLSASourceURI(),
-				SourceTag:    version,
-				ArtifactPath: path,
-			})
-		}},
-		{"minisign", toolMinisign, asset.Minisign.GetEnabled(), func() error {
-			return v.minisign.Verify(ctx, logger, rt, asset.Minisign, art, file, &minisign.ParamVerify{
-				ArtifactPath: path,
-				PublicKey:    asset.Minisign.PublicKey,
-			})
-		}},
-		{"github_artifact_attestations", toolGH, asset.GitHubArtifactAttestations.GetEnabled(), func() error {
-			return v.attestation(ctx, logger, asset, path)
-		}},
-	} {
-		if !check.enabled {
-			continue
-		}
-		if err := v.ensure(ctx, logger, check.tool); err != nil {
-			failed.note(check.kind, err)
-			continue
-		}
-		if err := check.verify(); err != nil {
-			failed.note(check.kind, err)
-		}
+	for _, check := range v.checks(ctx, logger, rt, pkg, art, file, version, asset, path) {
+		v.make(ctx, logger, check, failed)
 	}
 
 	if failed.err != nil {
@@ -287,4 +252,87 @@ func (v *Verifier) attestation(ctx context.Context, logger *slog.Logger, asset *
 		"os", asset.OS, "arch", asset.Arch, "signer_workflow", signer)
 	asset.GitHubArtifactAttestations.SignerWorkflow2 = signer
 	return nil
+}
+
+// minisignUnrunnable says minisign can't run on this machine, and nothing when it can.
+//
+// The tool runs on the host rather than on the environment the entry is for, and it isn't
+// built for every host aqua supports: on linux/arm64 there is no minisign to install.
+// ziglang/zig publishes minisign signatures, so every entry it has said so, and the check
+// that reads the entry on a Linux arm64 machine called that a registry not holding up to
+// its release. aqua says the same thing about the same package and installs it anyway.
+func (v *Verifier) minisignUnrunnable() string {
+	supported, err := minisign.Package().PackageInfo.CheckSupported(v.rt, v.rt.Env())
+	if err != nil || supported {
+		// An environment that can't be decided is one the check is attempted on. What
+		// comes back then is whatever the tool says, which is a better answer than a
+		// guess made here.
+		return ""
+	}
+	return "minisign isn't built for " + v.rt.Env()
+}
+
+// check is one way an asset can be verified, and what it takes to make it.
+type check struct {
+	kind string
+	// tool is what the check is run with, and what has to be installed before it can
+	// be. The attestations are checked by a gh the machine already has.
+	tool    string
+	enabled bool
+	// unrunnable says this machine can't make the check, and why. Nil is a check that
+	// runs anywhere.
+	unrunnable func() string
+	verify     func() error
+	// asset is what the check is about, for what is said when it doesn't hold.
+	asset *generate.Asset
+}
+
+// checks is every way this asset says it can be verified.
+func (v *Verifier) checks(ctx context.Context, logger *slog.Logger, rt *runtime.Runtime, pkg *config.Package, art *aquatemplate.Artifact, file *download.File, version string, asset *generate.Asset, path string) []*check {
+	return []*check{
+		{kind: "cosign", tool: toolCosign, enabled: asset.Cosign.GetEnabled(), asset: asset, verify: func() error {
+			return v.cosign.Verify(ctx, logger, rt, file, asset.Cosign, art, path)
+		}},
+		{kind: "slsa_provenance", tool: toolSLSA, enabled: asset.SLSAProvenance.GetEnabled(), asset: asset, verify: func() error {
+			return v.slsa.Verify(ctx, logger, rt, asset.SLSAProvenance, art, file, &slsa.ParamVerify{
+				SourceURI:    pkg.PackageInfo.SLSASourceURI(),
+				SourceTag:    version,
+				ArtifactPath: path,
+			})
+		}},
+		{kind: "minisign", tool: toolMinisign, enabled: asset.Minisign.GetEnabled(), asset: asset, unrunnable: v.minisignUnrunnable, verify: func() error {
+			return v.minisign.Verify(ctx, logger, rt, asset.Minisign, art, file, &minisign.ParamVerify{
+				ArtifactPath: path,
+				PublicKey:    asset.Minisign.PublicKey,
+			})
+		}},
+		{kind: "github_artifact_attestations", tool: toolGH, enabled: asset.GitHubArtifactAttestations.GetEnabled(), asset: asset, verify: func() error {
+			return v.attestation(ctx, logger, asset, path)
+		}},
+	}
+}
+
+// make runs one check, unless there is nothing to run or no way to run it here.
+func (v *Verifier) make(ctx context.Context, logger *slog.Logger, c *check, failed *unverified) {
+	if !c.enabled {
+		return
+	}
+	if c.unrunnable != nil {
+		if reason := c.unrunnable(); reason != "" {
+			// Not a check that failed. aqua skips the same one at install time with the
+			// same warning, so the entry is installable where this is true; what it says
+			// about the release is checked wherever the tool does run, which is the rest
+			// of the matrix.
+			logger.Warn("this machine can't make the check, so it goes unmade here",
+				"os", c.asset.OS, "arch", c.asset.Arch, "kind", c.kind, "reason", reason)
+			return
+		}
+	}
+	if err := v.ensure(ctx, logger, c.tool); err != nil {
+		failed.note(c.kind, err)
+		return
+	}
+	if err := c.verify(); err != nil {
+		failed.note(c.kind, err)
+	}
 }
