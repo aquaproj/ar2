@@ -3,6 +3,7 @@ package g2
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -80,6 +81,6 @@ func (c *Client) IndexPullRequest(ctx context.Context) (*gogithub.PullRequest, e
 }
 
 // CreateIndexPullRequest opens a pull request updating the catalogue.
-func (c *Client) CreateIndexPullRequest(ctx context.Context, base, title, body string) (*gogithub.PullRequest, error) {
-	return c.CreatePullRequestFrom(ctx, IndexBranch, base, title, body)
+func (c *Client) CreateIndexPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error) {
+	return c.CreatePullRequestFrom(ctx, logger, IndexBranch, base, title, body)
 }

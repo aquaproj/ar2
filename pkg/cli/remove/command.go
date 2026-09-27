@@ -93,7 +93,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 
 	// No branch token: a package being removed is one the registry holds, so every
 	// branch this touches is already there.
-	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo)
+	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
 	return ctrl.New(registry, args.BaseBranch).Remove(ctx, logger.Logger, &ctrl.Input{ //nolint:wrapcheck
 		PkgName: pkgName,
 		Reason:  args.Reason,

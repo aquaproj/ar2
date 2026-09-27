@@ -49,7 +49,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 		return fmt.Errorf("commit registry.json: %w", err)
 	}
 
-	pr, err := c.g2.CreatePullRequest(ctx, pkgName, title, prBody(versions, contents.unconverted, needsReview))
+	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, prBody(versions, contents.unconverted, needsReview))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}

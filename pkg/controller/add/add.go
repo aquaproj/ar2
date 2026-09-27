@@ -29,7 +29,7 @@ type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
-	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
+	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
 
 // Repositories reads the repository the package comes from, for the description the
@@ -215,7 +215,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 	}); err != nil {
 		return fmt.Errorf("commit the package definition: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequest(ctx, pkgName, title, body(cfg))
+	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, body(cfg))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}

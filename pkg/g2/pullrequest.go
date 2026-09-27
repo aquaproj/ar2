@@ -3,10 +3,12 @@ package g2
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
 
 // pullRequestsPerPage is the page size used to list open pull requests.
@@ -50,8 +52,8 @@ func (c *Client) PackagesInFlight(ctx context.Context) (map[string]struct{}, err
 
 // CreatePullRequest opens a pull request from the package's head branch into its
 // package branch.
-func (c *Client) CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error) {
-	return c.CreatePullRequestFrom(ctx, HeadBranchName(pkgName), BranchName(pkgName), title, body)
+func (c *Client) CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error) {
+	return c.CreatePullRequestFrom(ctx, logger, HeadBranchName(pkgName), BranchName(pkgName), title, body)
 }
 
 // CreatePullRequestFrom opens a pull request from head into base.
@@ -59,7 +61,7 @@ func (c *Client) CreatePullRequest(ctx context.Context, pkgName, title, body str
 // It is the pull request client that opens it rather than the reading one, whatever the
 // branches are: a pull request opened with GITHUB_TOKEN gets its checks in an
 // approval-required state, so nothing would check it until a person pressed a button.
-func (c *Client) CreatePullRequestFrom(ctx context.Context, head, base, title, body string) (*gogithub.PullRequest, error) {
+func (c *Client) CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error) {
 	pr, _, err := c.prGH.PullRequests.Create(ctx, c.owner, c.repo, gogithub.CreatePullRequest{
 		Title: new(title),
 		Body:  new(body),
@@ -69,5 +71,71 @@ func (c *Client) CreatePullRequestFrom(ctx context.Context, head, base, title, b
 	if err != nil {
 		return nil, fmt.Errorf("create a pull request: %w", err)
 	}
+	c.label(ctx, logger, pr.GetNumber())
 	return pr, nil
 }
+
+// label marks the pull request with the ar2 that opened it.
+//
+// A pull request is read long after the run that made it, and what it is worth is partly
+// which ar2 made it: an inference that has since been corrected made every pull request
+// before the correction wrong in the same way, and there is no other way to tell those apart
+// from the ones made after. Labelled, they can be found and closed as a group instead of one
+// at a time -- which is what happened to the provenance, the asset choice and the minisign
+// check, each found by reading one pull request and each affecting every package reached
+// since.
+//
+// Said rather than failed for: the pull request is the work, and a label it didn't get is a
+// pull request somebody still has to read.
+func (c *Client) label(ctx context.Context, logger *slog.Logger, number int) {
+	if c.version == "" {
+		// A local build says nothing about which release it is, and a label saying so
+		// would be worse than none.
+		return
+	}
+	name := labelName(c.version)
+	if err := c.ensureLabel(ctx, name); err != nil {
+		slogerr.WithError(logger, err).Warn("create the label of this ar2", "label", name)
+		return
+	}
+	if _, _, err := c.prGH.Issues.AddLabelsToIssue(ctx, c.owner, c.repo, number, []string{name}); err != nil {
+		slogerr.WithError(logger, err).Warn("label the pull request", "number", number, "label", name)
+	}
+}
+
+// labelName is what the label is called: ar2:v0.0.30, whichever way the version was written.
+func labelName(version string) string {
+	if strings.HasPrefix(version, "v") {
+		return "ar2:" + version
+	}
+	return "ar2:v" + version
+}
+
+// ensureLabel creates the label when the repository doesn't have it.
+//
+// A label is per repository, so the first pull request a release opens is the one that makes
+// it. Adding one that doesn't exist is refused rather than created, so this can't be left to
+// the call that uses it.
+func (c *Client) ensureLabel(ctx context.Context, name string) error {
+	if _, _, err := c.prGH.Issues.GetLabel(ctx, c.owner, c.repo, name); err == nil {
+		return nil
+	}
+	_, resp, err := c.prGH.Issues.CreateLabel(ctx, c.owner, c.repo, gogithub.CreateIssueLabelRequest{
+		Name:        name,
+		Color:       new(labelColor),
+		Description: new("Opened by this release of ar2"),
+	})
+	if err == nil {
+		return nil
+	}
+	if resp != nil && resp.StatusCode == http.StatusUnprocessableEntity {
+		// Already there, which is what two runs opening their first pull request at the
+		// same time look like.
+		return nil
+	}
+	return fmt.Errorf("create a label: %w", err)
+}
+
+// labelColor is GitHub's own default, because the label says what made the pull request
+// rather than how much it matters.
+const labelColor = "ededed"

@@ -61,7 +61,7 @@ func (f *fakeRegistry) IndexPullRequest(_ context.Context) (*gogithub.PullReques
 	return f.openPR, nil
 }
 
-func (f *fakeRegistry) CreateIndexPullRequest(_ context.Context, _, _, _ string) (*gogithub.PullRequest, error) {
+func (f *fakeRegistry) CreateIndexPullRequest(_ context.Context, _ *slog.Logger, _, _, _ string) (*gogithub.PullRequest, error) {
 	f.createdPRs++
 	return &gogithub.PullRequest{Number: new(1), NodeID: new("PR_node")}, nil
 }

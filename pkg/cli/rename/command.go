@@ -95,7 +95,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, from, to s
 		return err //nolint:wrapcheck
 	}
 
-	registry := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo)
+	registry := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version)
 	// No auto-merge: a rename is dispatched by a person, and the catalogue's pull
 	// request is the last place it can be looked at before the old name stops being
 	// listed.

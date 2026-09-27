@@ -29,7 +29,7 @@ type Registry interface {
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	IndexPullRequest(ctx context.Context) (*gogithub.PullRequest, error)
-	CreateIndexPullRequest(ctx context.Context, base, title, body string) (*gogithub.PullRequest, error)
+	CreateIndexPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error)
 }
 
 // Definitions is the definition on every package branch, read in one pass.

@@ -66,7 +66,7 @@ func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g
 	return nil
 }
 
-func (f *fakeRegistry) CreatePullRequestFrom(_ context.Context, head, base, title, body string) (*gogithub.PullRequest, error) {
+func (f *fakeRegistry) CreatePullRequestFrom(_ context.Context, _ *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error) {
 	if f.bases == nil {
 		f.bases = map[string]string{}
 	}

@@ -142,5 +142,5 @@ func registryClient(gh *gogithub.Client, args *Args) (*g2.Client, error) {
 	if err != nil {
 		return nil, err //nolint:wrapcheck // the error already names the token it is for
 	}
-	return g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo), nil
+	return g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version), nil
 }

@@ -122,7 +122,7 @@ func (c *Controller) differing(ctx context.Context, t *target) ([]*g2.File, erro
 }
 
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, change *change) error {
-	pr, err := c.g2.CreateIndexPullRequest(ctx, c.baseBranch, commitMessage(change), prBody(change))
+	pr, err := c.g2.CreateIndexPullRequest(ctx, logger, c.baseBranch, commitMessage(change), prBody(change))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}

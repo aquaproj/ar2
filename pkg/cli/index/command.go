@@ -109,7 +109,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 	// Auto-merge is turned on with the ordinary token: it needs the pull request the
 	// app just opened, not the app.
 	graphql := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken})))
-	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo), graphql, args.BaseBranch,
+	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version), graphql, args.BaseBranch,
 		graphql.Branches(args.G2Owner, args.G2Repo))
 	if len(pkgNames) > 0 {
 		return c.Refresh(ctx, logger.Logger, pkgNames) //nolint:wrapcheck
