@@ -43,6 +43,15 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	if base.Minisign != nil {
 		p.Minisign = base.Minisign
 	}
+	// SLSA provenance is the one aqua gr does infer, from an asset ending in
+	// .intoto.jsonl. What it can't read is whether slsa-verifier will accept the
+	// provenance in it: containerd's is built by its own release workflow, which is not
+	// a builder slsa-verifier trusts, and aqua has nowhere to name one. A definition
+	// saying slsa_provenance is disabled is saying that, and it is what a reader of the
+	// release found out rather than something the asset list shows.
+	if base.SLSAProvenance != nil {
+		p.SLSAProvenance = base.SLSAProvenance
+	}
 	return p
 }
 
