@@ -83,6 +83,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	if err != nil {
 		return nil, err
 	}
+	overrideSigning(reg, base)
 	if err := inferSigning(input.PkgName, reg, rel.names); err != nil {
 		return nil, err
 	}
