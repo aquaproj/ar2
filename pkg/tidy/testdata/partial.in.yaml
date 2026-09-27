@@ -1,0 +1,6 @@
+type: github_release
+repo_owner: luau-lang
+repo_name: luau
+replacements:
+  amd64: x86_64
+  linux: ubuntu

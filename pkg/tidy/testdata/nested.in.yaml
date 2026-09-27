@@ -1,0 +1,12 @@
+type: github_release
+repo_owner: cli
+repo_name: cli
+version_overrides:
+  - version_constraint: "true"
+    replacements:
+      arm64: aarch64
+      linux: ubuntu
+    overrides:
+      - goos: windows
+        replacements:
+          windows: pc-windows-msvc
