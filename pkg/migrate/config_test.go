@@ -207,13 +207,49 @@ func TestConfig_someOverridesEmpty(t *testing.T) {
 		},
 	}, nil)
 
-	// Both the definition's own entries, and the entry every version falls through
-	// to, which inherits the base the way v1's top level did.
+	// The entry that says something, and the entry every version falls through to. The
+	// older entry said nothing once its asset was taken out, and what follows it says
+	// nothing either, so it is the same answer twice: see collapseTrailingEmpty.
+	if len(cfg.VersionOverrides) != 2 {
+		t.Fatalf("got %d overrides:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
+	}
+	if got := cfg.VersionOverrides[1].VersionConstraints; got != "true" {
+		t.Errorf("the last entry is %q, want the one everything matches", got)
+	}
+}
+
+// An empty override before one that says something is doing the work: it says these
+// versions take nothing, and dropping it would let them fall through to an older entry
+// that does carry fields. Only a run of them at the end is the same answer repeated.
+func TestConfig_emptyOverrideShields(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "cli",
+		RepoName:           "cli",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{
+				VersionConstraints: `semver("< 1.0.0")`, Asset: "gh_{{.Version}}.tar.gz",
+				Replacements: aquaregistry.Replacements{"linux": "ubuntu"},
+			},
+			{VersionConstraints: `semver("< 2.0.0")`, Asset: "gh_{{.Version}}.tar.gz"},
+		},
+	}, nil)
+
+	// Newest first: the empty one, the one carrying the spelling, and the entry every
+	// version falls through to.
 	if len(cfg.VersionOverrides) != 3 {
 		t.Fatalf("got %d overrides:\n%+v", len(cfg.VersionOverrides), cfg.VersionOverrides)
 	}
-	if got := cfg.VersionOverrides[2].VersionConstraints; got != "true" {
-		t.Errorf("the last entry is %q, want the one everything matches", got)
+	// The reversal gives each entry the lower bound of the range it covers, so what the
+	// first entry says is not what v1 wrote. What matters is that it is still empty and
+	// the one behind it still carries the spelling it is there for.
+	if len(cfg.VersionOverrides[0].Replacements) != 0 {
+		t.Errorf("the first entry carries %v, want nothing", cfg.VersionOverrides[0].Replacements)
+	}
+	if got := cfg.VersionOverrides[1].Replacements["linux"]; got != "ubuntu" {
+		t.Errorf("the second entry says %q for linux, want the spelling it is there for", got)
 	}
 }
 
@@ -472,5 +508,39 @@ func TestConfig_carriesTheAssetFilters(t *testing.T) {
 	}
 	if got := cfg.AssetFilters[0].AllAssetsFilter; got != `Asset matches "^codex-package-"` {
 		t.Errorf("the first filter is %q", got)
+	}
+}
+
+// A run of empty overrides at the end is the same answer repeated, and one of them has to
+// stay.
+//
+// qdrant/qdrant is the shape: its oldest entry says no_asset, and a version matching none
+// of the overrides takes the first. Dropping the entry that catches everything would
+// resolve every recent version to no asset at all.
+func TestConfig_collapsesTrailingEmpty(t *testing.T) {
+	t.Parallel()
+	no := true
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "qdrant",
+		RepoName:           "qdrant",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver("<= 1.1.3") || Version == "v1.3.1"`, NoAsset: &no},
+			{VersionConstraints: `Version == "v1.3.0"`, Asset: "qdrant-{{.Version}}.tar.gz"},
+			{VersionConstraints: `semver("< 1.8.0")`, Asset: "qdrant-{{.Version}}.tar.gz"},
+			{VersionConstraints: "true", Asset: "qdrant-{{.Version}}.tar.gz"},
+		},
+	}, nil)
+
+	if len(cfg.VersionOverrides) != 2 {
+		t.Fatalf("got %d overrides, want the one that says no_asset and the one that catches everything:\n%+v",
+			len(cfg.VersionOverrides), cfg.VersionOverrides)
+	}
+	if cfg.VersionOverrides[0].NoAsset == nil || !*cfg.VersionOverrides[0].NoAsset {
+		t.Error("the entry that says no_asset went")
+	}
+	if got := cfg.VersionOverrides[1].VersionConstraints; got != "true" {
+		t.Errorf("the last entry is %q, want the one everything matches", got)
 	}
 }
