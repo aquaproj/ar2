@@ -187,7 +187,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 // release's rocm or jetpack build is kept from being taken for the ordinary one --
 // and they live in the definition rather than in the release.
 func definition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args, pkgName string, base *aquaregistry.PackageInfo) (*aquag2.Config, error) {
-	cfg, err := g2.New(gh, nil, nil, args.G2Owner, args.G2Repo).Config(ctx, pkgName)
+	cfg, err := g2.New(gh, nil, nil, args.G2Owner, args.G2Repo, args.Version).Config(ctx, pkgName)
 	if err != nil {
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}

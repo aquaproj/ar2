@@ -56,7 +56,7 @@ type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
-	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
+	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
 
 // GraphQL is the part of GitHub's GraphQL API a run uses.

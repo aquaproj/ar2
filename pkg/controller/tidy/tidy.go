@@ -27,7 +27,7 @@ type Registry interface {
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
-	CreatePullRequest(ctx context.Context, pkgName, title, body string) (*gogithub.PullRequest, error)
+	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
 
 // Definitions reads every package branch's definition in one pass.
@@ -167,7 +167,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 	if err := c.g2.Commit(ctx, g2.HeadBranchName(pkgName), base, title, files); err != nil {
 		return fmt.Errorf("commit the definition: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequest(ctx, pkgName, title, body(removed))
+	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, body(removed))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}

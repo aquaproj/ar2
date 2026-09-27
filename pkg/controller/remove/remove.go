@@ -37,7 +37,7 @@ type Registry interface {
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	VersionFiles(ctx context.Context, pkgName string) ([]string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
-	CreatePullRequestFrom(ctx context.Context, head, base, title, body string) (*gogithub.PullRequest, error)
+	CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error)
 }
 
 // Controller removes packages.
@@ -114,7 +114,7 @@ func (c *Controller) stopServing(ctx context.Context, logger *slog.Logger, in *I
 	if err := c.g2.Commit(ctx, branch, parent, title, files); err != nil {
 		return nil, fmt.Errorf("commit the registry's configuration and catalogue: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequestFrom(ctx, branch, c.baseBranch, title, stopBody(in))
+	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, branch, c.baseBranch, title, stopBody(in))
 	if err != nil {
 		return nil, fmt.Errorf("open the pull request that stops the package being served: %w", err)
 	}
@@ -177,7 +177,7 @@ func (c *Controller) dropVersions(ctx context.Context, logger *slog.Logger, in *
 	if err := c.g2.Commit(ctx, g2.HeadBranchName(in.PkgName), parent, title, files); err != nil {
 		return fmt.Errorf("commit the removal of the generated files: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequestFrom(ctx, g2.HeadBranchName(in.PkgName), branch, title,
+	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, g2.HeadBranchName(in.PkgName), branch, title,
 		dropBody(in, paths, stop))
 	if err != nil {
 		return fmt.Errorf("open the pull request that drops the generated files: %w", err)

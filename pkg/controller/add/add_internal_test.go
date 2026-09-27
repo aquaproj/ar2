@@ -33,7 +33,7 @@ func (f *fakeRegistry) Commit(_ context.Context, _, _, _ string, files []*g2.Fil
 	return nil
 }
 
-func (f *fakeRegistry) CreatePullRequest(_ context.Context, _, _, _ string) (*gogithub.PullRequest, error) {
+func (f *fakeRegistry) CreatePullRequest(_ context.Context, _ *slog.Logger, _, _, _ string) (*gogithub.PullRequest, error) {
 	f.created++
 	return &gogithub.PullRequest{Number: new(1)}, nil
 }

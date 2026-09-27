@@ -35,17 +35,20 @@ type Client struct {
 	// requests and that is all, so the checks still decide what merges. When it
 	// isn't configured the ordinary client is used, which is what a local run does.
 	prGH *gogithub.Client
+	// version is the ar2 that is running. Every pull request it opens is labelled with
+	// it, so that the ones an older ar2 made can be found together.
+	version string
 }
 
-// New creates a Client. branchGH and prGH may be nil.
-func New(gh, branchGH, prGH *gogithub.Client, owner, repo string) *Client {
+// New creates a Client. branchGH and prGH may be nil, and an empty version labels nothing.
+func New(gh, branchGH, prGH *gogithub.Client, owner, repo, version string) *Client {
 	if branchGH == nil {
 		branchGH = gh
 	}
 	if prGH == nil {
 		prGH = gh
 	}
-	return &Client{gh: gh, branchGH: branchGH, prGH: prGH, owner: owner, repo: repo}
+	return &Client{gh: gh, branchGH: branchGH, prGH: prGH, owner: owner, repo: repo, version: version}
 }
 
 // Versions returns the versions of the package whose registry.json is in the

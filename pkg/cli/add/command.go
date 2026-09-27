@@ -126,7 +126,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 		return err //nolint:wrapcheck
 	}
 
-	c := ctrl.New(g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo), gh.Repositories)
+	c := ctrl.New(g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version), gh.Repositories)
 	changed, err := c.Add(ctx, logger.Logger, &ctrl.Input{
 		PkgName:  pkgName,
 		Repo:     args.Repo,

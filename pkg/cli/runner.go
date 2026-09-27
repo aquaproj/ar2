@@ -25,7 +25,7 @@ import (
 
 // Run creates and executes the ar2 CLI application.
 func Run(ctx context.Context, logger *slogutil.Logger, env *cobrautil.Env) error {
-	gFlags := &flag.GlobalFlags{}
+	gFlags := &flag.GlobalFlags{Version: env.Version}
 	// The context reaches the commands through ExecuteContext below, which is what
 	// cobra hands to the action as cmd.Context(); building the tree needs none.
 	cmd := newCommand(logger, env, gFlags) //nolint:contextcheck

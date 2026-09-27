@@ -105,7 +105,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 
 	// Auto-merge is turned on with the ordinary token: it needs the pull request the app
 	// just opened, not the app.
-	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo),
+	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version),
 		graphql.Branches(args.G2Owner, args.G2Repo), graphql)
 	return c.Tidy(ctx, logger.Logger, &ctrl.Args{ //nolint:wrapcheck
 		Packages: pkgNames,

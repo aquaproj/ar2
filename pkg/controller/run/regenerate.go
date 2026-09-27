@@ -251,7 +251,7 @@ func (c *Controller) openRegeneratedPullRequest(ctx context.Context, logger *slo
 	if err := c.g2.Commit(ctx, g2.HeadBranchName(pkgName), base, title, files); err != nil {
 		return fmt.Errorf("commit registry.json: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequest(ctx, pkgName, title, regenerateBody(versions))
+	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, regenerateBody(versions))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
