@@ -46,3 +46,49 @@ func TestConfig_replacementsAllKnown(t *testing.T) {
 		t.Errorf("the replacements are %+v, want none", cfg.Replacements)
 	}
 }
+
+// goos, goarch, envs and variants are conditions: they say what an override matches and
+// change nothing, so an override carrying only those says nothing here. aqua-registry
+// writes one first so that an aqua too old to know variants matches it and stays on the
+// asset it always had; nothing reading this registry is that old.
+func TestConfig_conditionOnlyOverride(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "pnpm",
+		RepoName:           "pnpm",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{
+				VersionConstraints: "true",
+				Asset:              "pnpm-{{.OS}}-{{.Arch}}.{{.Format}}",
+				Format:             "tar.gz",
+				Files:              []*aquaregistry.File{{Name: "pnpm"}},
+				Overrides: []*aquaregistry.Override{
+					{GOOS: "linux", Variants: []*aquaregistry.Variant{{Key: "libc", Value: "glibc"}}},
+					{
+						GOOS:     "linux",
+						Asset:    "pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}",
+						Variants: []*aquaregistry.Variant{{Key: "libc", Value: "musl"}},
+					},
+				},
+			},
+		},
+	}, nil)
+
+	if len(cfg.VersionOverrides) == 0 {
+		t.Fatal("got no version_overrides")
+	}
+	overrides := cfg.VersionOverrides[0].Overrides
+	if len(overrides) != 1 {
+		t.Fatalf("got %d overrides, want the one that says something:\n%+v", len(overrides), overrides)
+	}
+	// And it keeps its asset: which libc a build was made against is in no asset name the
+	// parser knows how to read, so without it the override says nothing either.
+	if got := overrides[0].Asset; got != "pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}" {
+		t.Errorf("the asset is %q, want the musl one", got)
+	}
+	if len(overrides[0].Variants) != 1 || overrides[0].Variants[0].Value != "musl" {
+		t.Errorf("the override matches %+v, want the musl variant", overrides[0].Variants)
+	}
+}

@@ -137,22 +137,24 @@ func correctedFormat(asset, format string) string {
 	return format
 }
 
-// keepOverrides drops the overrides that only describe an asset name, and trims what
-// is left.
+// keepOverrides drops the overrides that say nothing, and trims what is left.
 //
-// An override narrowing by os or arch to change the asset is saying what the
-// release's own asset list says. One that carries files, variants or signing is
-// saying something the asset list doesn't: where the executable sits inside the
-// archive, which libc a build needs, or how it is signed.
+// goos, goarch, envs and variants are the conditions an override matches on; they change
+// nothing by themselves. So an override carrying only those says nothing here, however it
+// is written. In aqua-registry it can still mean something -- an aqua too old to know
+// variants drops the key and matches on the rest, so an empty entry placed first keeps
+// such an aqua on the asset it always had -- and nothing that reads this registry is that
+// old.
 //
-// The ones kept are trimmed the same way the rest of the definition is, since being
-// worth keeping for its files doesn't make an override's asset name worth keeping.
+// What an override can say is where the executable sits inside the archive, how the build
+// is signed, and which asset it is. That last one is usually what the release's own asset
+// list says, so it is trimmed -- except where the condition is a variant, because nothing
+// in an asset's name says which libc it was built against. There the asset is the whole
+// of what the override is for.
 func keepOverrides(overrides []*aquaregistry.Override, parentAsset string) []*aquaregistry.Override {
 	out := make([]*aquaregistry.Override, 0, len(overrides))
 	for _, ov := range overrides {
-		if len(ov.Variants) == 0 && len(ov.Files) == 0 &&
-			ov.Cosign == nil && ov.SLSAProvenance == nil && ov.Minisign == nil &&
-			ov.GitHubArtifactAttestations == nil {
+		if !saysSomething(ov) {
 			continue
 		}
 		out = append(out, trimOverrideByRuntime(ov, parentAsset))
@@ -163,12 +165,23 @@ func keepOverrides(overrides []*aquaregistry.Override, parentAsset string) []*aq
 	return out
 }
 
+// saysSomething reports whether an override changes what it matches, rather than only
+// saying what it matches.
+func saysSomething(ov *aquaregistry.Override) bool {
+	if len(ov.Files) != 0 || ov.Cosign != nil || ov.SLSAProvenance != nil ||
+		ov.Minisign != nil || ov.GitHubArtifactAttestations != nil {
+		return true
+	}
+	// A variant's asset, which the release's asset list can't be read for.
+	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "")
+}
+
 func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquaregistry.Override {
 	asset := ov.Asset
 	if asset == "" {
 		asset = parentAsset
 	}
-	return &aquaregistry.Override{
+	out := &aquaregistry.Override{
 		GOOS:     ov.GOOS,
 		GOArch:   ov.GOArch,
 		Envs:     ov.Envs,
@@ -187,6 +200,13 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		AppendExt:    ov.AppendExt,
 		Vars:         ov.Vars,
 	}
+	if len(ov.Variants) != 0 {
+		// The one asset the release can't be read for: which libc a build was made
+		// against is in no asset name the parser knows how to read.
+		out.Asset = ov.Asset
+		out.URL = ov.URL
+	}
+	return out
 }
 
 // Attestations writes the signing workflow under the name aqua reads first.
