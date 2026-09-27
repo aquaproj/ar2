@@ -78,3 +78,25 @@ func TestOverrideSigning_nothingToSay(t *testing.T) {
 		t.Error("the entry gained a signature")
 	}
 }
+
+// aqua gr infers SLSA provenance from an asset ending in .intoto.jsonl, and can't read
+// whether slsa-verifier will accept what is in it. A definition saying it won't is what
+// somebody found out about the release.
+func TestMerge_slsaProvenance(t *testing.T) {
+	t.Parallel()
+	inferred := &aquaregistry.PackageInfo{
+		SLSAProvenance: &aquaregistry.SLSAProvenance{
+			Type:  "github_release",
+			Asset: new("containerd-{{trimV .Version}}-attestation.intoto.jsonl"),
+		},
+	}
+	got := merge(inferred, &aquaregistry.PackageInfo{
+		SLSAProvenance: &aquaregistry.SLSAProvenance{Enabled: new(false)},
+	})
+	if got.SLSAProvenance.GetEnabled() {
+		t.Error("the definition says the provenance can't be verified and the inference kept the claim")
+	}
+	if inferred.SLSAProvenance.GetEnabled() != true {
+		t.Error("the inferred definition was modified")
+	}
+}
