@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
@@ -76,21 +77,33 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 // stops being true the next time upstream releases, and a lock file resolved from it
 // fails its checksum on every install after that.
 //
-// The second is aqua-registry's own version_filter, which says which of a repository's
-// tags are versions of the package at all.
+// The second is what the definition says about which of a repository's tags are
+// versions of the package at all: its version_filter, and its version_prefix, which
+// every version carries when a repository releases more than one program from the same
+// tags. bitwarden/clients tags the CLI cli-v2026.9.0 and the desktop application
+// desktop-v2026.9.0, and only one of them is this package.
 func filterVersions(logger *slog.Logger, versions []string, base *aquaregistry.PackageInfo) ([]string, error) {
 	var prog *vm.Program
-	if base != nil && base.VersionFilter != "" {
-		p, err := expr.CompileVersionFilter(base.VersionFilter)
-		if err != nil {
-			return nil, fmt.Errorf("compile the version_filter: %w", err)
+	prefix := ""
+	if base != nil {
+		prefix = base.VersionPrefix
+		if base.VersionFilter != "" {
+			p, err := expr.CompileVersionFilter(base.VersionFilter)
+			if err != nil {
+				return nil, fmt.Errorf("compile the version_filter: %w", err)
+			}
+			prog = p
 		}
-		prog = p
 	}
 	filtered := make([]string, 0, len(versions))
 	for _, version := range versions {
 		if genrgst.IsMovingTag(version) {
 			logger.Debug("the tag moves, so it is no version of the package", "version", version)
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(version, prefix) {
+			logger.Debug("the tag doesn't carry the package's version_prefix, so it is no version of it",
+				"version", version, "version_prefix", prefix)
 			continue
 		}
 		if prog != nil && !keepVersion(logger, prog, version) {

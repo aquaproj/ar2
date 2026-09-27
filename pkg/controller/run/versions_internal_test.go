@@ -47,3 +47,20 @@ func TestFilterVersions_movingTags(t *testing.T) {
 		})
 	}
 }
+
+// A repository releasing more than one program from the same tags gives each of them a
+// prefix, and only the tags carrying this package's are versions of it.
+// bitwarden/clients tags the CLI cli-v2026.9.0 and the desktop application
+// desktop-v2026.9.0, and the desktop archive holds no bw for the definition to name.
+func TestFilterVersions_versionPrefix(t *testing.T) {
+	t.Parallel()
+	got, err := filterVersions(discardLogger(),
+		[]string{"cli-v2026.9.0", "desktop-v2026.9.0", "browser-v2026.9.0", "cli-v2026.8.1"},
+		&aquaregistry.PackageInfo{VersionPrefix: "cli-v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"cli-v2026.9.0", "cli-v2026.8.1"}, got); diff != "" {
+		t.Errorf("the versions are wrong (-want +got):\n%s", diff)
+	}
+}
