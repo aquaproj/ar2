@@ -8,6 +8,7 @@ import (
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
+	gogithub "github.com/google/go-github/v92/github"
 )
 
 // regenerateRegistry is a registry that answers what a regeneration asks before it
@@ -26,6 +27,16 @@ func (f *regenerateRegistry) PackagesInFlight(_ context.Context) (map[string]str
 
 func (f *regenerateRegistry) Config(_ context.Context, _ string) (*aquag2.Config, error) {
 	return f.config, nil
+}
+
+// ConfigOnRef and VersionsOnRef are what a regeneration reads, whichever branch it is working
+// on: the package's own for what the registry holds.
+func (f *regenerateRegistry) ConfigOnRef(_ context.Context, _ string) (*aquag2.Config, error) {
+	return f.config, nil
+}
+
+func (f *regenerateRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
+	return f.versions, nil
 }
 
 func (f *regenerateRegistry) Versions(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
@@ -141,5 +152,65 @@ func TestRegenerateTitle(t *testing.T) {
 	}
 	if got, want := regenerateTitle("cli/cli", versions), "fix(cli/cli): generate 2 versions again"; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// waitingRegistry is a package with versions waiting for a definition: a pull request whose
+// branch is named after one of them, holding the versions and the definition somebody wrote.
+type waitingRegistry struct {
+	regenerateRegistry
+	pr *gogithub.PullRequest
+}
+
+func (f *waitingRegistry) WaitingPullRequest(_ context.Context, _ string) (*gogithub.PullRequest, error) {
+	return f.pr, nil
+}
+
+// --pending reads and writes the pull request's branch, not the package's. What is on it is the
+// definition that makes the versions true, and a commit built on the package branch would
+// write that away.
+func TestRegenerate_pendingWorksOnThatBranch(t *testing.T) {
+	t.Parallel()
+	branch := "ar2_ogham_2fexa_v0.8.0"
+	held := regenerateRegistry{
+		inFlight: map[string]struct{}{branch: {}},
+		config:   &aquag2.Config{},
+		versions: map[string]struct{}{},
+	}
+	reg := &waitingRegistry{regenerateRegistry: held, pr: &gogithub.PullRequest{
+		Number: new(9),
+		Head:   &gogithub.PullRequestBranch{Ref: new(branch)},
+	}}
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	changed, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{
+		PkgName: "ogham/exa",
+		Pending: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed != 0 {
+		t.Errorf("regenerated %d versions, want none: the branch holds none", changed)
+	}
+	// An open pull request of the package's own doesn't stop it, which is the check the
+	// other mode makes.
+	if reg.created != 0 {
+		t.Errorf("opened %d pull requests, want none: the one that was waiting is the answer", reg.created)
+	}
+}
+
+// Without a pull request waiting there is nothing for --pending to work on, and saying so is
+// better than regenerating what the registry holds by surprise.
+func TestRegenerate_pendingWithNothingWaiting(t *testing.T) {
+	t.Parallel()
+	held := regenerateRegistry{config: &aquag2.Config{}}
+	reg := &waitingRegistry{regenerateRegistry: held}
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	_, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{
+		PkgName: "ogham/exa",
+		Pending: true,
+	})
+	if !errors.Is(err, errNothingWaiting) {
+		t.Fatalf("got %v, want it to say nothing is waiting", err)
 	}
 }

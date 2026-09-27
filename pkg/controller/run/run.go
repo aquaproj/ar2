@@ -56,6 +56,11 @@ type Registry interface {
 // Contents is what aqua-registry-g2 holds, and how a branch of it is written.
 type Contents interface {
 	Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error)
+	// VersionsOnRef and ConfigOnRef read a branch that isn't a package's own, which is
+	// where a version waiting for a definition lives.
+	VersionsOnRef(ctx context.Context, logger *slog.Logger, ref string) (map[string]struct{}, error)
+	ConfigOnRef(ctx context.Context, ref string) (*aquag2.Config, error)
+	BranchSHA(ctx context.Context, branch string) (string, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
 	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	// File is the bytes a ref holds at a path, or "" when it holds nothing there.
@@ -70,6 +75,9 @@ type Contents interface {
 // already waiting for one.
 type PullRequests interface {
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
+	// WaitingPullRequest is the package's open pull request of versions waiting for a
+	// definition, which is what a regeneration of something unmerged works on.
+	WaitingPullRequest(ctx context.Context, pkgName string) (*gogithub.PullRequest, error)
 	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 	// CreatePullRequestFrom opens one from a branch of its own, which is what the versions
 	// waiting for a definition are on.

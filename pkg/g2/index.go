@@ -63,7 +63,7 @@ func (c *Client) File(ctx context.Context, ref, path string) (string, error) {
 // IndexPullRequest returns the open pull request updating the catalogue, or nil.
 func (c *Client) IndexPullRequest(ctx context.Context) (*gogithub.PullRequest, error) {
 	opts := &gogithub.PullRequestListOptions{
-		State: "open",
+		State: stateOpen,
 		Head:  c.owner + ":" + IndexBranch,
 	}
 	opts.PerPage = 1

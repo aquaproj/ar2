@@ -20,8 +20,17 @@ const ConfigFileName = aquag2.ConfigFileName
 // definition still lives in aqua-registry, and the next pull request for it carries
 // the converted one along with the generated files.
 func (c *Client) Config(ctx context.Context, pkgName string) (*aquag2.Config, error) {
+	return c.ConfigOnRef(ctx, BranchName(pkgName))
+}
+
+// ConfigOnRef returns the definition a ref holds, or nil when it holds none.
+//
+// The ref matters when the definition being generated from isn't the one the registry has
+// merged: a pull request that carries a definition somebody has just written is the only place
+// that version of it exists.
+func (c *Client) ConfigOnRef(ctx context.Context, ref string) (*aquag2.Config, error) {
 	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, ConfigFileName,
-		&gogithub.RepositoryContentGetOptions{Ref: BranchName(pkgName)})
+		&gogithub.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
 		// No file, or no branch at all for a package nothing has been generated
 		// for yet. Either way the definition isn't there.

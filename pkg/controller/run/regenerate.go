@@ -21,6 +21,11 @@ var (
 	errNoDefinition = errors.New("the package's branch holds no definition to generate from")
 	// errVersionNotHeld is returned for a version the registry doesn't have.
 	errVersionNotHeld = errors.New("the registry holds no such version of the package")
+	// errNothingWaiting is returned when nothing is waiting for a definition.
+	errNothingWaiting = errors.New("the package has no pull request of versions waiting for a definition")
+	// errNoBranch is returned when the branch went between finding the pull request and
+	// committing to it.
+	errNoBranch = errors.New("the branch isn't there")
 )
 
 // RegenerateInput is the one package a regeneration is for.
@@ -38,6 +43,10 @@ type RegenerateInput struct {
 	RegistryRef string
 	// DryRun says which versions would change and commits nothing.
 	DryRun bool
+	// Pending regenerates what is on the package's open pull request of versions waiting
+	// for a definition, from the definition that pull request carries, rather than what
+	// the registry holds.
+	Pending bool
 }
 
 // Regenerate generates versions the registry already holds, and opens a pull request
@@ -60,19 +69,20 @@ func (c *Controller) Regenerate(ctx context.Context, logger *slog.Logger, in *Re
 	defer c.report(logger, nil)
 	logger = logger.With("package", in.PkgName)
 
-	if err := c.noPullRequestInFlight(ctx, in.PkgName); err != nil {
-		return 0, err
-	}
-	def, err := c.definitionOnBranch(ctx, in.PkgName)
+	where, err := c.where(ctx, logger, in)
 	if err != nil {
 		return 0, err
 	}
-	versions, err := c.versionsToRegenerate(ctx, logger, in)
+	def, err := c.definitionOnRef(ctx, where.ref, in.PkgName)
+	if err != nil {
+		return 0, err
+	}
+	versions, err := c.versionsToRegenerate(ctx, logger, in, where)
 	if err != nil {
 		return 0, err
 	}
 
-	changed, err := c.differingVersions(ctx, logger, in, def, versions)
+	changed, err := c.differingVersions(ctx, logger, in, def, versions, where)
 	if err != nil {
 		return 0, err
 	}
@@ -89,10 +99,46 @@ func (c *Controller) Regenerate(ctx context.Context, logger *slog.Logger, in *Re
 		}
 		return len(changed), nil
 	}
-	if err := c.openRegeneratedPullRequest(ctx, logger, in.PkgName, changed); err != nil {
+	if err := c.commitRegenerated(ctx, logger, in.PkgName, changed, where); err != nil {
 		return 0, err
 	}
 	return len(changed), nil
+}
+
+// where says which branch a regeneration reads and writes.
+//
+// The registry's own for a version it holds: the definition on the package branch made the
+// file, and the correction goes to a pull request of its own.
+//
+// The pull request's for a version waiting for a definition. What is being regenerated exists
+// only there, the definition to generate it from is the one somebody has just written on it,
+// and the result belongs on the same branch: a version and the definition that makes it true
+// merge together or not at all.
+func (c *Controller) where(ctx context.Context, logger *slog.Logger, in *RegenerateInput) (*target, error) {
+	if !in.Pending {
+		if err := c.noPullRequestInFlight(ctx, in.PkgName); err != nil {
+			return nil, err
+		}
+		return &target{ref: g2.BranchName(in.PkgName)}, nil
+	}
+	pr, err := c.g2.WaitingPullRequest(ctx, in.PkgName)
+	if err != nil {
+		return nil, fmt.Errorf("look for the pull request of the versions waiting for a definition: %w", err)
+	}
+	if pr == nil {
+		return nil, fmt.Errorf("%w: %s", errNothingWaiting, in.PkgName)
+	}
+	logger.Info("regenerating what is waiting for a definition",
+		"number", pr.GetNumber(), "branch", pr.GetHead().GetRef())
+	return &target{ref: pr.GetHead().GetRef(), pending: true}, nil
+}
+
+// target is the branch a regeneration works on.
+type target struct {
+	ref string
+	// pending says the branch is a pull request's, so what is written goes onto it rather
+	// than into a pull request of its own.
+	pending bool
 }
 
 // noPullRequestInFlight refuses a package that already has one open.
@@ -117,8 +163,8 @@ func (c *Controller) noPullRequestInFlight(ctx context.Context, pkgName string) 
 // run writes the first time it reaches a package, and generating from it here would
 // produce files the registry's own definition doesn't produce -- which is the thing
 // this command exists to correct rather than to cause.
-func (c *Controller) definitionOnBranch(ctx context.Context, pkgName string) (*definition, error) {
-	cfg, err := c.g2.Config(ctx, pkgName)
+func (c *Controller) definitionOnRef(ctx context.Context, ref, pkgName string) (*definition, error) {
+	cfg, err := c.g2.ConfigOnRef(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}
@@ -133,10 +179,10 @@ func (c *Controller) definitionOnBranch(ctx context.Context, pkgName string) (*d
 // Only versions the registry holds. Generating one it doesn't would add it, which is
 // a run's job and reaches versions in the order the registry decides rather than the
 // order somebody typed.
-func (c *Controller) versionsToRegenerate(ctx context.Context, logger *slog.Logger, in *RegenerateInput) ([]string, error) {
-	held, err := c.g2.Versions(ctx, logger, in.PkgName)
+func (c *Controller) versionsToRegenerate(ctx context.Context, logger *slog.Logger, in *RegenerateInput, where *target) ([]string, error) {
+	held, err := c.g2.VersionsOnRef(ctx, logger, where.ref)
 	if err != nil {
-		return nil, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
+		return nil, fmt.Errorf("list the versions %s holds: %w", where.ref, err)
 	}
 	if len(in.Versions) == 0 {
 		return allVersions(held), nil
@@ -172,13 +218,12 @@ func allVersions(held map[string]struct{}) []string {
 // do. A regeneration that produced the same file for every version is what a package
 // nothing has changed under looks like, and it should come to nothing rather than to
 // a pull request.
-func (c *Controller) differingVersions(ctx context.Context, logger *slog.Logger, in *RegenerateInput, def *definition, versions []string) ([]*regenerated, error) {
+func (c *Controller) differingVersions(ctx context.Context, logger *slog.Logger, in *RegenerateInput, def *definition, versions []string, where *target) ([]*regenerated, error) {
 	input := &Input{
 		Verify:      in.Verify,
 		PkgInfos:    map[string]*aquaregistry.PackageInfo{in.PkgName: in.Base},
 		RegistryRef: in.RegistryRef,
 	}
-	branch := g2.BranchName(in.PkgName)
 	changed := make([]*regenerated, 0, len(versions))
 	for _, tag := range versions {
 		v, content, err := c.regenerate(ctx, logger, input, def, in.PkgName, tag)
@@ -190,7 +235,7 @@ func (c *Controller) differingVersions(ctx context.Context, logger *slog.Logger,
 				"version", tag, "error", err.Error())
 			continue
 		}
-		held, err := c.g2.File(ctx, branch, aquag2.Path(tag))
+		held, err := c.g2.File(ctx, where.ref, aquag2.Path(tag))
 		if err != nil {
 			return nil, fmt.Errorf("get the registry.json the branch holds: %w", err)
 		}
@@ -237,10 +282,10 @@ func (c *Controller) regenerate(ctx context.Context, logger *slog.Logger, input 
 // version nothing held, so CI passing is the whole of what it needed; this one
 // replaces what the registry already serves, and what CI can say about the new file
 // is that it describes a real release -- not that replacing the old one was right.
-func (c *Controller) openRegeneratedPullRequest(ctx context.Context, logger *slog.Logger, pkgName string, versions []*regenerated) error {
-	base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
+func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger, pkgName string, versions []*regenerated, where *target) error {
+	base, err := c.regenerationParent(ctx, pkgName, where)
 	if err != nil {
-		return fmt.Errorf("get the package branch: %w", err)
+		return err
 	}
 	files := make([]*g2.File, 0, len(versions))
 	for _, r := range versions {
@@ -248,8 +293,20 @@ func (c *Controller) openRegeneratedPullRequest(ctx context.Context, logger *slo
 	}
 
 	title := regenerateTitle(pkgName, versions)
-	if err := c.g2.Commit(ctx, g2.HeadBranchName(pkgName), base, title, files); err != nil {
+	branch := g2.HeadBranchName(pkgName)
+	if where.pending {
+		// The pull request that is waiting, so that what makes the versions true arrives
+		// with them. Its own tip is the parent, because the definition somebody wrote is
+		// on it and a commit built on the package branch would throw that away.
+		branch = where.ref
+	}
+	if err := c.g2.Commit(ctx, branch, base, title, files); err != nil {
 		return fmt.Errorf("commit registry.json: %w", err)
+	}
+	if where.pending {
+		logger.Info("generated again onto the pull request that was waiting",
+			"branch", branch, "num_of_versions", len(versions))
+		return nil
 	}
 	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, regenerateBody(versions))
 	if err != nil {
@@ -294,4 +351,27 @@ func regenerateBody(versions []*regenerated) string {
 		"signature the entry claims verifies. What it can't check is whether replacing the old file was " +
 		"right, so auto-merge is off and this needs reading. The old file is in the branch's history.\n")
 	return b.String()
+}
+
+// regenerationParent is the commit what is regenerated is built on.
+//
+// The package branch for a correction of what the registry holds, and the waiting pull
+// request's own tip for what is on it: the definition that makes those versions true is a
+// commit there, and building on the package branch would write it away.
+func (c *Controller) regenerationParent(ctx context.Context, pkgName string, where *target) (string, error) {
+	if !where.pending {
+		base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
+		if err != nil {
+			return "", fmt.Errorf("get the package branch: %w", err)
+		}
+		return base, nil
+	}
+	sha, err := c.g2.BranchSHA(ctx, where.ref)
+	if err != nil {
+		return "", fmt.Errorf("get the branch of the pull request: %w", err)
+	}
+	if sha == "" {
+		return "", fmt.Errorf("%w: %s", errNoBranch, where.ref)
+	}
+	return sha, nil
 }

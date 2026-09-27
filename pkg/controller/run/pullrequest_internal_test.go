@@ -67,6 +67,24 @@ func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g
 	return nil
 }
 
+// The readers of a branch that isn't a package's own are never asked here: nothing in these
+// tests regenerates what is waiting for a definition.
+func (f *fakeRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (f *fakeRegistry) ConfigOnRef(_ context.Context, _ string) (*aquag2.Config, error) {
+	return nil, nil //nolint:nilnil
+}
+
+func (f *fakeRegistry) BranchSHA(_ context.Context, _ string) (string, error) {
+	return "base-sha", nil
+}
+
+func (f *fakeRegistry) WaitingPullRequest(_ context.Context, _ string) (*gogithub.PullRequest, error) {
+	return nil, nil //nolint:nilnil
+}
+
 func (f *fakeRegistry) Label(_ context.Context, _ *slog.Logger, _ int, name string) {
 	f.labels = append(f.labels, name)
 }

@@ -14,6 +14,9 @@ import (
 // pullRequestsPerPage is the page size used to list open pull requests.
 const pullRequestsPerPage = 100
 
+// stateOpen asks GitHub for the pull requests that haven't been merged or closed.
+const stateOpen = "open"
+
 // PackagesInFlight returns the packages that already have an open pull request.
 //
 // Asking the repository which versions it holds can't see a pull request that hasn't
@@ -24,7 +27,7 @@ const pullRequestsPerPage = 100
 // because a run touches many packages and there are rarely many pull requests.
 func (c *Client) PackagesInFlight(ctx context.Context) (map[string]struct{}, error) {
 	inFlight := map[string]struct{}{}
-	opts := &gogithub.PullRequestListOptions{State: "open"}
+	opts := &gogithub.PullRequestListOptions{State: stateOpen}
 	opts.PerPage = pullRequestsPerPage
 	for {
 		prs, resp, err := c.gh.PullRequests.List(ctx, c.owner, c.repo, opts)
@@ -158,3 +161,30 @@ func (c *Client) ensureLabel(ctx context.Context, name string) error {
 // labelColor is GitHub's own default, because the label says what made the pull request
 // rather than how much it matters.
 const labelColor = "ededed"
+
+// WaitingPullRequest returns the package's open pull request of versions waiting for a
+// definition, or nil when it has none.
+//
+// It is the one whose head branch is named after a version rather than after the package: the
+// pull request a run opens for everything it generated is on the package's own branch, and
+// this is the other kind.
+func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogithub.PullRequest, error) {
+	prefix := HeadBranchName(pkgName) + "_"
+	opts := &gogithub.PullRequestListOptions{State: stateOpen}
+	opts.PerPage = pullRequestsPerPage
+	for {
+		prs, resp, err := c.gh.PullRequests.List(ctx, c.owner, c.repo, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list open pull requests: %w", err)
+		}
+		for _, pr := range prs {
+			if strings.HasPrefix(pr.GetHead().GetRef(), prefix) {
+				return pr, nil
+			}
+		}
+		if resp.NextPage == 0 {
+			return nil, nil //nolint:nilnil // no pull request is waiting, which isn't a failure
+		}
+		opts.Page = resp.NextPage
+	}
+}
