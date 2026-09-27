@@ -46,12 +46,14 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 			logger.Warn("can't open this format here, so its files go unchecked",
 				"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
 		} else if extract {
-			review, missing, err := v.fillByExtracting(ctx, logger, pkgName, version, asset)
+			review, missing, holds, err := v.fillByExtracting(ctx, logger, pkgName, version, asset)
 			if len(missing) > 0 {
 				// The entry names a file the archive doesn't hold anywhere, so what it
 				// says about this environment can't be true. The caller decides what
-				// becomes of such a version; what this reports is which files those are.
-				unresolved = append(unresolved, asset.OS+"/"+asset.Arch+": "+strings.Join(missing, ", "))
+				// becomes of such a version; what this reports is which files those are,
+				// and what the archive holds instead -- the one thing that says what the
+				// definition should have said.
+				unresolved = append(unresolved, describe(asset, missing, holds))
 				continue
 			}
 			if err == nil {
@@ -79,26 +81,38 @@ func (v *Verifier) Fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 // fillByExtracting extracts the asset, resolves its files, and records the checksum. It
 // reports whether what it resolved has to be looked at, and which files it couldn't resolve
 // at all.
-func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (bool, []string, error) {
+func (v *Verifier) fillByExtracting(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (bool, []string, []string, error) {
 	result, err := v.Verify(ctx, logger, pkgName, version, asset)
 	if err != nil {
-		return false, nil, fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
+		return false, nil, nil, fmt.Errorf("verify the asset for %s/%s: %w", asset.OS, asset.Arch, err)
 	}
 	asset.Files = result.Files
 	asset.LinkedLibc = result.LinkedLibc
 	if err := setChecksum(asset, result.Checksum); err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 	if len(result.Unresolved) > 0 {
 		logger.Warn("the archive holds no file of this name, anywhere",
-			"os", asset.OS, "arch", asset.Arch, "unresolved", result.Unresolved)
-		return false, result.Unresolved, nil
+			"os", asset.OS, "arch", asset.Arch,
+			"unresolved", result.Unresolved, "archive_holds", result.Holds)
+		return false, result.Unresolved, result.Holds, nil
 	}
 	if result.NeedsReview {
 		logger.Warn("the files of this asset don't match the archive",
 			"os", asset.OS, "arch", asset.Arch)
 	}
-	return result.NeedsReview, nil, nil
+	return result.NeedsReview, nil, nil, nil
+}
+
+// describe says what one environment couldn't resolve and what its archive holds instead.
+func describe(asset *generate.Asset, missing, holds []string) string {
+	out := asset.OS + "/" + asset.Arch + ": " + strings.Join(missing, ", ")
+	if len(holds) == 0 {
+		// An archive of nothing, which is a release that packaged nothing rather than one
+		// whose layout moved.
+		return out + " (the archive holds nothing)"
+	}
+	return out + " (the archive holds " + strings.Join(holds, ", ") + ")"
 }
 
 // fillChecksum downloads the asset only when its checksum is still missing.

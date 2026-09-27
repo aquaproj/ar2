@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
@@ -96,6 +97,10 @@ type Result struct {
 	NeedsReview bool
 	// Unresolved names the files that aren't anywhere in the archive.
 	Unresolved []string
+	// Holds is what the archive does hold, when something couldn't be resolved. It is the
+	// one thing that says what the definition should have said, and the archive is gone as
+	// soon as the run ends.
+	Holds []string
 	// LinkedLibc is the libc the executables need, read from the binaries. It is
 	// empty when the asset holds nothing that can be read that way.
 	LinkedLibc string
@@ -171,7 +176,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 	}
 
 	result := &Result{Checksum: checksum}
-	result.Files, result.NeedsReview, result.Unresolved = resolveFiles(logger, dest, asset.Files)
+	result.Files, result.NeedsReview, result.Unresolved, result.Holds = resolveFiles(logger, dest, asset.Files)
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.
 	if asset.OS == "linux" {
@@ -187,7 +192,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 // extracted files is a command. The name comes from registry.yaml and doesn't change
 // when an upstream reorganizes its archive, so looking for it is a far narrower
 // guess than picking a binary out of the tree.
-func resolveFiles(logger *slog.Logger, dir string, files []*generate.File) ([]*generate.File, bool, []string) {
+func resolveFiles(logger *slog.Logger, dir string, files []*generate.File) ([]*generate.File, bool, []string, []string) {
 	var (
 		needsReview bool
 		unresolved  []string
@@ -224,7 +229,30 @@ func resolveFiles(logger *slog.Logger, dir string, files []*generate.File) ([]*g
 		needsReview = true
 		out = append(out, &generate.File{Name: file.Name, Src: found})
 	}
-	return out, needsReview, unresolved
+	if len(unresolved) == 0 {
+		return out, needsReview, nil, nil
+	}
+	// What the archive does hold, because that is what whoever writes the definition
+	// needs and there is no other way to see it: the asset is downloaded by a run and
+	// gone by the time anybody reads about it.
+	return out, needsReview, unresolved, holds(index)
+}
+
+// holdsLimit is how many of an archive's files are worth saying. A release that packs a
+// whole tree has nothing to tell a reader after the first few names.
+const holdsLimit = 20
+
+// holds is what the archive holds, as paths, in order and capped.
+func holds(index map[string]string) []string {
+	paths := make([]string, 0, len(index))
+	for _, path := range index {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) > holdsLimit {
+		return append(paths[:holdsLimit:holdsLimit], fmt.Sprintf("and %d more", len(paths)-holdsLimit))
+	}
+	return paths
 }
 
 // exists reports whether src is present under dir.

@@ -32,16 +32,19 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func TestResolveFiles(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name        string
-		archive     []string
-		files       []*generate.File
-		want        []*generate.File
-		needsReview bool
-		unresolved  []string
-	}{
+// resolveCase is one extracted archive, and what resolving the definition's files against it
+// should make of them.
+type resolveCase struct {
+	name        string
+	archive     []string
+	files       []*generate.File
+	want        []*generate.File
+	needsReview bool
+	unresolved  []string
+}
+
+func resolveCases() []resolveCase {
+	return []resolveCase{
 		{
 			// The common case: nothing moved, so the registry's template is carried
 			// over and the pull request can merge on its own.
@@ -84,11 +87,15 @@ func TestResolveFiles(t *testing.T) {
 			want:    []*generate.File{{Name: "gh"}},
 		},
 	}
-	for _, tt := range tests {
+}
+
+func TestResolveFiles(t *testing.T) {
+	t.Parallel()
+	for _, tt := range resolveCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			dir := newArchive(t, tt.archive...)
-			files, needsReview, unresolved := resolveFiles(discardLogger(), dir, tt.files)
+			files, needsReview, unresolved, holds := resolveFiles(discardLogger(), dir, tt.files)
 			if diff := cmp.Diff(tt.want, files); diff != "" {
 				t.Errorf("files are wrong (-want +got):\n%s", diff)
 			}
@@ -98,6 +105,7 @@ func TestResolveFiles(t *testing.T) {
 			if diff := cmp.Diff(tt.unresolved, unresolved); diff != "" {
 				t.Errorf("unresolved is wrong (-want +got):\n%s", diff)
 			}
+			checkHolds(t, unresolved, holds, tt.archive)
 		})
 	}
 }
@@ -133,5 +141,17 @@ func TestExtractable(t *testing.T) {
 		if got, want := Extractable(format), err == nil; got != want {
 			t.Errorf("%q is %v, want %v: %s is %v", format, got, want, tool, err)
 		}
+	}
+}
+
+// checkHolds asserts what the archive holds is said when, and only when, something couldn't be
+// resolved -- which is the only time anybody needs it.
+func checkHolds(t *testing.T, unresolved, holds, archive []string) {
+	t.Helper()
+	if len(unresolved) == 0 && len(holds) > 0 {
+		t.Errorf("said what the archive holds with nothing unresolved: %v", holds)
+	}
+	if len(unresolved) > 0 && len(holds) == 0 && len(archive) > 0 {
+		t.Error("something was unresolved and it didn't say what the archive holds")
 	}
 }
