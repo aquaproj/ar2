@@ -18,7 +18,8 @@ import (
 // What stays is what the asset list can't answer, and what it answers wrongly often
 // enough to be worth correcting by hand. The executables inside the archive, the
 // builds that differ by libc, and how an asset is signed are not in the asset list at
-// all. The format and the replacements are read off the asset names, which works
+// all. Where the checksum file is doesn't stay either, for the other reason: a
+// generated entry carries the digest of the asset, so nothing reads that file. The format and the replacements are read off the asset names, which works
 // until a name carries no extension or spells an architecture in a way aqua doesn't
 // know.
 //
@@ -26,7 +27,10 @@ import (
 // module path, so for those the definition is all there is.
 func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	if pkgInfo.Type != aquaregistry.PkgInfoTypeGitHubRelease {
-		return pkgInfo
+		// A release says nothing about an http URL or a Go module path, so the
+		// definition is all there is -- except for the checksum file, which nothing
+		// reads whatever the package is.
+		return withoutChecksum(pkgInfo)
 	}
 	trimmed := &aquaregistry.PackageInfo{
 		Name:      pkgInfo.Name,
@@ -48,7 +52,6 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		SLSAProvenance:             pkgInfo.SLSAProvenance,
 		Minisign:                   pkgInfo.Minisign,
 		GitHubArtifactAttestations: Attestations(pkgInfo.GitHubArtifactAttestations),
-		Checksum:                   signedChecksum(pkgInfo.Checksum),
 
 		Format:       correctedFormat(pkgInfo.Asset, pkgInfo.Format),
 		Replacements: unguessableSpellings(pkgInfo.Replacements),
@@ -84,7 +87,6 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		SLSAProvenance:             vo.SLSAProvenance,
 		Minisign:                   vo.Minisign,
 		GitHubArtifactAttestations: Attestations(vo.GitHubArtifactAttestations),
-		Checksum:                   signedChecksum(vo.Checksum),
 
 		Format:       correctedFormat(asset, vo.Format),
 		Replacements: unguessableSpellings(vo.Replacements),
@@ -98,19 +100,23 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 	}
 }
 
-// signedChecksum keeps a checksum file only when its signature can be verified.
+// withoutChecksum returns the definition with nothing said about the checksum file.
 //
-// An unsigned one is fetched from the same place as the asset, so believing it adds
-// nothing to downloading the asset and hashing it, which is what happens anyway. The
-// definition doesn't need to say where a file nothing will read lives.
-func signedChecksum(chksum *aquaregistry.Checksum) *aquaregistry.Checksum {
-	if chksum == nil {
-		return nil
+// aqua-registry verifies an asset against that file, signature and all. Here every entry
+// carries the digest of the asset itself, taken when the entry was generated and checked
+// again by the package branch's CI on a machine of the environment the entry is for, so
+// nothing ever fetches the file -- a generated entry has nowhere to say that it exists.
+// A definition saying where it is says it to nobody.
+func withoutChecksum(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
+	out := pkgInfo.Copy()
+	out.Checksum = nil
+	out.VersionOverrides = make([]*aquaregistry.VersionOverride, 0, len(pkgInfo.VersionOverrides))
+	for _, vo := range pkgInfo.VersionOverrides {
+		copied := *vo
+		copied.Checksum = nil
+		out.VersionOverrides = append(out.VersionOverrides, &copied)
 	}
-	if chksum.GetCosign() == nil && chksum.GetMinisign() == nil && chksum.GetGitHubArtifactAttestations() == nil {
-		return nil
-	}
-	return chksum
+	return out
 }
 
 // correctedFormat keeps a format only when it disagrees with what the asset name
@@ -192,7 +198,6 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		SLSAProvenance:             ov.SLSAProvenance,
 		Minisign:                   ov.Minisign,
 		GitHubArtifactAttestations: Attestations(ov.GitHubArtifactAttestations),
-		Checksum:                   signedChecksum(ov.Checksum),
 
 		Format:       correctedFormat(asset, ov.Format),
 		Replacements: unguessableSpellings(ov.Replacements),

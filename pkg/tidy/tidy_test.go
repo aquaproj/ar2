@@ -15,47 +15,59 @@ import (
 // like is what the test reads: a definition is a file on a package branch, and a fixture
 // shortened to fit in a function stops being one.
 type definitionCase struct {
-	name    string
-	fixture string
-	removed []string
+	name      string
+	fixture   string
+	spellings []string
+	checksums int
 }
 
 func definitionCases() []definitionCase {
 	return []definitionCase{
 		{
-			name:    "a block of nothing but known spellings goes altogether",
-			fixture: "known",
-			removed: []string{"amd64: x86_64", "darwin: apple-darwin"},
+			name:      "a block of nothing but known spellings goes altogether",
+			fixture:   "known",
+			spellings: []string{"amd64: x86_64", "darwin: apple-darwin"},
 		},
 		{
-			name:    "what the parser can't guess stays, and the rest goes",
-			fixture: "partial",
-			removed: []string{"amd64: x86_64"},
+			name:      "what the parser can't guess stays, and the rest goes",
+			fixture:   "partial",
+			spellings: []string{"amd64: x86_64"},
 		},
 		{
-			name:    "every block is reached, wherever the definition puts one",
-			fixture: "nested",
-			removed: []string{"arm64: aarch64", "windows: pc-windows-msvc"},
+			name:      "every block is reached, wherever the definition puts one",
+			fixture:   "nested",
+			spellings: []string{"arm64: aarch64", "windows: pc-windows-msvc"},
+		},
+		{
+			// aqua-registry verifies an asset against the checksum file. A generated
+			// entry carries the digest of the asset, and has nowhere to say that the
+			// file exists, so the definition was saying it to nobody.
+			name:      "the checksum file goes, wherever the definition says it",
+			fixture:   "checksum",
+			checksums: 2,
 		},
 	}
 }
 
-func TestReplacements(t *testing.T) {
+func TestDefinition(t *testing.T) {
 	t.Parallel()
 	for _, tt := range definitionCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			in := fixture(t, tt.fixture+".in.yaml")
 			want := fixture(t, tt.fixture+".want.yaml")
-			got, removed, err := tidy.Replacements(in)
+			got, removed, err := tidy.Definition(in)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("the definition is wrong (-want +got):\n%s", diff)
 			}
-			if diff := cmp.Diff(tt.removed, removed); diff != "" {
-				t.Errorf("what went is wrong (-want +got):\n%s", diff)
+			if diff := cmp.Diff(tt.spellings, removed.Spellings); diff != "" {
+				t.Errorf("the spellings that went are wrong (-want +got):\n%s", diff)
+			}
+			if removed.Checksums != tt.checksums {
+				t.Errorf("%d checksum blocks went, want %d", removed.Checksums, tt.checksums)
 			}
 		})
 	}
@@ -73,17 +85,17 @@ func fixture(t *testing.T, name string) string {
 
 // A spelling the parser can't read is the only thing that makes such an asset belong to a
 // platform, so nothing is taken out of a definition that says only those.
-func TestReplacements_keepsWhatItCantGuess(t *testing.T) {
+func TestDefinition_keepsWhatItCantGuess(t *testing.T) {
 	t.Parallel()
 	in := "type: github_release\nreplacements:\n  linux: ubuntu\n"
-	got, removed, err := tidy.Replacements(in)
+	got, removed, err := tidy.Definition(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != in {
 		t.Errorf("the definition changed:\n%s", got)
 	}
-	if len(removed) != 0 {
+	if removed.Any() {
 		t.Errorf("took out %v", removed)
 	}
 }
@@ -106,14 +118,14 @@ all_assets_filter: Asset matches "^goose-"
 files:
   - name: goose
 `
-	got, removed, err := tidy.Replacements(in)
+	got, removed, err := tidy.Definition(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("the definition is wrong (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff([]string{"amd64: x86_64"}, removed); diff != "" {
+	if diff := cmp.Diff([]string{"amd64: x86_64"}, removed.Spellings); diff != "" {
 		t.Errorf("what went is wrong (-want +got):\n%s", diff)
 	}
 }

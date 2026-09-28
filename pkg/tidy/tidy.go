@@ -18,11 +18,28 @@ import (
 	"github.com/goccy/go-yaml/parser"
 )
 
-// replacementsKey is the field that says how a release writes a platform.
-const replacementsKey = "replacements"
+const (
+	// replacementsKey is the field that says how a release writes a platform.
+	replacementsKey = "replacements"
+	// checksumKey is the field that says where the checksum file is and how it is signed.
+	checksumKey = "checksum"
+)
 
-// Replacements takes the spellings the parser works out for itself out of a definition,
-// and says which ones went.
+// Removed is what a tidying took out of a definition.
+type Removed struct {
+	// Spellings are the replacements that went, as "<platform>: <spelling>".
+	Spellings []string
+	// Checksums is how many checksum blocks went.
+	Checksums int
+}
+
+// Any reports whether anything went.
+func (r *Removed) Any() bool {
+	return len(r.Spellings) > 0 || r.Checksums > 0
+}
+
+// Definition takes out of a definition what it doesn't have to say: the spellings the
+// parser works out for itself, and where the checksum file is. It says what went.
 //
 // The file is edited as a syntax tree rather than read into a definition and written back
 // out. A definition on a package branch is a file a maintainer edits: the comment saying
@@ -32,24 +49,44 @@ const replacementsKey = "replacements"
 // Every replacements block is reached, wherever it is: the definition's own, each
 // version_override's, and each override's within them. A block left with nothing goes
 // altogether rather than staying as an empty map.
-func Replacements(content string) (string, []string, error) {
+func Definition(content string) (string, *Removed, error) {
 	file, err := parser.ParseBytes([]byte(content), parser.ParseComments)
 	if err != nil {
 		return "", nil, fmt.Errorf("parse a package definition as YAML: %w", err)
 	}
+	removed := &Removed{}
 	if len(file.Docs) == 0 {
-		return content, nil, nil
+		return content, removed, nil
 	}
-	var removed []string
 	for _, mapping := range mappings(file.Docs[0].Body) {
-		removed = append(removed, trim(mapping)...)
+		removed.Spellings = append(removed.Spellings, trim(mapping)...)
+		if dropChecksum(mapping) {
+			removed.Checksums++
+		}
 	}
-	if len(removed) == 0 {
-		return content, nil, nil
+	if !removed.Any() {
+		return content, removed, nil
 	}
 	// Exactly one newline at the end, whether or not the rendering kept the one the
 	// file had.
 	return strings.TrimSuffix(file.String(), "\n") + "\n", removed, nil
+}
+
+// dropChecksum takes the checksum file out of the mapping, and says whether there was
+// one.
+//
+// aqua-registry verifies an asset against that file. Here every entry carries the digest
+// of the asset itself, taken when it was generated and checked again by the branch's CI
+// on a machine of the environment the entry is for, so nothing ever reads the file --
+// not even to know it exists. A definition saying where it is, and how its signature is
+// checked, says it to nobody.
+func dropChecksum(mapping *ast.MappingNode) bool {
+	value := mappingValue(mapping, checksumKey)
+	if value == nil {
+		return false
+	}
+	mapping.Values = without(mapping.Values, value)
+	return true
 }
 
 // mappings is every mapping node in the document, so that a replacements block is found

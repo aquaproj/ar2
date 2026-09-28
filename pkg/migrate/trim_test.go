@@ -92,3 +92,47 @@ func TestConfig_conditionOnlyOverride(t *testing.T) {
 		t.Errorf("the override matches %+v, want the musl variant", overrides[0].Variants)
 	}
 }
+
+// aqua-registry verifies an asset against the checksum file. A generated entry carries
+// the digest of the asset itself and has nowhere to say that the file exists, so a
+// definition saying where it is, signature and all, says it to nobody.
+func TestConfig_checksumGoes(t *testing.T) {
+	t.Parallel()
+	signed := &aquaregistry.Checksum{
+		Type:      "github_release",
+		Asset:     "grype_{{trimV .Version}}_checksums.txt",
+		Algorithm: "sha256",
+		Cosign:    &aquaregistry.Cosign{Opts: []string{"--certificate-identity-regexp", "anything"}},
+	}
+	for _, pkgInfo := range []*aquaregistry.PackageInfo{
+		{
+			Type: "github_release", RepoOwner: "anchore", RepoName: "grype",
+			Checksum: signed,
+			VersionOverrides: []*aquaregistry.VersionOverride{
+				{VersionConstraints: "true", Checksum: signed},
+			},
+		},
+		{
+			// An http package keeps everything else, because a release says nothing
+			// about a URL. The checksum file is read by nobody whatever the type is.
+			Type: "http", URL: "https://example.com/{{.Version}}",
+			Checksum: signed,
+			VersionOverrides: []*aquaregistry.VersionOverride{
+				{VersionConstraints: "true", Checksum: signed},
+			},
+		},
+	} {
+		t.Run(pkgInfo.Type, func(t *testing.T) {
+			t.Parallel()
+			got, _ := migrate.Config(pkgInfo, nil)
+			if got.Checksum != nil {
+				t.Errorf("the definition still says where the checksum file is: %+v", got.Checksum)
+			}
+			for _, vo := range got.VersionOverrides {
+				if vo.Checksum != nil {
+					t.Errorf("an override still says where the checksum file is: %+v", vo.Checksum)
+				}
+			}
+		})
+	}
+}
