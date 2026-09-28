@@ -91,7 +91,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if !args.SkipPR {
 		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch, nil))
 	}
-	return ctrl.New(gh, generate.New(gh.Repositories), reg,
+	return ctrl.New(gh, generate.New(gh.Repositories, httpClient), reg,
 		github.NewClient(httpClient), v, renamer), nil
 }
 

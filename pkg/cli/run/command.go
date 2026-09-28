@@ -150,7 +150,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		return err
 	}
 
-	reg, err := generate.New(gh.Repositories).Generate(ctx, logger.Logger, &generate.Input{
+	reg, err := generate.New(gh.Repositories, httpClient).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,
