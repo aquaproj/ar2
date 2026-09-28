@@ -1,0 +1,12 @@
+type: github_release
+repo_owner: anchore
+repo_name: grype
+description: A vulnerability scanner for container images and filesystems
+files:
+  - name: grype
+version_overrides:
+  - version_constraint: semver(">= 0.65.0")
+    # Kept: the signature of the asset itself is what an entry can carry.
+    github_artifact_attestations:
+      signer_workflow: anchore/grype/.github/workflows/release.yaml
+  - version_constraint: "true"
