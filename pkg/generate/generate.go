@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,11 +42,14 @@ type Input struct {
 // Generator builds registry.json from a release.
 type Generator struct {
 	gh genrgst.RepositoriesService
+	// httpClient downloads the signature bundle beside an asset, which is the only
+	// thing here read from a release rather than from its asset list.
+	httpClient *http.Client
 }
 
 // New creates a Generator.
-func New(gh genrgst.RepositoriesService) *Generator {
-	return &Generator{gh: gh}
+func New(gh genrgst.RepositoriesService, httpClient *http.Client) *Generator {
+	return &Generator{gh: gh, httpClient: httpClient}
 }
 
 // Generate resolves a release into registry.json.
@@ -84,7 +88,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return nil, err
 	}
 	overrideSigning(reg, base)
-	if err := inferSigning(input.PkgName, reg, rel.names); err != nil {
+	if err := g.inferSigning(ctx, logger, input, reg, rel.names); err != nil {
 		return nil, err
 	}
 	return reg, nil
