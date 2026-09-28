@@ -19,6 +19,7 @@ type definitionCase struct {
 	fixture   string
 	spellings []string
 	checksums int
+	overrides int
 }
 
 func definitionCases() []definitionCase {
@@ -34,9 +35,12 @@ func definitionCases() []definitionCase {
 			spellings: []string{"amd64: x86_64"},
 		},
 		{
+			// The override said nothing but which environment it was for once its
+			// replacements went, so it went too.
 			name:      "every block is reached, wherever the definition puts one",
 			fixture:   "nested",
 			spellings: []string{"arm64: aarch64", "windows: pc-windows-msvc"},
+			overrides: 1,
 		},
 		{
 			// aqua-registry verifies an asset against the checksum file. A generated
@@ -45,6 +49,21 @@ func definitionCases() []definitionCase {
 			name:      "the checksum file goes, wherever the definition says it",
 			fixture:   "checksum",
 			checksums: 2,
+		},
+		{
+			// What taking the last field out of an override leaves behind: it matches the
+			// environment and then applies nothing to it.
+			name:      "an override left saying only which environment it is for goes",
+			fixture:   "empty-override",
+			checksums: 1,
+			overrides: 1,
+		},
+		{
+			// One that names a variant is what makes an entry for that variant generated,
+			// and one with a later sibling the same environment could match is the first
+			// match rather than nothing at all.
+			name:    "the overrides that are doing something stay",
+			fixture: "kept-override",
 		},
 	}
 }
@@ -68,6 +87,9 @@ func TestDefinition(t *testing.T) {
 			}
 			if removed.Checksums != tt.checksums {
 				t.Errorf("%d checksum blocks went, want %d", removed.Checksums, tt.checksums)
+			}
+			if removed.Overrides != tt.overrides {
+				t.Errorf("%d overrides went, want %d", removed.Overrides, tt.overrides)
 			}
 		})
 	}

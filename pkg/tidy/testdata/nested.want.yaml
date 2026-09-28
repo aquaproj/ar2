@@ -5,5 +5,3 @@ version_overrides:
   - version_constraint: "true"
     replacements:
       linux: ubuntu
-    overrides:
-      - goos: windows

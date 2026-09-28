@@ -1,0 +1,22 @@
+type: github_release
+repo_owner: anthropics
+repo_name: claude-code
+description: Claude Code
+files:
+  - name: claude
+overrides:
+  # Naming glibc is what makes an entry for it generated, so it stays although it says
+  # nothing else.
+  - goos: linux
+    variants:
+      - key: libc
+        value: glibc
+  - goos: linux
+    asset: claude-{{.OS}}-{{.Arch}}-musl.{{.Format}}
+    variants:
+      - key: libc
+        value: musl
+  # A later sibling the same environment could match, so this one is the first match.
+  - goos: windows
+  - goos: windows
+    format: zip

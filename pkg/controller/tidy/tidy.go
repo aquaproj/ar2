@@ -140,7 +140,8 @@ func (c *Controller) tidyPackage(ctx context.Context, logger *slog.Logger, pkgNa
 		return false, nil
 	}
 	logger.Info("the definition says what it doesn't have to",
-		"replacements", strings.Join(removed.Spellings, ", "), "checksum_blocks", removed.Checksums)
+		"replacements", strings.Join(removed.Spellings, ", "),
+		"checksum_blocks", removed.Checksums, "empty_overrides", removed.Overrides)
 	if args.DryRun {
 		return false, nil
 	}
@@ -189,10 +190,12 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 // nobody at all.
 func what(removed *tidy.Removed) string {
 	switch {
-	case len(removed.Spellings) == 0:
-		return "drop the checksum file nothing reads"
-	case removed.Checksums == 0:
+	case removed.Checksums == 0 && removed.Overrides == 0:
 		return "drop the replacements a release is read for"
+	case len(removed.Spellings) == 0 && removed.Overrides == 0:
+		return "drop the checksum file nothing reads"
+	case len(removed.Spellings) == 0 && removed.Checksums == 0:
+		return "drop the overrides that say nothing"
 	default:
 		return "drop what the definition doesn't have to say"
 	}
@@ -224,6 +227,13 @@ func body(removed *tidy.Removed) string {
 			"even knows it exists, so the definition was saying it to nobody.\n",
 			blocks(removed.Checksums))
 	}
+	if removed.Overrides > 0 {
+		fmt.Fprintf(&b, "\n%s said which environment it was for and nothing else, so it matched "+
+			"that environment and then applied nothing to it. An override with a later sibling the "+
+			"same environment could match stays, because the first match is the one applied, and so "+
+			"does one carrying variants: naming a variant is what makes an entry for it generated.\n",
+			overrides(removed.Overrides))
+	}
 	b.WriteString("\nNothing generated changes.\n")
 	return b.String()
 }
@@ -234,4 +244,12 @@ func blocks(n int) string {
 		return "One block"
 	}
 	return fmt.Sprintf("%d blocks", n)
+}
+
+// overrides names how many overrides went, for a sentence that reads either way.
+func overrides(n int) string {
+	if n == 1 {
+		return "One override"
+	}
+	return fmt.Sprintf("%d overrides", n)
 }
