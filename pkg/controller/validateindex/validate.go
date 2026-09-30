@@ -74,7 +74,37 @@ func entries(index *aquag2.Index) []string {
 		}
 		seen[pkg.Name] = struct{}{}
 	}
+	problems = append(problems, identifiers(index)...)
 	return append(problems, aliases(index, seen)...)
+}
+
+// identifiers reports two packages saying they are the same one.
+//
+// What a package's branch is named after is its identifier, so two packages carrying one
+// identifier is two packages reading and writing one branch -- each one's versions
+// answering for the other. A name is checked for being listed twice above; this is the
+// same question about the thing that outlives the name.
+//
+// An entry without an identifier is not reported. Every package taken over before the
+// registry minted them has none, and what fills those in is the reconciliation rather
+// than whoever is reading this.
+func identifiers(index *aquag2.Index) []string {
+	var problems []string
+	// The package each identifier belongs to, so that the second of two is reported
+	// against the first rather than counted twice.
+	claimed := map[string]string{}
+	for _, pkg := range index.Packages {
+		if pkg == nil || pkg.ID == "" {
+			continue
+		}
+		if first, ok := claimed[pkg.ID]; ok {
+			problems = append(problems,
+				pkg.Name+" and "+first+" say they are the same package ("+pkg.ID+")")
+			continue
+		}
+		claimed[pkg.ID] = pkg.Name
+	}
+	return problems
 }
 
 // aliases reports the aliases that don't name one package.

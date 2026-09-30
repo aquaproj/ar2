@@ -51,8 +51,10 @@ func (c *Controller) addOne(ctx context.Context, logger *slog.Logger, pkgName st
 		return nil
 	}
 	logger.Info("adding a package to the catalogue", "package", pkgName)
+	entry := aquag2.NewIndexPackage(pkgName, cfg)
+	c.identify(entry, nil, ids(t.index))
 	return c.write(ctx, logger, t, &change{
-		added: []*aquag2.IndexPackage{aquag2.NewIndexPackage(pkgName, cfg)},
+		added: []*aquag2.IndexPackage{entry},
 	})
 }
 

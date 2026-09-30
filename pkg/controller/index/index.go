@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"time"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
@@ -56,12 +57,21 @@ type Controller struct {
 	// paths that bring one package -- a run taking a package over, a rename -- pass
 	// nil.
 	defs Definitions
+	// now is what an identifier is minted from. A field so that a test can mint a
+	// known one.
+	now func() time.Time
 }
 
 // New creates a Controller. automerge may be nil, and then the catalogue's pull
 // requests wait for someone; defs may be nil in anything but Sync.
 func New(registry Registry, automerge AutoMerger, baseBranch string, defs Definitions) *Controller {
-	return &Controller{g2: registry, automerge: automerge, baseBranch: baseBranch, defs: defs}
+	return &Controller{
+		g2:         registry,
+		automerge:  automerge,
+		baseBranch: baseBranch,
+		defs:       defs,
+		now:        time.Now,
+	}
 }
 
 // AddPackage puts one package into the catalogue.
@@ -84,11 +94,16 @@ func (c *Controller) Rename(ctx context.Context, logger *slog.Logger, from, to s
 	if err != nil {
 		return err
 	}
+	entries := entriesByName(t.index)
 	t.index.Remove(from)
 	t.index.Remove(to)
 	logger.Info("listing the package under its new name", "package", from, "renamed_to", to)
+	entry := aquag2.NewIndexPackage(to, cfg)
+	// The identifier of the name it had. A rename is the same package under another
+	// name, and what the branch is named after doesn't change with the name.
+	c.identify(entry, entries[from], ids(t.index))
 	return c.write(ctx, logger, t, &change{
-		added: []*aquag2.IndexPackage{aquag2.NewIndexPackage(to, cfg)},
+		added: []*aquag2.IndexPackage{entry},
 	})
 }
 
@@ -113,6 +128,8 @@ func (c *Controller) Refresh(ctx context.Context, logger *slog.Logger, pkgNames 
 	if err != nil {
 		return err
 	}
+	have := entriesByName(t.index)
+	taken := ids(t.index)
 	entries := make([]*aquag2.IndexPackage, 0, len(pkgNames))
 	for _, pkgName := range pkgNames {
 		cfg, err := c.g2.Config(ctx, pkgName)
@@ -129,7 +146,9 @@ func (c *Controller) Refresh(ctx context.Context, logger *slog.Logger, pkgNames 
 		// The entry is replaced rather than edited: what it holds is a projection of
 		// the definition, so what the definition says now is the whole of it.
 		t.index.Remove(pkgName)
-		entries = append(entries, aquag2.NewIndexPackage(pkgName, cfg))
+		entry := aquag2.NewIndexPackage(pkgName, cfg)
+		c.identify(entry, have[pkgName], taken)
+		entries = append(entries, entry)
 	}
 	return c.write(ctx, logger, t, &change{updated: entries})
 }
@@ -165,12 +184,13 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, logger, t, reconcile(logger, t.index, files))
+	return c.write(ctx, logger, t, c.reconcile(logger, t.index, files))
 }
 
 // reconcile works out what the catalogue has to gain and what it has to say differently.
-func reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string) *change {
+func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string) *change {
 	have := entriesByName(index)
+	taken := ids(index)
 	ch := &change{}
 	// In name order, so that a pull request reads the same way whatever order the
 	// branches came back in.
@@ -186,6 +206,7 @@ func reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string
 		}
 		entry := aquag2.NewIndexPackage(pkgName, cfg)
 		old, ok := have[pkgName]
+		c.identify(entry, old, taken)
 		if !ok {
 			logger.Info("adding a package to the catalogue", "package", pkgName)
 			ch.added = append(ch.added, entry)
@@ -224,6 +245,38 @@ func parseConfig(logger *slog.Logger, pkgName, content string) *aquag2.Config {
 	return cfg
 }
 
+// identify gives the entry the identifier the catalogue already has for the package, and
+// mints one when it has none.
+//
+// The identifier is what the package's branch will be named after, so it outlives every
+// name the package is listed under: an entry rebuilt from a definition keeps it, and a
+// rename carries it to the new name. What it must never do is change, which is why this is
+// the only place that decides it.
+//
+// A package the catalogue lists without one is a package taken over before the registry
+// minted them. Minting here is what fills those in, and it is what makes the entry differ
+// from the one already written, so the reconciliation commits it.
+func (c *Controller) identify(entry, old *aquag2.IndexPackage, taken map[string]struct{}) {
+	if old != nil && old.ID != "" {
+		entry.ID = old.ID
+		return
+	}
+	entry.ID = g2.MintID(c.now(), taken)
+	taken[entry.ID] = struct{}{}
+}
+
+// ids is the identifiers the catalogue has spoken for, which is what a new one is minted
+// against.
+func ids(index *aquag2.Index) map[string]struct{} {
+	out := make(map[string]struct{}, len(index.Packages))
+	for _, pkg := range index.Packages {
+		if pkg != nil && pkg.ID != "" {
+			out[pkg.ID] = struct{}{}
+		}
+	}
+	return out
+}
+
 // entriesByName is the catalogue's entries, by the package they describe.
 func entriesByName(index *aquag2.Index) map[string]*aquag2.IndexPackage {
 	entries := make(map[string]*aquag2.IndexPackage, len(index.Packages))
@@ -243,6 +296,7 @@ func entriesByName(index *aquag2.Index) map[string]*aquag2.IndexPackage {
 // whether anything is committed.
 func sameEntry(a, b *aquag2.IndexPackage) bool {
 	return a.Name == b.Name &&
+		a.ID == b.ID &&
 		a.Description == b.Description &&
 		a.Link == b.Link &&
 		slices.Equal(a.Aliases, b.Aliases) &&
