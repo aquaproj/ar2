@@ -50,7 +50,7 @@ nobody uses, and a run asking for the new name would find no branch and make a s
 one. That goes into a pull request, since committing onto a package branch takes one.
 
 The old name becomes an alias of the package, which is how a configuration still asking
-for it resolves: aqua reads the aliases from the catalogue and the table beside it, and
+for it resolves: aqua reads the table beside the catalogue, which holds both names, and
 fetches the package under the name it has now.
 
 The catalogue is brought to the new name straight away, ahead of that pull request. Both

@@ -136,8 +136,8 @@ func TestController_Remove(t *testing.T) {
 		t.Errorf("the catalogue still lists it:\n%s", byPath[aquag2.IndexFileName])
 	}
 	// The alias went with the entry, or a name nothing holds would still resolve.
-	if strings.Contains(byPath[aquag2.AliasesFileName], "foo/old") {
-		t.Errorf("the alias is still there:\n%s", byPath[aquag2.AliasesFileName])
+	if strings.Contains(byPath[aquag2.NamesFileName], "foo/old") {
+		t.Errorf("the alias is still there:\n%s", byPath[aquag2.NamesFileName])
 	}
 	if reg.bases[g2.RemoveBranchName(fakeID)] != "main" {
 		t.Errorf("the first pull request goes into %q", reg.bases[g2.RemoveBranchName(fakeID)])

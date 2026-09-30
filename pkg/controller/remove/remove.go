@@ -210,7 +210,7 @@ func stopBody(in *Input) string {
 	b.WriteString("The registry stops serving `" + in.PkgName + "`.\n\n")
 	b.WriteString("Why:\n\n> " + strings.ReplaceAll(strings.TrimSpace(in.Reason), "\n", "\n> ") + "\n\n")
 	b.WriteString("This is half of it. The package is added to `ignored_packages`, so no run generates " +
-		"it again, and its entry goes from `index.json` and `aliases.json`, so nothing searching the " +
+		"it again, and its entry goes from `index.json` and `names.json`, so nothing searching the " +
 		"registry finds it. What it generated is still on its branch, and the pull request that takes " +
 		"that away says as much.\n\n")
 	b.WriteString("Merge this one first. A package still in the order has its files generated again by " +
