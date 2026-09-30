@@ -59,10 +59,9 @@ So every definition is read and every entry is compared against what its definit
 makes now. That costs what listing the branches cost: the definitions come back with
 the branches, a hundred branches to a query.
 
-The aliases are most of why the second one matters. They are what a configuration still
-asking for an old name resolves through, and the table beside the catalogue is rendered
-from them in the same commit, so an alias added by hand reaches aqua only once this has
-run.
+The table beside the catalogue is rendered from the same entries in the same commit. It is
+what resolves a name to the branch holding the package -- and an old name to the name the
+package has now -- so a package or an alias reaches aqua only once this has run.
 
 Named packages are read out of their definitions again and nothing else is looked at,
 which is the same repair aimed at one package.

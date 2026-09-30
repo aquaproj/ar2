@@ -136,9 +136,9 @@ func TestController_AddPackage(t *testing.T) {
 	// The catalogue and the table of other names go in one commit, so that they
 	// can't describe different registries.
 	if len(reg.committed) != 2 {
-		t.Fatalf("committed %d files, want the catalogue and the aliases", len(reg.committed))
+		t.Fatalf("committed %d files, want the catalogue and the names", len(reg.committed))
 	}
-	if reg.committed[0].Path != g2.IndexFileName || reg.committed[1].Path != aquag2.AliasesFileName {
+	if reg.committed[0].Path != g2.IndexFileName || reg.committed[1].Path != aquag2.NamesFileName {
 		t.Fatalf("committed %s and %s", reg.committed[0].Path, reg.committed[1].Path)
 	}
 	if !strings.Contains(reg.committed[0].Content, "cli/cli") {
@@ -305,7 +305,7 @@ func TestController_Sync_fileMissing(t *testing.T) {
 		{Name: "cli/cli", ID: minted, Description: "GitHub's official command line tool"},
 	}}
 	files := rendered(t, index)
-	delete(files, aquag2.AliasesFileName)
+	delete(files, aquag2.NamesFileName)
 	reg := &fakeRegistry{index: index, files: files}
 	defs := definitions(t, map[string]*aquag2.Config{
 		minted: named("cli/cli", "GitHub's official command line tool"),
@@ -314,7 +314,7 @@ func TestController_Sync_fileMissing(t *testing.T) {
 	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
-	if len(reg.committed) != 1 || reg.committed[0].Path != aquag2.AliasesFileName {
+	if len(reg.committed) != 1 || reg.committed[0].Path != aquag2.NamesFileName {
 		t.Fatalf("committed %+v, want the file that was missing", reg.committed)
 	}
 	if reg.createdPRs != 1 {
@@ -407,7 +407,7 @@ func TestController_AddPackage_aliases(t *testing.T) {
 	if len(reg.committed) != 2 {
 		t.Fatalf("committed %d files", len(reg.committed))
 	}
-	aliases, err := aquag2.ReadAliases(strings.NewReader(reg.committed[1].Content))
+	aliases, err := aquag2.ReadNames(strings.NewReader(reg.committed[1].Content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestController_Rename(t *testing.T) {
 		t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
 	}
 	// And the table beside it resolves the old name, which is the point of the alias.
-	aliases, err := aquag2.ReadAliases(strings.NewReader(reg.committed[1].Content))
+	aliases, err := aquag2.ReadNames(strings.NewReader(reg.committed[1].Content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestController_Refresh(t *testing.T) {
 	}
 	// The table beside it is rendered from the same entries, which is why an alias
 	// added by hand reaches aqua only once this has run.
-	aliases, err := aquag2.ReadAliases(strings.NewReader(reg.committed[1].Content))
+	aliases, err := aquag2.ReadNames(strings.NewReader(reg.committed[1].Content))
 	if err != nil {
 		t.Fatal(err)
 	}
