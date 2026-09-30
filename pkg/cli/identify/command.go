@@ -9,12 +9,14 @@ import (
 	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/identify"
 	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"golang.org/x/oauth2"
 )
 
 // errTokenRequired is returned when no access token is available.
@@ -32,7 +34,7 @@ type Args struct {
 func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 	args := &Args{GlobalFlags: gFlags}
 	cmd := &cobra.Command{
-		Use:   "identify [<path>]",
+		Use:   "identify",
 		Short: "Put every package on the branch named after its id",
 		Long: `Put every package on the branch named after its id.
 
@@ -45,8 +47,12 @@ when a name does.
 $ ar2 identify --dry-run
 $ ar2 identify
 
-The catalogue is the list of what to do, because the ids are in it. Each package's new
-branch starts at the commit its old one is at, so nothing is copied and the record of
+The branches are the list of what to do, because a branch named after a package is what
+says which package it holds -- that name is the only place it is written down. A branch
+holding no definition isn't one of them: it holds nothing but the template every new
+branch starts with, and a run taking the package over again makes it afresh.
+
+Each package's new branch starts at the commit its old one is at, so nothing is copied and the record of
 how each version arrived is still readable. Two corrections ride along in that commit,
 since committing onto a package branch afterwards would take a pull request: the
 definition is made to name its own package, which is how a branch named after an id
@@ -62,13 +68,9 @@ do. Nothing is read from a branch it creates until the writes are switched over 
 Two tokens are read from the environment. GITHUB_TOKEN reads the repository, and
 AR2_BRANCH_TOKEN creates the branches, since that is what a ruleset requiring checks
 lets through.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, as []string) error {
-			path := g2.IndexFileName
-			if len(as) == 1 {
-				path = as[0]
-			}
-			return action(cmd.Context(), logger, args, cmd.OutOrStdout(), path)
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return action(cmd.Context(), logger, args, cmd.OutOrStdout())
 		},
 	}
 	fs := cmd.Flags()
@@ -78,7 +80,7 @@ lets through.`,
 	return cmd
 }
 
-func action(ctx context.Context, logger *slogutil.Logger, args *Args, w io.Writer, path string) error {
+func action(ctx context.Context, logger *slogutil.Logger, args *Args, w io.Writer) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
@@ -90,11 +92,18 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, w io.Write
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	branchGH, err := token.Client(token.BranchEnv)
 	if err != nil {
 		return err //nolint:wrapcheck // the error already names the token it is for
 	}
 
 	registry := g2.New(gh, branchGH, nil, args.G2Owner, args.G2Repo, args.Version)
-	return ctrl.New(registry).Identify(ctx, logger.Logger, w, path, args.DryRun) //nolint:wrapcheck
+	// The table says which packages have already been carried over, and the definitions
+	// say which branches are still named after a package.
+	ids, defs, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+	return ctrl.New(registry, ids, defs).Identify(ctx, logger.Logger, w, args.DryRun) //nolint:wrapcheck
 }
