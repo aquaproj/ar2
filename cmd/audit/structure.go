@@ -55,7 +55,7 @@ func structure(w io.Writer, root string) error {
 // checkPackage converts one package and reports what the conversion produced.
 func checkPackage(logger *slog.Logger, src *aquaregistry.PackageInfo, counts map[string]int, report func(kind, pkg, detail string)) {
 	name := src.GetName()
-	cfg, unconverted := migrate.Config(src.Copy(), nil)
+	cfg, unconverted := migrate.Config(name, src.Copy(), nil)
 	out := cfg.PackageInfo
 
 	if len(unconverted) > 0 {

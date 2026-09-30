@@ -66,7 +66,7 @@ func comparePublished(ctx context.Context, w io.Writer, gh *gogithub.Client, src
 		return false
 	}
 	logger := slog.New(slog.DiscardHandler)
-	cfg, _ := migrate.Config(src.Copy(), nil)
+	cfg, _ := migrate.Config(name, src.Copy(), nil)
 	var bad []string
 	compared, shown := 0, false
 	for _, v := range tags {

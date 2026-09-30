@@ -30,7 +30,7 @@ func one(w io.Writer, path, version string) error {
 	}
 	src := cfg.PackageInfos[0]
 	logger := slog.New(slog.DiscardHandler)
-	converted, unconverted := migrate.Config(src.Copy(), nil)
+	converted, unconverted := migrate.Config(src.GetName(), src.Copy(), nil)
 
 	v1, err := src.Copy().SetVersion(logger, version)
 	if err != nil {

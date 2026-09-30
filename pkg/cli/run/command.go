@@ -206,7 +206,7 @@ func definition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, fmt.Errorf("get the aqua gr configuration: %w", err)
 	}
-	converted, unconverted := migrate.Config(base, scaffold)
+	converted, unconverted := migrate.Config(pkgName, base, scaffold)
 	for _, constraint := range unconverted {
 		logger.Warn("a version_constraint couldn't be turned into a boundary",
 			"package", pkgName, "version_constraint", constraint)
