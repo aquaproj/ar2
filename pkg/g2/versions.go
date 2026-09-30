@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path"
+	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
@@ -90,7 +92,10 @@ func (c *Client) Versions(ctx context.Context, logger *slog.Logger, pkgName stri
 func (c *Client) VersionsOnRef(ctx context.Context, logger *slog.Logger, ref string) (map[string]struct{}, error) {
 	// The Git Data API rather than the Contents API, which stops at 1,000 entries in a
 	// directory and says so only by returning fewer.
-	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, ref+":"+aquag2.VersionDir, false)
+	//
+	// Read recursively, because a version is the directory holding the generated file
+	// rather than any directory under versions/. See versionOf.
+	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, ref+":"+aquag2.VersionDir, true)
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			// The branch holds no versions directory, which is a branch carrying nothing
@@ -107,12 +112,32 @@ func (c *Client) VersionsOnRef(ctx context.Context, logger *slog.Logger, ref str
 	logger.Debug("listed the versions of a ref", "ref", ref, "num_of_entries", len(tree.Entries))
 	out := make(map[string]struct{}, len(tree.Entries))
 	for _, entry := range tree.Entries {
-		if entry.GetType() != "tree" {
+		version, ok := versionOf(entry)
+		if !ok {
 			continue
 		}
-		out[entry.GetPath()] = struct{}{}
+		out[version] = struct{}{}
 	}
 	return out, nil
+}
+
+// versionOf reads the version whose registry.json a tree entry is, and reports false for
+// an entry that is not one.
+//
+// A version's name is escaped into one path segment, so it is the directory holding the
+// generated file. Before it was escaped, a version with a slash in it became two
+// directories, and calling every directory a version made "kustomize" a version of
+// kustomize: what was reported as already generated was a version that doesn't exist,
+// while the one that does looked missing.
+func versionOf(entry *gogithub.TreeEntry) (string, bool) {
+	if entry.GetType() != blobType {
+		return "", false
+	}
+	dir, file := path.Split(entry.GetPath())
+	if file != aquag2.FileName {
+		return "", false
+	}
+	return aquag2.DecodeVersion(strings.TrimSuffix(dir, "/"))
 }
 
 // errTreeTruncated is what a listing GitHub wouldn't give whole gets.
