@@ -127,9 +127,7 @@ func (c *Client) identityCommit(ctx context.Context, pkgName string, plan *Ident
 			Type: new(blobType),
 			SHA:  new(moved.SHA),
 		})
-		// Only the path: an entry with no content and no sha is serialized with
-		// "sha": null, which the API reads as taking that path out.
-		entries = append(entries, &gogithub.TreeEntry{Path: new(moved.From)})
+		entries = append(entries, deletedEntry(moved.From))
 	}
 	if len(entries) == 0 {
 		return plan.Parent, nil
