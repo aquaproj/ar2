@@ -47,7 +47,7 @@ func TestController_Show(t *testing.T) {
 			for _, want := range []string{
 				"package:     cli/cli",
 				"id:          1790000000 (2026-09-21T14:13:20Z)",
-				"branch:      pkg_cli_2fcli",
+				"branch:      pkg_1790000000",
 				"aliases:     github/hub",
 			} {
 				if !strings.Contains(got, want) {

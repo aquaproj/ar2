@@ -4,94 +4,87 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
 	"go.yaml.in/yaml/v3"
 )
 
-// RenamePackage puts a package's branch under its new name, carrying everything on it.
+// RenamePackage puts the package's definition under the name its repository has now, in a
+// pull request into the branch holding it.
 //
-// The branch is created rather than the versions generated again. A package's history is
-// every release it ever published, downloaded and hashed and opened on six machines to
-// get there; the new name is the same history under another word for it. The old commit
-// becomes the new branch's parent, so nothing is copied and the record of how each
-// version arrived is still readable.
+// The branch doesn't move, which is what naming it after an id is for: a rename used to
+// carry the whole branch over, and everything that had written the old name down was left
+// pointing at nothing. What has to change is the definition, because the definition is the
+// only thing that says which package the branch holds -- one still naming the old package
+// would be found under a name nobody uses, and a run asking for the new name would find no
+// branch and make a second one.
 //
-// Creating a branch is what this can do. Committing onto one takes a pull request -- the
-// ruleset says so and no app bypasses it -- so the corrected definition is part of the
-// commit the branch starts at rather than a change made afterwards.
+// The old name becomes an alias, which is how a configuration still asking for it resolves.
 //
-// It returns false when there was nothing to move: no branch under the old name, or one
-// already under the new one. Both are what a second run of the same rename sees.
-func (c *Client) RenamePackage(ctx context.Context, from, to string) (bool, error) {
-	oldBranch, newBranch := BranchName(from), BranchName(to)
-	parent, err := c.BranchSHA(ctx, oldBranch)
+// It returns the definition as the pull request writes it, and nil when there was nothing to
+// do: a definition that already names the new package is what a second run of the same
+// rename sees.
+func (c *Client) RenamePackage(ctx context.Context, logger *slog.Logger, from, to string) (*aquag2.Config, error) {
+	branch, ok := c.Branch(from)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", errNoBranchToRename, from)
+	}
+	head, _ := c.HeadBranch(from)
+	parent, err := c.BranchSHA(ctx, branch)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if parent == "" {
-		return false, fmt.Errorf("%w: %s", errNoBranchToRename, from)
-	}
-	if sha, err := c.BranchSHA(ctx, newBranch); err != nil {
-		return false, err
-	} else if sha != "" {
-		return false, nil
+		return nil, fmt.Errorf("%w: %s", errNoBranchToRename, from)
 	}
 
-	cfg, err := c.Config(ctx, from)
+	cfg, err := c.ConfigOnRef(ctx, branch)
 	if err != nil {
-		return false, err
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("%w: %s", errNoConfigToRename, from)
+	}
+	if cfg.Name == to {
+		return nil, nil //nolint:nilnil // nothing to do, which is not a definition
 	}
 	content, err := renamedConfig(cfg, from, to)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	commit, err := c.renameCommit(ctx, parent, from, to, content)
+	title := fmt.Sprintf("fix(%s): rename the package to %s", from, to)
+	if err := c.Commit(ctx, head, parent, title, []*File{{
+		Path:    ConfigFileName,
+		Content: content,
+	}}); err != nil {
+		return nil, fmt.Errorf("commit the renamed definition: %w", err)
+	}
+	pr, err := c.CreatePullRequestFrom(ctx, logger, head, branch, title, renameBody(from, to))
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("open the pull request that renames the package: %w", err)
 	}
-	if _, _, err := c.branchGH.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
-		Ref: "refs/heads/" + newBranch,
-		SHA: commit,
-	}); err != nil {
-		return false, fmt.Errorf("create the branch of the renamed package: %w", err)
-	}
-	return true, nil
+	logger.Info("opened the pull request that renames the package",
+		"from", from, "to", to, "number", pr.GetNumber())
+	return cfg, nil
 }
 
-// renameCommit is the commit the new branch starts at: the old branch's, with the
-// definition corrected.
-//
-// Built with the app that creates branches rather than the one that opens pull requests,
-// because this commit is only ever reached by a branch being created at it.
-func (c *Client) renameCommit(ctx context.Context, parent, from, to, config string) (string, error) {
-	parentCommit, _, err := c.branchGH.Git.GetCommit(ctx, c.owner, c.repo, parent)
-	if err != nil {
-		return "", fmt.Errorf("get the commit of the branch being renamed: %w", err)
-	}
-	tree, _, err := c.branchGH.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(),
-		[]*gogithub.TreeEntry{{
-			Path:    new(ConfigFileName),
-			Mode:    new(blobMode),
-			Type:    new(blobType),
-			Content: new(config),
-		}})
-	if err != nil {
-		return "", fmt.Errorf("create the tree of the renamed package: %w", err)
-	}
-	commit, _, err := c.branchGH.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
-		Message: new("chore: rename " + from + " to " + to),
-		Tree:    tree,
-		Parents: []*gogithub.Commit{{SHA: new(parent)}},
-	}, nil)
-	if err != nil {
-		return "", fmt.Errorf("create the commit of the renamed package: %w", err)
-	}
-	return commit.GetSHA(), nil
+// renameBody says what the pull request does and what waits on it.
+func renameBody(from, to string) string {
+	return fmt.Sprintf(`Generated by ar2.
+
+%s answers to %s now. The definition on this branch is what says which package the branch
+holds, so it is what the rename changes; the branch itself is named after the package's id
+and doesn't move.
+
+The old name is kept as an alias, which is how a configuration still asking for %s resolves.
+
+Until this merges, the registry still holds the package under %s: a run asking for the new
+name finds no branch for it.
+`, from, to, from, from)
 }
 
 // renamedConfig is the definition under the new name.

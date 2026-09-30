@@ -8,12 +8,14 @@ import (
 	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/remove"
 	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"golang.org/x/oauth2"
 )
 
 // errTokenRequired is returned when no access token is available.
@@ -93,7 +95,11 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 
 	// No branch token: a package being removed is one the registry holds, so every
 	// branch this touches is already there.
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
+	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
+		return err //nolint:wrapcheck
+	}
 	return ctrl.New(registry, args.BaseBranch).Remove(ctx, logger.Logger, &ctrl.Input{ //nolint:wrapcheck
 		PkgName: pkgName,
 		Reason:  args.Reason,

@@ -89,9 +89,12 @@ func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger,
 	if err != nil {
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}
-	if cfg != nil {
+	if cfg != nil && !g2.IsClaim(cfg) {
 		return &definition{config: cfg, fromBranch: true}, nil
 	}
+	// A definition that says nothing but the package's name is the claim the branch was
+	// created with, which is a package waiting to be taken over rather than one that has
+	// been.
 
 	base := input.PkgInfos[pkgName]
 	if base == nil {

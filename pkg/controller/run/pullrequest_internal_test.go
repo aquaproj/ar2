@@ -28,6 +28,26 @@ type fakeRegistry struct {
 	labels []string
 }
 
+// fakeID is the id whatever package a test is about is held under. What the tests check is
+// which branch was written to, not how the id was arrived at.
+const fakeID = "1790772767"
+
+func (f *fakeRegistry) Branch(_ string) (string, bool) {
+	return g2.IDBranchName(fakeID), true
+}
+
+func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
+	return g2.HeadBranchName(fakeID), true
+}
+
+func (f *fakeRegistry) VersionHeadBranch(_, version string) (string, bool) {
+	return g2.VersionHeadBranchName(fakeID, version), true
+}
+
+func (f *fakeRegistry) IsVersionHeadBranch(_, branch string) bool {
+	return g2.IsVersionHeadBranch(fakeID, branch)
+}
+
 func (f *fakeRegistry) Versions(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
@@ -214,7 +234,7 @@ func TestOpenUnresolved(t *testing.T) {
 	if err := c.openUnresolved(t.Context(), discardLogger(), "ogham/exa", versions, nil); err != nil {
 		t.Fatal(err)
 	}
-	if want := "ar2_ogham_2fexa_v0.8.0"; reg.commitBranch != want {
+	if want := "ar2_1790772767_v0.8.0"; reg.commitBranch != want {
 		t.Errorf("committed to %q, want the branch of the oldest of them, %q", reg.commitBranch, want)
 	}
 	if reg.fromBranch != reg.commitBranch {
@@ -237,7 +257,7 @@ func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
-	inFlight := map[string]struct{}{"ar2_ogham_2fexa_v0.7.0": {}}
+	inFlight := map[string]struct{}{"ar2_1790772767_v0.7.0": {}}
 	versions := []*version{
 		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
 	}
@@ -252,16 +272,17 @@ func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 // The pull request of the package itself is not one of these, so it doesn't stop them.
 func TestWaiting(t *testing.T) {
 	t.Parallel()
-	own := map[string]struct{}{"ar2_ogham_2fexa": {}}
-	if branch, ok := waiting("ogham/exa", own); ok {
+	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	own := map[string]struct{}{"ar2_1790772767": {}}
+	if branch, ok := c.waiting("ogham/exa", own); ok {
 		t.Errorf("the package's own branch counted as one waiting: %q", branch)
 	}
-	version := map[string]struct{}{"ar2_ogham_2fexa_v0.7.0": {}}
-	if _, ok := waiting("ogham/exa", version); !ok {
+	version := map[string]struct{}{"ar2_1790772767_v0.7.0": {}}
+	if _, ok := c.waiting("ogham/exa", version); !ok {
 		t.Error("a version's branch should count as one waiting")
 	}
-	other := map[string]struct{}{"ar2_cli_2fcli_v2.0.0": {}}
-	if _, ok := waiting("ogham/exa", other); ok {
+	other := map[string]struct{}{"ar2_1790772768_v2.0.0": {}}
+	if _, ok := c.waiting("ogham/exa", other); ok {
 		t.Error("another package's branch counted as this one's")
 	}
 }

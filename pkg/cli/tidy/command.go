@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/tidy"
 	"github.com/aquaproj/ar2/pkg/g2"
@@ -101,12 +102,20 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 	if err != nil {
 		return err //nolint:wrapcheck // the error already names the token it is for
 	}
-	graphql := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken})))
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
+	graphql := github.NewClient(httpClient)
+
+	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
+	// The definitions come back with the table they were read out of, which is what the
+	// tidy works through.
+	_, files, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
 
 	// Auto-merge is turned on with the ordinary token: it needs the pull request the app
 	// just opened, not the app.
-	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version),
-		graphql.Branches(args.G2Owner, args.G2Repo), graphql)
+	c := ctrl.New(registry, files, graphql)
 	return c.Tidy(ctx, logger.Logger, &ctrl.Args{ //nolint:wrapcheck
 		Packages: pkgNames,
 		Limit:    args.Limit,

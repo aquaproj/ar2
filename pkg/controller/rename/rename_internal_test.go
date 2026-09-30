@@ -11,15 +11,17 @@ import (
 
 // fakeRegistry records what a rename asked it to do.
 type fakeRegistry struct {
-	moved   bool
+	// renamed is the definition the rename would write, or nil when the definition
+	// already names the new package.
+	renamed *aquag2.Config
 	from    string
 	to      string
 	configs map[string]*aquag2.Config
 }
 
-func (f *fakeRegistry) RenamePackage(_ context.Context, from, to string) (bool, error) {
+func (f *fakeRegistry) RenamePackage(_ context.Context, _ *slog.Logger, from, to string) (*aquag2.Config, error) {
 	f.from, f.to = from, to
-	return f.moved, nil
+	return f.renamed, nil
 }
 
 func (f *fakeRegistry) Config(_ context.Context, pkgName string) (*aquag2.Config, error) {
@@ -42,15 +44,15 @@ func (f *fakeCatalogue) Rename(_ context.Context, _ *slog.Logger, from, to strin
 
 func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-// The branch first, then the catalogue: a catalogue naming a branch that isn't there is a
-// registry answering nothing for a package it says it has.
+// The definition first, then the catalogue: what the catalogue lists the package under is a
+// projection of the definition, so it is brought to what the rename writes.
 func TestController_Rename(t *testing.T) {
 	t.Parallel()
 	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
 		RepoOwner: "anomalyco", RepoName: "opencode",
 		Aliases: []*aquaregistry.Alias{{Name: "sst/opencode"}},
 	}}
-	reg := &fakeRegistry{moved: true, configs: map[string]*aquag2.Config{"anomalyco/opencode": cfg}}
+	reg := &fakeRegistry{renamed: cfg, configs: map[string]*aquag2.Config{"anomalyco/opencode": cfg}}
 	cat := &fakeCatalogue{}
 
 	if err := New(reg, cat).Rename(t.Context(), discard(),
@@ -70,11 +72,11 @@ func TestController_Rename(t *testing.T) {
 	}
 }
 
-// A branch already under the new name is a run that stopped before the catalogue, so the
-// catalogue is still brought up to it.
+// A definition that already names the new package is a rename that stopped before the
+// catalogue, so the catalogue is still brought up to it.
 func TestController_Rename_branchAlreadyThere(t *testing.T) {
 	t.Parallel()
-	reg := &fakeRegistry{moved: false, configs: map[string]*aquag2.Config{
+	reg := &fakeRegistry{configs: map[string]*aquag2.Config{
 		"c/c": {PackageInfo: &aquaregistry.PackageInfo{RepoOwner: "c", RepoName: "c"}},
 	}}
 	cat := &fakeCatalogue{}

@@ -11,9 +11,38 @@ import (
 // branch ruleset cover all of them with a single pattern.
 const BranchPrefix = "pkg_"
 
-// BranchName returns the branch holding the package's generated registry.json.
+// BranchName returns the branch a package's generated registry.json was held on while
+// branches were named after the package.
+//
+// Nothing addresses a package this way any more: a branch is named after the package's id,
+// so that a repository being renamed doesn't move anything. It is what 'ar2 identify' reads
+// to carry a package over to the branch named after its id, and it goes when those branches
+// go.
 func BranchName(pkgName string) string {
 	return BranchPrefix + EncodePackageName(pkgName)
+}
+
+// IDBranchName returns the branch holding the package whose id this is.
+func IDBranchName(id string) string {
+	return BranchPrefix + id
+}
+
+// BranchID returns the id a package branch is named after, and false for a branch named
+// after the package itself.
+//
+// An id is a decimal number and an encoded package name is never one: a package name holds
+// at least one slash, which the encoding writes as "_2f".
+func BranchID(branch string) (string, bool) {
+	id, ok := strings.CutPrefix(branch, BranchPrefix)
+	if !ok || id == "" {
+		return "", false
+	}
+	for i := range len(id) {
+		if id[i] < '0' || id[i] > '9' {
+			return "", false
+		}
+	}
+	return id, true
 }
 
 // EncodePackageName escapes a package name so it can be used as a git ref.
@@ -64,14 +93,15 @@ func isSafe(c byte) bool {
 // latter doesn't have to make an exception for the branch a pull request comes from.
 const HeadBranchPrefix = "ar2_"
 
-// HeadBranchName returns the branch a pull request for the package is opened from.
+// HeadBranchName returns the branch a pull request for the package with this id is opened
+// from.
 //
 // It carries no version: one pull request adds every version of the package that a
 // run found, which keeps the number of pull requests down and, more importantly,
 // keeps two of them from targeting the same package branch at once. Two would
 // conflict on merge, since the second is written against a base the first has moved.
-func HeadBranchName(pkgName string) string {
-	return HeadBranchPrefix + EncodePackageName(pkgName)
+func HeadBranchName(id string) string {
+	return HeadBranchPrefix + id
 }
 
 // VersionHeadBranchName returns the branch a pull request for one version alone is opened
@@ -86,19 +116,17 @@ func HeadBranchName(pkgName string) string {
 // Two of these don't conflict with each other or with the package's own, because a pull
 // request into the package branch moves it only when it merges, and this one doesn't until a
 // person has been.
-func VersionHeadBranchName(pkgName, version string) string {
-	return HeadBranchName(pkgName) + "_" + EncodePackageName(version)
+func VersionHeadBranchName(id, version string) string {
+	return HeadBranchName(id) + "_" + EncodePackageName(version)
 }
 
 // IsVersionHeadBranch reports whether the branch is one of the package's version branches.
 //
-// A prefix match isn't enough, because one package's name can be the beginning of
-// another's: GoogleCloudPlatform/terraformer/aws encodes to
-// GoogleCloudPlatform_2fterraformer_2faws, which the parent's prefix
-// GoogleCloudPlatform_2fterraformer_ matches. What tells them apart is what follows the
-// separator -- an encoded version, in which an underscore only ever begins an escape.
-func IsVersionHeadBranch(pkgName, branch string) bool {
-	prefix := HeadBranchName(pkgName) + "_"
+// A prefix match isn't enough, because one id can be the beginning of another: 1790772680
+// starts with 179077268. What tells them apart is what follows the separator -- an encoded
+// version, in which an underscore only ever begins an escape.
+func IsVersionHeadBranch(id, branch string) bool {
+	prefix := HeadBranchName(id) + "_"
 	if !strings.HasPrefix(branch, prefix) {
 		return false
 	}
@@ -137,6 +165,6 @@ func isHexDigit(c byte) bool {
 // Its own branch rather than the one a version's pull request uses, because it goes the
 // other way: into the default branch, carrying the registry's configuration and the
 // catalogue. A package could have both open at once, and they must not be the same ref.
-func RemoveBranchName(pkgName string) string {
-	return HeadBranchPrefix + "remove_" + EncodePackageName(pkgName)
+func RemoveBranchName(id string) string {
+	return HeadBranchPrefix + "remove_" + id
 }

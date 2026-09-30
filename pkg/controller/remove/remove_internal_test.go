@@ -32,6 +32,22 @@ type fakeRegistry struct {
 	bodies []string
 }
 
+// fakeID is the id whatever package a test is about is held under. What the tests check is
+// which branch was written to, not how the id was arrived at.
+const fakeID = "1790772767"
+
+func (f *fakeRegistry) Branch(_ string) (string, bool) {
+	return g2.IDBranchName(fakeID), true
+}
+
+func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
+	return g2.HeadBranchName(fakeID), true
+}
+
+func (f *fakeRegistry) RemoveBranch(_ string) (string, bool) {
+	return g2.RemoveBranchName(fakeID), true
+}
+
 func (f *fakeRegistry) PackagesInFlight(_ context.Context) (map[string]struct{}, error) {
 	return f.inFlight, nil
 }
@@ -105,7 +121,7 @@ func TestController_Remove(t *testing.T) {
 	}
 
 	// The default branch's half.
-	stop := reg.commits[g2.RemoveBranchName("foo/bar")]
+	stop := reg.commits[g2.RemoveBranchName(fakeID)]
 	if len(stop) != 3 {
 		t.Fatalf("committed %d files to the removal branch", len(stop))
 	}
@@ -123,8 +139,8 @@ func TestController_Remove(t *testing.T) {
 	if strings.Contains(byPath[aquag2.AliasesFileName], "foo/old") {
 		t.Errorf("the alias is still there:\n%s", byPath[aquag2.AliasesFileName])
 	}
-	if reg.bases[g2.RemoveBranchName("foo/bar")] != "main" {
-		t.Errorf("the first pull request goes into %q", reg.bases[g2.RemoveBranchName("foo/bar")])
+	if reg.bases[g2.RemoveBranchName(fakeID)] != "main" {
+		t.Errorf("the first pull request goes into %q", reg.bases[g2.RemoveBranchName(fakeID)])
 	}
 }
 
@@ -144,7 +160,7 @@ func TestController_Remove_dropsWhatWasGenerated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	drop := reg.commits[g2.HeadBranchName("foo/bar")]
+	drop := reg.commits[g2.HeadBranchName(fakeID)]
 	if len(drop) != 2 {
 		t.Fatalf("committed %d files to the head branch", len(drop))
 	}
@@ -153,8 +169,8 @@ func TestController_Remove_dropsWhatWasGenerated(t *testing.T) {
 			t.Errorf("%s isn't a deletion", file.Path)
 		}
 	}
-	if reg.bases[g2.HeadBranchName("foo/bar")] != g2.BranchName("foo/bar") {
-		t.Errorf("the second pull request goes into %q", reg.bases[g2.HeadBranchName("foo/bar")])
+	if reg.bases[g2.HeadBranchName(fakeID)] != g2.IDBranchName(fakeID) {
+		t.Errorf("the second pull request goes into %q", reg.bases[g2.HeadBranchName(fakeID)])
 	}
 	// It has to say which one merges first, because merging them the other way round
 	// has the next run generate the files again.
@@ -174,7 +190,7 @@ func TestController_Remove_nothingPublished(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reg.commits[g2.HeadBranchName("foo/bar")]; ok {
+	if _, ok := reg.commits[g2.HeadBranchName(fakeID)]; ok {
 		t.Error("it committed to the package branch")
 	}
 	if len(reg.bases) != 1 {
@@ -197,12 +213,12 @@ func TestController_Remove_alreadyIgnored(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range reg.commits[g2.RemoveBranchName("scenarigo/scenarigo")] {
+	for _, file := range reg.commits[g2.RemoveBranchName(fakeID)] {
 		if file.Path == g2.RegistryConfigFileName {
 			t.Errorf("the configuration was written again:\n%s", file.Content)
 		}
 	}
-	if len(reg.commits[g2.HeadBranchName("scenarigo/scenarigo")]) != 1 {
+	if len(reg.commits[g2.HeadBranchName(fakeID)]) != 1 {
 		t.Error("the generated file wasn't taken away")
 	}
 }
@@ -211,7 +227,7 @@ func TestController_Remove_alreadyIgnored(t *testing.T) {
 // are taken out, so going ahead would discard what that pull request holds.
 func TestController_Remove_pullRequestInFlight(t *testing.T) {
 	t.Parallel()
-	reg := &fakeRegistry{inFlight: map[string]struct{}{g2.HeadBranchName("foo/bar"): {}}, index: index()}
+	reg := &fakeRegistry{inFlight: map[string]struct{}{g2.HeadBranchName(fakeID): {}}, index: index()}
 	err := New(reg, "main").Remove(t.Context(), logger(), &Input{PkgName: "foo/bar", Reason: "It is malware."})
 	if !errors.Is(err, errPullRequestInFlight) {
 		t.Fatalf("got %v", err)

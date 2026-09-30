@@ -33,16 +33,6 @@ type Registry interface {
 	CreateIndexPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error)
 }
 
-// Definitions is the definition on every package branch, read in one pass.
-//
-// The reconciliation compares the catalogue against them, so it needs all of them: a
-// definition edited after the entry was made from it is a difference nothing else would
-// notice, and finding which one changed by reading them one at a time would be a request
-// per package every time the reconciliation runs.
-type Definitions interface {
-	Files(ctx context.Context, logger *slog.Logger, prefix, path string) (map[string]string, error)
-}
-
 // AutoMerger turns a pull request over to its checks.
 type AutoMerger interface {
 	EnableAutoMerge(ctx context.Context, pullRequestID string) error
@@ -53,10 +43,11 @@ type Controller struct {
 	g2         Registry
 	automerge  AutoMerger
 	baseBranch string
-	// defs reads every branch's definition. Only the reconciliation needs it, so the
-	// paths that bring one package -- a run taking a package over, a rename -- pass
-	// nil.
-	defs Definitions
+	// defs is the definition on every package branch, which is also what the identities
+	// were read out of. The reconciliation needs all of them: a definition edited after
+	// the entry was made from it is a difference nothing else would notice. The paths
+	// that bring one package -- a run taking a package over, a rename -- pass nil.
+	defs map[string]string
 	// now is what an identifier is minted from. A field so that a test can mint a
 	// known one.
 	now func() time.Time
@@ -64,7 +55,7 @@ type Controller struct {
 
 // New creates a Controller. automerge may be nil, and then the catalogue's pull
 // requests wait for someone; defs may be nil in anything but Sync.
-func New(registry Registry, automerge AutoMerger, baseBranch string, defs Definitions) *Controller {
+func New(registry Registry, automerge AutoMerger, baseBranch string, defs map[string]string) *Controller {
 	return &Controller{
 		g2:         registry,
 		automerge:  automerge,
@@ -174,39 +165,53 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 	if c.defs == nil {
 		return errNoDefinitions
 	}
-	files, err := c.defs.Files(ctx, logger, aquag2.BranchPrefix, g2.ConfigFileName)
-	if err != nil {
-		return fmt.Errorf("read the definitions of the package branches: %w", err)
-	}
-	logger.Info("read the definitions on the package branches", "num_of_definitions", len(files))
+	logger.Info("read the definitions on the package branches", "num_of_definitions", len(c.defs))
 
 	t, err := c.read(ctx)
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, logger, t, c.reconcile(logger, t.index, files))
+	return c.write(ctx, logger, t, c.reconcile(logger, t.index, c.defs))
 }
 
 // reconcile works out what the catalogue has to gain and what it has to say differently.
 func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string) *change {
 	have := entriesByName(index)
-	taken := ids(index)
 	ch := &change{}
-	// In name order, so that a pull request reads the same way whatever order the
+	// In branch order, so that a pull request reads the same way whatever order the
 	// branches came back in.
 	for _, branch := range slices.Sorted(maps.Keys(files)) {
-		pkgName, ok := aquag2.PackageName(branch)
+		id, ok := g2.BranchID(branch)
 		if !ok {
-			// main, and anything else that isn't a package branch.
+			// A branch still named after the package, which 'ar2 identify' carries
+			// over. Reading it would list the package twice, under the same name.
 			continue
 		}
-		cfg := parseConfig(logger, pkgName, files[branch])
+		cfg := parseConfig(logger, branch, files[branch])
 		if cfg == nil {
 			continue
 		}
+		if g2.IsClaim(cfg) {
+			// The claim the branch was created with. The package is waiting for the
+			// pull request that brings its definition, and there is nothing to
+			// describe it with until then.
+			logger.Debug("the branch holds no definition yet", "branch", branch)
+			continue
+		}
+		pkgName := cfg.Name
+		if pkgName == "" {
+			// Nothing says which package the branch holds: its name is an id and its
+			// definition doesn't answer for itself.
+			logger.Warn("a package branch holds a definition that doesn't name its package",
+				"branch", branch)
+			continue
+		}
 		entry := aquag2.NewIndexPackage(pkgName, cfg)
+		// The branch the definition was read from is the id. Nothing is minted here:
+		// the branch exists, so what the catalogue has to say about where the package
+		// is has an answer already, and minting would give a second one.
+		entry.ID = id
 		old, ok := have[pkgName]
-		c.identify(entry, old, taken)
 		if !ok {
 			logger.Info("adding a package to the catalogue", "package", pkgName)
 			ch.added = append(ch.added, entry)
@@ -230,16 +235,16 @@ func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files m
 // A definition that doesn't parse is reported and skipped rather than failing the run. It
 // is one package's file, and stopping here would leave the catalogue no closer to what
 // every other branch says.
-func parseConfig(logger *slog.Logger, pkgName, content string) *aquag2.Config {
+func parseConfig(logger *slog.Logger, branch, content string) *aquag2.Config {
 	cfg := &aquag2.Config{}
 	if err := yaml.Unmarshal([]byte(content), cfg); err != nil {
-		slogerr.WithError(logger, err).Warn("read a package definition as YAML", "package", pkgName)
+		slogerr.WithError(logger, err).Warn("read a package definition as YAML", "branch", branch)
 		return nil
 	}
 	if cfg.PackageInfo == nil {
 		// A file that is YAML but not a definition. Describing the package from it
 		// would say nothing but its name, which is worse than leaving the entry alone.
-		logger.Warn("a package branch holds no definition", "package", pkgName)
+		logger.Warn("a package branch holds no definition", "branch", branch)
 		return nil
 	}
 	return cfg

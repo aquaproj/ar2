@@ -52,7 +52,7 @@ func (f *regenerateRegistry) Versions(_ context.Context, _ *slog.Logger, _ strin
 func TestRegenerate_pullRequestInFlight(t *testing.T) {
 	t.Parallel()
 	reg := &regenerateRegistry{
-		inFlight: map[string]struct{}{g2.HeadBranchName("cli/cli"): {}},
+		inFlight: map[string]struct{}{g2.HeadBranchName(fakeID): {}},
 		config:   &aquag2.Config{},
 	}
 	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
@@ -171,7 +171,7 @@ func (f *waitingRegistry) WaitingPullRequest(_ context.Context, _ string) (*gogi
 // write that away.
 func TestRegenerate_pendingWorksOnThatBranch(t *testing.T) {
 	t.Parallel()
-	branch := "ar2_ogham_2fexa_v0.8.0"
+	branch := "ar2_1790772767_v0.8.0"
 	held := regenerateRegistry{
 		inFlight: map[string]struct{}{branch: {}},
 		config:   &aquag2.Config{},
