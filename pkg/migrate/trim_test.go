@@ -12,7 +12,7 @@ import (
 // works out for itself. What it keeps is the part that can't be worked out.
 func TestConfig_replacements(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:      "github_release",
 		RepoOwner: "luau-lang",
 		RepoName:  "luau",
@@ -35,7 +35,7 @@ func TestConfig_replacements(t *testing.T) {
 // goes rather than being written empty.
 func TestConfig_replacementsAllKnown(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:         "github_release",
 		RepoOwner:    "astral-sh",
 		RepoName:     "uv",
@@ -53,7 +53,7 @@ func TestConfig_replacementsAllKnown(t *testing.T) {
 // asset it always had; nothing reading this registry is that old.
 func TestConfig_conditionOnlyOverride(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "pnpm",
 		RepoName:           "pnpm",
@@ -124,7 +124,7 @@ func TestConfig_checksumGoes(t *testing.T) {
 	} {
 		t.Run(pkgInfo.Type, func(t *testing.T) {
 			t.Parallel()
-			got, _ := migrate.Config(pkgInfo, nil)
+			got, _ := migrate.Config("cli/cli", pkgInfo, nil)
 			if got.Checksum != nil {
 				t.Errorf("the definition still says where the checksum file is: %+v", got.Checksum)
 			}
@@ -132,6 +132,45 @@ func TestConfig_checksumGoes(t *testing.T) {
 				if vo.Checksum != nil {
 					t.Errorf("an override still says where the checksum file is: %+v", vo.Checksum)
 				}
+			}
+		})
+	}
+}
+
+// The definition says which package it is for, always. aqua-registry leaves the name out
+// when it is the repository's, because there the definition sits in a file named after the
+// package; here it sits on a branch, and the only thing that says which package a branch
+// holds is the definition on it.
+func TestConfig_alwaysNamesThePackage(t *testing.T) {
+	t.Parallel()
+	for _, d := range []struct {
+		pkgName string
+		base    *aquaregistry.PackageInfo
+	}{
+		{
+			// v1 leaves it out: the name is the repository's.
+			pkgName: "cli/cli",
+			base:    &aquaregistry.PackageInfo{Type: "github_release", RepoOwner: "cli", RepoName: "cli"},
+		},
+		{
+			// One repository publishing several commands names each of them.
+			pkgName: "kubernetes/kubernetes/kubectl",
+			base: &aquaregistry.PackageInfo{
+				Name: "kubernetes/kubernetes/kubectl", Type: "github_release",
+				RepoOwner: "kubernetes", RepoName: "kubernetes",
+			},
+		},
+		{
+			// Every other type is carried over as it is, and this still has to hold.
+			pkgName: "apache/tomcat",
+			base:    &aquaregistry.PackageInfo{Type: "http", URL: "https://example.com/{{.Version}}"},
+		},
+	} {
+		t.Run(d.pkgName, func(t *testing.T) {
+			t.Parallel()
+			cfg, _ := migrate.Config(d.pkgName, d.base, nil)
+			if cfg.Name != d.pkgName {
+				t.Fatalf("the definition says %q", cfg.Name)
 			}
 		})
 	}

@@ -79,8 +79,15 @@ const catchAll = "true"
 // The second return value names the constraints that couldn't be turned into a
 // boundary. The result is still usable, but what those entries matched in v1 isn't
 // what they match here, so a person has to look at them.
-func Config(base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Config, []string) {
+func Config(pkgName string, base *aquaregistry.PackageInfo, scaffold *genrgst.RawConfig) (*g2.Config, []string) {
 	pkgInfo := trimInferred(base.Copy())
+
+	// The definition says which package it is for, always -- aqua-registry leaves the
+	// name out when it is the repository's, because there the definition sits in a file
+	// named after the package. Here it sits on a branch, and a branch is named after
+	// something that outlives the name, so the only thing that says which package a
+	// branch holds is the definition on it.
+	pkgInfo.Name = pkgName
 
 	// g2 has no version_constraint at the top level: it is the base the overrides
 	// inherit from and never a candidate itself. v1 writes "false" there to stop it

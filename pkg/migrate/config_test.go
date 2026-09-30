@@ -28,7 +28,7 @@ func TestConfig(t *testing.T) {
 		},
 	}
 
-	cfg, unconverted := migrate.Config(base, &genrgst.RawConfig{
+	cfg, unconverted := migrate.Config("cli/cli", base, &genrgst.RawConfig{
 		AllAssetsFilter: `not (Asset matches "^lib")`,
 		VersionFilter:   `not (Version matches "^gui")`,
 	})
@@ -63,7 +63,7 @@ func TestConfig(t *testing.T) {
 // top level meant on its own.
 func TestConfig_noVersionOverride(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:      "github_release",
 		RepoOwner: "cli",
 		RepoName:  "cli",
@@ -82,7 +82,7 @@ func TestConfig_noVersionOverride(t *testing.T) {
 // only fills what the registry leaves empty.
 func TestConfig_registryFilterWins(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:          "github_release",
 		VersionFilter: `not (Version matches "^nightly")`,
 		VersionPrefix: "cli-",
@@ -140,7 +140,7 @@ func TestConfig_format(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+			cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 				Type:      "github_release",
 				RepoOwner: "foo",
 				RepoName:  "foo",
@@ -171,7 +171,7 @@ func TestConfig_format(t *testing.T) {
 // ten cases to think about and then describing none of them.
 func TestConfig_allOverridesEmpty(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "Arriven",
 		RepoName:           "db1000n",
@@ -193,7 +193,7 @@ func TestConfig_allOverridesEmpty(t *testing.T) {
 // entry that does carry fields.
 func TestConfig_someOverridesEmpty(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "cli",
 		RepoName:           "cli",
@@ -223,7 +223,7 @@ func TestConfig_someOverridesEmpty(t *testing.T) {
 // that does carry fields. Only a run of them at the end is the same answer repeated.
 func TestConfig_emptyOverrideShields(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "cli",
 		RepoName:           "cli",
@@ -266,7 +266,7 @@ func TestConfig_catchAllEvaluates(t *testing.T) {
 	// A definition whose overrides say something, so the list is converted and the entry
 	// every version falls through to is appended. A definition that says nothing gets no
 	// overrides at all, and then there is no constraint to evaluate.
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "cli",
 		RepoName:           "cli",
@@ -301,7 +301,7 @@ func TestConfig_catchAllEvaluates(t *testing.T) {
 // which looks for a musl build the newer releases don't have.
 func TestConfig_topLevelIsACandidate(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "BurntSushi",
 		RepoName:           "xsv",
@@ -331,7 +331,7 @@ func TestConfig_topLevelIsACandidate(t *testing.T) {
 // what g2 means by having no top level at all.
 func TestConfig_topLevelFalse(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "Arriven",
 		RepoName:           "db1000n",
@@ -357,7 +357,7 @@ func TestConfig_topLevelFalse(t *testing.T) {
 func TestConfig_unreachableOverrides(t *testing.T) {
 	t.Parallel()
 	no := true
-	cfg, unconverted := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, unconverted := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:      "github_release",
 		RepoOwner: "XcodesOrg",
 		RepoName:  "xcodes",
@@ -393,7 +393,7 @@ func TestConfig_unreachableOverrides(t *testing.T) {
 // entry that answers instead has to say what it said.
 func TestConfig_fallbackCarriesTheCatchAll(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "superradcompany",
 		RepoName:           "microsandbox",
@@ -417,7 +417,7 @@ func TestConfig_fallbackCarriesTheCatchAll(t *testing.T) {
 // what it doesn't match carries nothing and inherits the base.
 func TestConfig_fallbackInheritsTheBase(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "bazelbuild",
 		RepoName:           "bazel-watcher",
@@ -446,7 +446,7 @@ func TestConfig_fallbackInheritsTheBase(t *testing.T) {
 func TestConfig_noDuplicateFallback(t *testing.T) {
 	t.Parallel()
 	noAsset := true
-	cfg, unconverted := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, unconverted := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "http",
 		RepoOwner:          "anthropics",
 		RepoName:           "claude-code",
@@ -474,7 +474,7 @@ func TestConfig_noDuplicateFallback(t *testing.T) {
 // the first time, and every run after that reads the branch.
 func TestConfig_carriesTheAssetFilters(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "openai",
 		RepoName:           "codex",
@@ -520,7 +520,7 @@ func TestConfig_carriesTheAssetFilters(t *testing.T) {
 func TestConfig_collapsesTrailingEmpty(t *testing.T) {
 	t.Parallel()
 	no := true
-	cfg, _ := migrate.Config(&aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "qdrant",
 		RepoName:           "qdrant",

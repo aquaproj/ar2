@@ -61,7 +61,7 @@ func synthetic(w io.Writer, root string) error {
 // comparePackage compares the two definitions of one package on every version its
 // constraints mention, and reports whether any of them resolved differently.
 func comparePackage(logger *slog.Logger, src *aquaregistry.PackageInfo, byField map[string]int, examples *[]string) bool {
-	cfg, _ := migrate.Config(src.Copy(), nil)
+	cfg, _ := migrate.Config(src.GetName(), src.Copy(), nil)
 	differs := false
 	for _, v := range mentionedVersions(src) {
 		a, errA := src.Copy().SetVersion(logger, v)
