@@ -8,6 +8,7 @@ import (
 
 	"github.com/aquaproj/ar2/pkg/cli/add"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	identify "github.com/aquaproj/ar2/pkg/cli/identify"
 	"github.com/aquaproj/ar2/pkg/cli/index"
 	"github.com/aquaproj/ar2/pkg/cli/initcmd"
 	"github.com/aquaproj/ar2/pkg/cli/regenerate"
@@ -55,6 +56,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		regenerate.New(logger, gFlags),
 		remove.New(logger, gFlags),
 		index.New(logger, gFlags),
+		identify.New(logger, gFlags),
 		show.New(logger, gFlags),
 		state.New(logger, gFlags),
 		test.New(logger, gFlags),
