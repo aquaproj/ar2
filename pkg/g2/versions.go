@@ -41,6 +41,45 @@ type Client struct {
 	// version is the ar2 that is running. Every pull request it opens is labelled with
 	// it, so that the ones an older ar2 made can be found together.
 	version string
+	// ids is what each package's branch is named after. Every branch addressed here is
+	// resolved through it: a branch's name is an id, and the definition on the branch is
+	// the only thing that says which package it holds.
+	ids *Identities
+}
+
+// UseIdentities tells the client what each package's branch is named after.
+//
+// Read once, before anything is read or written, because every branch this addresses is
+// named after an id. A client that was never told holds no package as far as the readers
+// are concerned, and refuses to create a branch rather than inventing where to put one.
+func (c *Client) UseIdentities(ids *Identities) {
+	c.ids = ids
+}
+
+// Branch is the branch holding the package, and false when the registry holds none.
+func (c *Client) Branch(pkgName string) (string, bool) {
+	return c.ids.Branch(pkgName)
+}
+
+// HeadBranch is the branch a pull request for the package is opened from, and false when
+// the registry holds no branch for it.
+func (c *Client) HeadBranch(pkgName string) (string, bool) {
+	return c.ids.HeadBranch(pkgName)
+}
+
+// VersionHeadBranch is the branch a pull request for one version alone is opened from.
+func (c *Client) VersionHeadBranch(pkgName, version string) (string, bool) {
+	return c.ids.VersionHeadBranch(pkgName, version)
+}
+
+// RemoveBranch is the branch the pull request that stops serving the package is opened from.
+func (c *Client) RemoveBranch(pkgName string) (string, bool) {
+	return c.ids.RemoveBranch(pkgName)
+}
+
+// IsVersionHeadBranch reports whether the branch is one of the package's version branches.
+func (c *Client) IsVersionHeadBranch(pkgName, branch string) bool {
+	return c.ids.IsVersionHeadBranch(pkgName, branch)
 }
 
 // New creates a Client. branchGH and prGH may be nil, and an empty version labels nothing.
@@ -63,25 +102,17 @@ func New(gh, branchGH, prGH *gogithub.Client, owner, repo, version string) *Clie
 // generated" would stop it from ever being retried — exactly for the packages that
 // need attention. Asking the repository makes a run idempotent instead.
 //
-// The listing is aqua's own, which reads the branch through the Git Data API. The
-// Contents API stops at 1,000 entries in a directory and says so only by returning
-// fewer, so a package with more versions than that would have looked as though the
-// ones it didn't return were missing, and been generated again on every run.
+// The Git Data API rather than the Contents API, which stops at 1,000 entries in a
+// directory and says so only by returning fewer: a package with more versions than that
+// would have looked as though the ones it didn't return were missing, and been generated
+// again on every run.
 func (c *Client) Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error) {
-	versions, err := aquag2.NewVersionLister(c.gh.Git, c.owner, c.repo).List(ctx, logger, pkgName)
-	if err != nil {
-		// A package with no generated version yet has no branch, and a brand new
-		// repository has none at all. Either way there is nothing to skip.
-		if errors.Is(err, aquag2.ErrNoPackageBranch) {
-			return map[string]struct{}{}, nil
-		}
-		return nil, fmt.Errorf("list the versions of the package: %w", err)
+	branch, ok := c.Branch(pkgName)
+	if !ok {
+		// A package the registry doesn't hold yet. There is nothing to skip.
+		return map[string]struct{}{}, nil
 	}
-	out := make(map[string]struct{}, len(versions))
-	for _, v := range versions {
-		out[v] = struct{}{}
-	}
-	return out, nil
+	return c.VersionsOnRef(ctx, logger, branch)
 }
 
 // VersionsOnRef returns the versions a ref holds a registry.json for.

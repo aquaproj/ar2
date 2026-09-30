@@ -61,31 +61,30 @@ func TestEncodePackageName_prefixPairs(t *testing.T) {
 	}
 }
 
-// One package's name can be the beginning of another's, and the parent's branch prefix
-// then matches the child's version branches. GoogleCloudPlatform/terraformer was
-// regenerated onto GoogleCloudPlatform/terraformer/aws's branch for it.
+// One id can be the beginning of another: 1790772680 starts with 179077268. What tells a
+// version branch of one from a version branch of the other is what follows the separator.
 func TestIsVersionHeadBranch(t *testing.T) {
 	t.Parallel()
 	data := []struct {
-		pkg    string
+		id     string
 		branch string
 		exp    bool
 	}{
-		{"GoogleCloudPlatform/terraformer", "ar2_GoogleCloudPlatform_2fterraformer_0.8.20", true},
-		{"GoogleCloudPlatform/terraformer", "ar2_GoogleCloudPlatform_2fterraformer_2faws_0.8.20", false},
-		{"GoogleCloudPlatform/terraformer/aws", "ar2_GoogleCloudPlatform_2fterraformer_2faws_0.8.20", true},
-		// A version can hold a slash of its own, which encodes the same way a package's does.
-		{"kubernetes-sigs/kustomize", "ar2_kubernetes-sigs_2fkustomize_kustomize_2fv5.8.1", true},
+		{"179077268", "ar2_179077268_0.8.20", true},
+		{"179077268", "ar2_1790772680_0.8.20", false},
+		{"1790772680", "ar2_1790772680_0.8.20", true},
+		// A version holds a slash of its own, which is escaped the way a name is.
+		{"1790772903", "ar2_1790772903_kustomize_2fv5.8.1", true},
 		// The package's own branch carries no version.
-		{"cli/cli", "ar2_cli_2fcli", false},
-		{"cli/cli", "ar2_cli_2fcli_", false},
-		{"cli/cli", "ar2_cli_2fcli_v2.1.0", true},
-		{"cli/cli", "pkg_cli_2fcli", false},
+		{"1790772767", "ar2_1790772767", false},
+		{"1790772767", "ar2_1790772767_", false},
+		{"1790772767", "ar2_1790772767_v2.1.0", true},
+		{"1790772767", "pkg_1790772767", false},
 	}
 	for _, d := range data {
-		t.Run(d.pkg+" "+d.branch, func(t *testing.T) {
+		t.Run(d.id+" "+d.branch, func(t *testing.T) {
 			t.Parallel()
-			if got := g2.IsVersionHeadBranch(d.pkg, d.branch); got != d.exp {
+			if got := g2.IsVersionHeadBranch(d.id, d.branch); got != d.exp {
 				t.Fatalf("got %v, want %v", got, d.exp)
 			}
 		})

@@ -67,23 +67,14 @@ func (f *fakeRegistry) CreateIndexPullRequest(_ context.Context, _ *slog.Logger,
 	return &gogithub.PullRequest{Number: new(1), NodeID: new("PR_node")}, nil
 }
 
-// fakeDefinitions is what every package branch holds, as the branch reader returns it.
-type fakeDefinitions struct {
-	files map[string]string
-	read  int
-}
-
-func (f *fakeDefinitions) Files(_ context.Context, _ *slog.Logger, _, _ string) (map[string]string, error) {
-	f.read++
-	return f.files, nil
-}
-
 // definitions renders each package's definition onto its branch, the way the repository
 // holds it.
-func definitions(t *testing.T, configs map[string]*aquag2.Config) *fakeDefinitions {
+// definitions is what every package branch holds, keyed by the branch: the branch is named
+// after the package's id and the definition on it is what says which package it holds.
+func definitions(t *testing.T, configs map[string]*aquag2.Config) map[string]string {
 	t.Helper()
 	files := make(map[string]string, len(configs))
-	for pkgName, cfg := range configs {
+	for id, cfg := range configs {
 		if cfg == nil {
 			// A branch with nothing generated onto it yet holds no definition at all,
 			// which the reader leaves out rather than reporting.
@@ -93,13 +84,24 @@ func definitions(t *testing.T, configs map[string]*aquag2.Config) *fakeDefinitio
 		if err != nil {
 			t.Fatal(err)
 		}
-		files[aquag2.BranchName(pkgName)] = string(b)
+		files[g2.IDBranchName(id)] = string(b)
 	}
-	return &fakeDefinitions{files: files}
+	return files
 }
 
 func config(description string) *aquag2.Config {
 	return &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{Description: description}}
+}
+
+// named is the definition a branch holds: it says which package it is, because the branch's
+// own name is an id and says nothing.
+func named(pkgName, description string) *aquag2.Config {
+	return &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
+		Name:        pkgName,
+		RepoOwner:   "owner",
+		RepoName:    "repo",
+		Description: description,
+	}}
 }
 
 func logger() *slog.Logger {
@@ -114,7 +116,7 @@ const (
 )
 
 // newController is New with a clock that doesn't move, so that what it mints is known.
-func newController(reg Registry, merger AutoMerger, defs Definitions) *Controller {
+func newController(reg Registry, merger AutoMerger, defs map[string]string) *Controller {
 	c := New(reg, merger, "main", defs)
 	c.now = func() time.Time { return time.Unix(1790000000, 0) }
 	return c
@@ -175,15 +177,12 @@ func TestController_Sync(t *testing.T) {
 	}}
 	reg := &fakeRegistry{index: index, files: rendered(t, index)}
 	defs := definitions(t, map[string]*aquag2.Config{
-		"cli/cli":               config("what the definition says now"),
-		"suzuki-shunsuke/tfcmt": config("Fork of tfnotify"),
+		minted: named("cli/cli", "what the definition says now"),
+		next:   named("suzuki-shunsuke/tfcmt", "Fork of tfnotify"),
 	})
 
 	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
-	}
-	if defs.read != 1 {
-		t.Errorf("read the branches %d times, want once", defs.read)
 	}
 	if len(reg.committed) == 0 {
 		t.Fatal("committed nothing")
@@ -192,8 +191,9 @@ func TestController_Sync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Neither entry had an identifier, so the reconciliation minted one for each. The
-	// second steps past the first, which is what a clock that hasn't moved comes to.
+	// The identifier of each entry is the branch the definition was read from: the
+	// branch is there, so what the catalogue has to say about where the package is has
+	// an answer already.
 	want := []*aquag2.IndexPackage{
 		{Name: "cli/cli", ID: minted, Description: "what the definition says now"},
 		{Name: "suzuki-shunsuke/tfcmt", ID: next, Description: "Fork of tfnotify"},
@@ -215,7 +215,7 @@ func TestController_Sync_upToDate(t *testing.T) {
 	}}
 	reg := &fakeRegistry{index: index, files: rendered(t, index)}
 	defs := definitions(t, map[string]*aquag2.Config{
-		"cli/cli": config("GitHub's official command line tool"),
+		minted: named("cli/cli", "GitHub's official command line tool"),
 	})
 
 	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
@@ -240,7 +240,7 @@ func TestController_Sync_keepsWhatHasNoDefinition(t *testing.T) {
 	}}
 	reg := &fakeRegistry{index: index, files: rendered(t, index)}
 	defs := definitions(t, map[string]*aquag2.Config{
-		"cli/cli": config("GitHub's official command line tool"),
+		minted: named("cli/cli", "GitHub's official command line tool"),
 	})
 
 	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
@@ -308,7 +308,7 @@ func TestController_Sync_fileMissing(t *testing.T) {
 	delete(files, aquag2.AliasesFileName)
 	reg := &fakeRegistry{index: index, files: files}
 	defs := definitions(t, map[string]*aquag2.Config{
-		"cli/cli": config("GitHub's official command line tool"),
+		minted: named("cli/cli", "GitHub's official command line tool"),
 	})
 
 	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {

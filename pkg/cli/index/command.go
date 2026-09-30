@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/index"
 	"github.com/aquaproj/ar2/pkg/g2"
@@ -108,9 +109,17 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 
 	// Auto-merge is turned on with the ordinary token: it needs the pull request the
 	// app just opened, not the app.
-	graphql := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken})))
-	c := ctrl.New(g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version), graphql, args.BaseBranch,
-		graphql.Branches(args.G2Owner, args.G2Repo))
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
+	graphql := github.NewClient(httpClient)
+
+	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
+	// The definitions come back with the table they were read out of, which is what the
+	// reconciliation compares the catalogue against.
+	_, files, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+	c := ctrl.New(registry, graphql, args.BaseBranch, files)
 	if len(pkgNames) > 0 {
 		return c.Refresh(ctx, logger.Logger, pkgNames) //nolint:wrapcheck
 	}

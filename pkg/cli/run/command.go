@@ -12,6 +12,7 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/migrate"
@@ -145,7 +146,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		return err
 	}
 
-	cfg, err := definition(ctx, logger, gh, args, pkgName, base)
+	cfg, err := definition(ctx, logger, gh, httpClient, args, pkgName, base)
 	if err != nil {
 		return err
 	}
@@ -189,12 +190,16 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 // what decide which assets are considered at all -- all_assets_filter is how a
 // release's rocm or jetpack build is kept from being taken for the ordinary one --
 // and they live in the definition rather than in the release.
-func definition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, args *Args, pkgName string, base *aquaregistry.PackageInfo) (*aquag2.Config, error) {
-	cfg, err := g2.New(gh, nil, nil, args.G2Owner, args.G2Repo, args.Version).Config(ctx, pkgName)
+func definition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args, pkgName string, base *aquaregistry.PackageInfo) (*aquag2.Config, error) {
+	g2Client := g2.New(gh, nil, nil, args.G2Owner, args.G2Repo, args.Version)
+	if _, _, err := identities.Read(ctx, logger.Logger, g2Client, httpClient, args.G2Owner, args.G2Repo); err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	cfg, err := g2Client.Config(ctx, pkgName)
 	if err != nil {
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}
-	if cfg != nil {
+	if cfg != nil && !g2.IsClaim(cfg) {
 		return cfg, nil
 	}
 	if base == nil {

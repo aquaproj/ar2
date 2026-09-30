@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/statefile"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	indexctrl "github.com/aquaproj/ar2/pkg/controller/index"
@@ -80,6 +81,12 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	reg, err := registryClient(gh, args)
 	if err != nil {
 		return nil, err
+	}
+	// What each package's branch is named after, before anything is read or written: a
+	// branch is named after the package's id, so nothing about its name says which
+	// package it holds.
+	if _, _, err := identities.Read(ctx, logger.Logger, reg, httpClient, args.G2Owner, args.G2Repo); err != nil {
+		return nil, err //nolint:wrapcheck
 	}
 	v, err := verifier(ctx, logger, httpClient, args)
 	if err != nil {

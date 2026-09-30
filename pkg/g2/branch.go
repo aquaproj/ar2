@@ -72,13 +72,24 @@ func (c *Client) BranchSHA(ctx context.Context, branch string) (string, error) {
 // first commit carries the template files rather than being empty, so that a pull
 // request into it is checked by the same CI as everywhere else.
 func (c *Client) EnsurePackageBranch(ctx context.Context, pkgName string) (string, error) {
-	branch := BranchName(pkgName)
-	sha, err := c.BranchSHA(ctx, branch)
-	if err != nil {
-		return "", err
+	if c.ids == nil {
+		return "", errNoIdentities
 	}
-	if sha != "" {
-		return sha, nil
+	branch, held := c.Branch(pkgName)
+	if held {
+		sha, err := c.BranchSHA(ctx, branch)
+		if err != nil {
+			return "", err
+		}
+		if sha != "" {
+			return sha, nil
+		}
+		// The table says a branch that isn't there: an id was minted for the package
+		// earlier in this run and creating the branch didn't get as far as this.
+	} else {
+		// Taking the package over. Its branch is named after an id minted here, because
+		// nothing in the registry knows the package yet.
+		branch = IDBranchName(c.ids.Mint(pkgName))
 	}
 
 	entries, err := c.templateEntries(ctx)
@@ -93,6 +104,14 @@ func (c *Client) EnsurePackageBranch(ctx context.Context, pkgName string) (strin
 		Mode:    new(blobMode),
 		Type:    new(blobType),
 		Content: new(readmeContent(pkgName)),
+	})
+	// The branch's claim to the package. Its name is an id, so this is the only thing
+	// saying which package it holds until the definition arrives and replaces it.
+	entries = append(entries, &gogithub.TreeEntry{
+		Path:    new(ConfigFileName),
+		Mode:    new(blobMode),
+		Type:    new(blobType),
+		Content: new(ClaimDefinition(pkgName)),
 	})
 	tree, _, err := c.branchGH.Git.CreateTree(ctx, c.owner, c.repo, "", entries)
 	if err != nil {

@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 
-	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/tidy"
 	gogithub "github.com/google/go-github/v92/github"
@@ -27,12 +26,12 @@ type Registry interface {
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+	// Branch and HeadBranch are the branch holding the package and the branch a pull
+	// request for it is opened from. A branch is named after the package's id, so they
+	// answer false for a package the registry doesn't hold.
+	Branch(pkgName string) (string, bool)
+	HeadBranch(pkgName string) (string, bool)
 	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
-}
-
-// Definitions reads every package branch's definition in one pass.
-type Definitions interface {
-	Files(ctx context.Context, logger *slog.Logger, prefix, path string) (map[string]string, error)
 }
 
 // AutoMerger turns a pull request over to its checks.
@@ -42,14 +41,16 @@ type AutoMerger interface {
 
 // Controller tidies definitions.
 type Controller struct {
-	g2        Registry
-	defs      Definitions
+	g2 Registry
+	// defs is the definition on every package branch, which is also what the identities
+	// were read out of.
+	defs      map[string]string
 	automerge AutoMerger
 }
 
 // New creates a Controller. automerge may be nil, and then the pull requests wait for
 // someone.
-func New(registry Registry, defs Definitions, automerge AutoMerger) *Controller {
+func New(registry Registry, defs map[string]string, automerge AutoMerger) *Controller {
 	return &Controller{g2: registry, defs: defs, automerge: automerge}
 }
 
@@ -100,15 +101,23 @@ func (c *Controller) Tidy(ctx context.Context, logger *slog.Logger, args *Args) 
 // definitions is what the run works through, by package name.
 func (c *Controller) definitions(ctx context.Context, logger *slog.Logger, args *Args) (map[string]string, error) {
 	if len(args.Packages) == 0 {
-		files, err := c.defs.Files(ctx, logger, aquag2.BranchPrefix, g2.ConfigFileName)
-		if err != nil {
-			return nil, fmt.Errorf("read the definitions of the package branches: %w", err)
-		}
+		files := c.defs
 		out := make(map[string]string, len(files))
+		ids := g2.NewIdentities(logger, files)
 		for branch, content := range files {
-			if pkgName, ok := aquag2.PackageName(branch); ok {
-				out[pkgName] = content
+			id, ok := g2.BranchID(branch)
+			if !ok {
+				// A branch still named after the package, which nothing writes to
+				// any more.
+				continue
 			}
+			pkgName, ok := ids.Package(id)
+			if !ok {
+				// Nothing on the branch says which package it holds, so there is no
+				// package to open a pull request for.
+				continue
+			}
+			out[pkgName] = content
 		}
 		logger.Info("read the definitions on the package branches", "num_of_definitions", len(out))
 		return out, nil
@@ -116,7 +125,11 @@ func (c *Controller) definitions(ctx context.Context, logger *slog.Logger, args 
 
 	out := make(map[string]string, len(args.Packages))
 	for _, pkgName := range args.Packages {
-		content, err := c.g2.File(ctx, aquag2.BranchName(pkgName), g2.ConfigFileName)
+		branch, ok := c.g2.Branch(pkgName)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", errNoBranch, pkgName)
+		}
+		content, err := c.g2.File(ctx, branch, g2.ConfigFileName)
 		if err != nil {
 			return nil, fmt.Errorf("read the definition of %s: %w", pkgName, err)
 		}
@@ -145,7 +158,11 @@ func (c *Controller) tidyPackage(ctx context.Context, logger *slog.Logger, pkgNa
 	if args.DryRun {
 		return false, nil
 	}
-	if _, ok := inFlight[g2.HeadBranchName(pkgName)]; ok {
+	head, ok := c.g2.HeadBranch(pkgName)
+	if !ok {
+		return false, fmt.Errorf("%w: %s", errNoBranch, pkgName)
+	}
+	if _, inFlight := inFlight[head]; inFlight {
 		// Committing would reset the branch that pull request is on, and what is waiting
 		// there is versions somebody may be reading.
 		logger.Info("the package has an open pull request, so its definition waits")
@@ -156,7 +173,12 @@ func (c *Controller) tidyPackage(ctx context.Context, logger *slog.Logger, pkgNa
 
 // openPullRequest commits the tidied definition and takes it to a pull request.
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, pkgName, content string, removed *tidy.Removed) error {
-	base, err := c.g2.BranchSHA(ctx, g2.BranchName(pkgName))
+	branch, ok := c.g2.Branch(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
+	}
+	head, _ := c.g2.HeadBranch(pkgName)
+	base, err := c.g2.BranchSHA(ctx, branch)
 	if err != nil {
 		return fmt.Errorf("get the package branch: %w", err)
 	}
@@ -166,7 +188,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 
 	title := fmt.Sprintf("chore(%s): %s", pkgName, what(removed))
 	files := []*g2.File{{Path: g2.ConfigFileName, Content: content}}
-	if err := c.g2.Commit(ctx, g2.HeadBranchName(pkgName), base, title, files); err != nil {
+	if err := c.g2.Commit(ctx, head, base, title, files); err != nil {
 		return fmt.Errorf("commit the definition: %w", err)
 	}
 	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, body(removed))

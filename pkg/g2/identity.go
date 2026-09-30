@@ -65,7 +65,10 @@ func (c *Client) PlanIdentity(ctx context.Context, pkgName, id string) (*Identif
 		return nil, fmt.Errorf("%w: %s", errNoBranchToIdentify, pkgName)
 	}
 
-	cfg, err := c.Config(ctx, pkgName)
+	// The branch named after the package, which is the one being carried over. Asking for
+	// the package's branch would answer with the one named after its id, which is what
+	// this is about to create.
+	cfg, err := c.ConfigOnRef(ctx, BranchName(pkgName))
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/statefile"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/add"
@@ -16,6 +17,7 @@ import (
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"golang.org/x/oauth2"
 )
 
 // errTokenRequired is returned when no access token is available.
@@ -126,7 +128,12 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 		return err //nolint:wrapcheck
 	}
 
-	c := ctrl.New(g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version), gh.Repositories)
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
+	registry := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version)
+	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
+		return err //nolint:wrapcheck
+	}
+	c := ctrl.New(registry, gh.Repositories)
 	changed, err := c.Add(ctx, logger.Logger, &ctrl.Input{
 		PkgName:  pkgName,
 		Repo:     args.Repo,

@@ -10,6 +10,7 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/identities"
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/run"
 	"github.com/aquaproj/ar2/pkg/g2"
@@ -166,10 +167,13 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, err
 	}
+	reg := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version)
+	if _, _, err := identities.Read(ctx, logger.Logger, reg, httpClient, args.G2Owner, args.G2Repo); err != nil {
+		return nil, err //nolint:wrapcheck
+	}
 	// No renamer: a regeneration is for one package under the name it has, and
 	// noticing that the name has changed is the sweep's job.
-	return ctrl.New(gh, generate.New(gh.Repositories, httpClient),
-		g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version),
+	return ctrl.New(gh, generate.New(gh.Repositories, httpClient), reg,
 		github.NewClient(httpClient), v, nil), nil
 }
 

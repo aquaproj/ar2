@@ -13,9 +13,13 @@ import (
 // Version returns the registry.json the repository holds for one version of a
 // package, or nil when it holds none.
 func (c *Client) Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error) {
+	branch, ok := c.Branch(pkgName)
+	if !ok {
+		return nil, nil //nolint:nilnil // no branch, so no generated file
+	}
 	path := aquag2.Path(version)
 	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, path,
-		&gogithub.RepositoryContentGetOptions{Ref: BranchName(pkgName)})
+		&gogithub.RepositoryContentGetOptions{Ref: branch})
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			return nil, nil //nolint:nilnil // the version isn't there, which isn't a failure

@@ -20,8 +20,12 @@ var errVersionsTruncated = errors.New("the versions directory is too large to li
 // stops being served is whatever is there, and a version directory holding something this
 // doesn't know about is exactly what would be left behind by a list built from names.
 func (c *Client) VersionFiles(ctx context.Context, pkgName string) ([]string, error) {
+	branch, ok := c.Branch(pkgName)
+	if !ok {
+		return nil, nil
+	}
 	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo,
-		BranchName(pkgName)+":"+aquag2.VersionDir, true)
+		branch+":"+aquag2.VersionDir, true)
 	if err != nil {
 		// No branch, or a branch that has never had a version generated onto it.
 		// Either way it holds nothing under versions/.

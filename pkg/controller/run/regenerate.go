@@ -23,6 +23,10 @@ var (
 	errVersionNotHeld = errors.New("the registry holds no such version of the package")
 	// errNothingWaiting is returned when nothing is waiting for a definition.
 	errNothingWaiting = errors.New("the package has no pull request of versions waiting for a definition")
+	// errNoPackageBranch is returned when the registry holds no branch for the package, so
+	// there is nothing to regenerate onto. A package is taken over by a run, which is what
+	// creates its branch.
+	errNoPackageBranch = errors.New("the registry holds no branch for the package")
 	// errNoBranch is returned when the branch went between finding the pull request and
 	// committing to it.
 	errNoBranch = errors.New("the branch isn't there")
@@ -119,7 +123,11 @@ func (c *Controller) where(ctx context.Context, logger *slog.Logger, in *Regener
 		if err := c.noPullRequestInFlight(ctx, in.PkgName); err != nil {
 			return nil, err
 		}
-		return &target{ref: g2.BranchName(in.PkgName)}, nil
+		branch, ok := c.g2.Branch(in.PkgName)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", errNoPackageBranch, in.PkgName)
+		}
+		return &target{ref: branch}, nil
 	}
 	pr, err := c.g2.WaitingPullRequest(ctx, in.PkgName)
 	if err != nil {
@@ -151,7 +159,11 @@ func (c *Controller) noPullRequestInFlight(ctx context.Context, pkgName string) 
 	if err != nil {
 		return fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
-	if _, ok := inFlight[g2.HeadBranchName(pkgName)]; ok {
+	head, ok := c.g2.HeadBranch(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoPackageBranch, pkgName)
+	}
+	if _, ok := inFlight[head]; ok {
 		return fmt.Errorf("%w: %s", errPullRequestInFlight, pkgName)
 	}
 	return nil
@@ -168,7 +180,9 @@ func (c *Controller) definitionOnRef(ctx context.Context, ref, pkgName string) (
 	if err != nil {
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}
-	if cfg == nil {
+	if cfg == nil || g2.IsClaim(cfg) {
+		// No definition, or the claim the branch was created with, which says the
+		// package's name and nothing to generate from.
 		return nil, fmt.Errorf("%w: %s", errNoDefinition, pkgName)
 	}
 	return &definition{config: cfg, fromBranch: true}, nil
@@ -293,7 +307,10 @@ func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger,
 	}
 
 	title := regenerateTitle(pkgName, versions)
-	branch := g2.HeadBranchName(pkgName)
+	branch, ok := c.g2.HeadBranch(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoPackageBranch, pkgName)
+	}
 	if where.pending {
 		// The pull request that is waiting, so that what makes the versions true arrives
 		// with them. Its own tip is the parent, because the definition somebody wrote is

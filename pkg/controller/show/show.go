@@ -76,12 +76,12 @@ func write(w io.Writer, pkg *aquag2.IndexPackage) {
 	fmt.Fprintf(w, "package:     %s\n", pkg.Name)
 	if pkg.ID != "" {
 		fmt.Fprintf(w, "id:          %s (%s)\n", pkg.ID, minted(pkg.ID))
-		fmt.Fprintf(w, "branch:      %s\n", g2.BranchName(pkg.Name))
+		fmt.Fprintf(w, "branch:      %s\n", g2.IDBranchName(pkg.ID))
 	} else {
 		// A package taken over before the registry minted identifiers. The next
 		// reconciliation gives it one.
 		fmt.Fprintf(w, "id:          none yet\n")
-		fmt.Fprintf(w, "branch:      %s\n", g2.BranchName(pkg.Name))
+		fmt.Fprintf(w, "branch:      %s\n", g2.IDBranchName(pkg.ID))
 	}
 	if pkg.Description != "" {
 		fmt.Fprintf(w, "description: %s\n", pkg.Description)

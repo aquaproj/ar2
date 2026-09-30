@@ -36,6 +36,12 @@ type Registry interface {
 	Index(ctx context.Context, ref string) (*aquag2.Index, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	VersionFiles(ctx context.Context, pkgName string) ([]string, error)
+	// Branch, HeadBranch and RemoveBranch are the branches a removal touches. A branch
+	// is named after the package's id, so they answer false for a package the registry
+	// doesn't hold -- which is a removal with nothing to do.
+	Branch(pkgName string) (string, bool)
+	HeadBranch(pkgName string) (string, bool)
+	RemoveBranch(pkgName string) (string, bool)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error)
 }
@@ -92,7 +98,11 @@ func (c *Controller) noPullRequestInFlight(ctx context.Context, pkgName string) 
 	if err != nil {
 		return fmt.Errorf("list the packages with an open pull request: %w", err)
 	}
-	if _, ok := inFlight[g2.HeadBranchName(pkgName)]; ok {
+	head, ok := c.g2.HeadBranch(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoPackageBranch, pkgName)
+	}
+	if _, ok := inFlight[head]; ok {
 		return fmt.Errorf("%w: %s", errPullRequestInFlight, pkgName)
 	}
 	return nil
@@ -110,7 +120,10 @@ func (c *Controller) stopServing(ctx context.Context, logger *slog.Logger, in *I
 		return nil, fmt.Errorf("get the branch to commit onto: %w", err)
 	}
 	title := fmt.Sprintf("fix(%s): stop serving the package", in.PkgName)
-	branch := g2.RemoveBranchName(in.PkgName)
+	branch, ok := c.g2.RemoveBranch(in.PkgName)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", errNoPackageBranch, in.PkgName)
+	}
 	if err := c.g2.Commit(ctx, branch, parent, title, files); err != nil {
 		return nil, fmt.Errorf("commit the registry's configuration and catalogue: %w", err)
 	}
@@ -168,16 +181,20 @@ func (c *Controller) dropVersions(ctx context.Context, logger *slog.Logger, in *
 		files = append(files, &g2.File{Path: path, Deleted: true})
 	}
 
-	branch := g2.BranchName(in.PkgName)
+	branch, ok := c.g2.Branch(in.PkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoPackageBranch, in.PkgName)
+	}
+	head, _ := c.g2.HeadBranch(in.PkgName)
 	parent, err := c.g2.BranchSHA(ctx, branch)
 	if err != nil {
 		return fmt.Errorf("get the package branch: %w", err)
 	}
 	title := fmt.Sprintf("fix(%s): drop what was generated", in.PkgName)
-	if err := c.g2.Commit(ctx, g2.HeadBranchName(in.PkgName), parent, title, files); err != nil {
+	if err := c.g2.Commit(ctx, head, parent, title, files); err != nil {
 		return fmt.Errorf("commit the removal of the generated files: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, g2.HeadBranchName(in.PkgName), branch, title,
+	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, head, branch, title,
 		dropBody(in, paths, stop))
 	if err != nil {
 		return fmt.Errorf("open the pull request that drops the generated files: %w", err)

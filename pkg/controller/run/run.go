@@ -55,20 +55,41 @@ type Registry interface {
 
 // Contents is what aqua-registry-g2 holds, and how a branch of it is written.
 type Contents interface {
+	Definitions
+	Branches
 	Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error)
-	// VersionsOnRef and ConfigOnRef read a branch that isn't a package's own, which is
-	// where a version waiting for a definition lives.
+	// VersionsOnRef reads a branch that isn't a package's own, which is where a version
+	// waiting for a definition lives.
 	VersionsOnRef(ctx context.Context, logger *slog.Logger, ref string) (map[string]struct{}, error)
-	ConfigOnRef(ctx context.Context, ref string) (*aquag2.Config, error)
+	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
-	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	// File is the bytes a ref holds at a path, or "" when it holds nothing there.
 	// A regeneration compares what it would commit against them.
 	File(ctx context.Context, ref, path string) (string, error)
-	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
-	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+}
+
+// Definitions is what the registry says a package is, and what it says about itself.
+//
+// ConfigOnRef reads a branch that isn't a package's own, which is where a definition
+// somebody has just written lives until its pull request merges.
+type Definitions interface {
+	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
+	ConfigOnRef(ctx context.Context, ref string) (*aquag2.Config, error)
+	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
+}
+
+// Branches is where a package's work goes.
+//
+// A branch is named after the package's id, so each of these answers false for a package the
+// registry doesn't hold yet -- which is the package EnsurePackageBranch is about to mint an
+// id for.
+type Branches interface {
+	Branch(pkgName string) (string, bool)
+	HeadBranch(pkgName string) (string, bool)
+	VersionHeadBranch(pkgName, version string) (string, bool)
+	IsVersionHeadBranch(pkgName, branch string) bool
 }
 
 // PullRequests is how a run puts what it generated to a person, and how it sees what is
@@ -224,12 +245,14 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 		logger.Debug("the package was moved to another name this run", "package", candidate.Name)
 		return workNone, nil
 	}
-	if _, ok := inFlight[g2.HeadBranchName(candidate.Name)]; ok {
-		// A pull request for this package is still open. Opening a second one would
-		// target the same package branch and conflict on merge, and if the first is
-		// open because its CI failed, a copy of it helps no one.
-		logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
-		return workNone, nil
+	if head, ok := c.g2.HeadBranch(candidate.Name); ok {
+		if _, inFlight := inFlight[head]; inFlight {
+			// A pull request for this package is still open. Opening a second one
+			// would target the same package branch and conflict on merge, and if the
+			// first is open because its CI failed, a copy of it helps no one.
+			logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
+			return workNone, nil
+		}
 	}
 	versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName]
 	todo := decide(candidate.Package, versions, now)
