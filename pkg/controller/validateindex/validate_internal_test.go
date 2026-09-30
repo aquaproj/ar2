@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestValidate(t *testing.T) { //nolint:funlen
@@ -133,5 +136,23 @@ func TestValidate_missingFile(t *testing.T) {
 	t.Parallel()
 	if err := Validate(io.Discard, filepath.Join(t.TempDir(), "index.json")); err == nil {
 		t.Fatal("Validate() wanted an error for a file that isn't there")
+	}
+}
+
+// Two packages carrying one identifier is two packages reading and writing one branch,
+// because the identifier is what the branch is named after.
+func TestIdentifiers(t *testing.T) {
+	t.Parallel()
+	got := identifiers(&aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "cli/cli", ID: "1790000000"},
+		{Name: "sst/opencode", ID: "1790000000"},
+		// No identifier: a package taken over before the registry minted them, which
+		// the reconciliation fills in rather than a reader.
+		{Name: "suzuki-shunsuke/tfcmt"},
+		{Name: "junegunn/fzf", ID: "1790000001"},
+	}})
+	want := []string{"sst/opencode and cli/cli say they are the same package (1790000000)"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("the problems are wrong (-want +got):\n%s", diff)
 	}
 }

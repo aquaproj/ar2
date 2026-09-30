@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -105,10 +106,24 @@ func logger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
+// minted is the identifier a controller built by newController mints first. The next is
+// the second after it, which is what stepping past a taken one comes to.
+const (
+	minted = "1790000000"
+	next   = "1790000001"
+)
+
+// newController is New with a clock that doesn't move, so that what it mints is known.
+func newController(reg Registry, merger AutoMerger, defs Definitions) *Controller {
+	c := New(reg, merger, "main", defs)
+	c.now = func() time.Time { return time.Unix(1790000000, 0) }
+	return c
+}
+
 func TestController_AddPackage(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
+	err := newController(reg, &fakeMerger{}, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +153,7 @@ func TestController_AddPackage(t *testing.T) {
 func TestController_AddPackage_alreadyThere(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{index: &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "cli/cli"}}}}
-	err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
+	err := newController(reg, &fakeMerger{}, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +179,7 @@ func TestController_Sync(t *testing.T) {
 		"suzuki-shunsuke/tfcmt": config("Fork of tfnotify"),
 	})
 
-	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if defs.read != 1 {
@@ -177,9 +192,11 @@ func TestController_Sync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Neither entry had an identifier, so the reconciliation minted one for each. The
+	// second steps past the first, which is what a clock that hasn't moved comes to.
 	want := []*aquag2.IndexPackage{
-		{Name: "cli/cli", Description: "what the definition says now"},
-		{Name: "suzuki-shunsuke/tfcmt", Description: "Fork of tfnotify"},
+		{Name: "cli/cli", ID: minted, Description: "what the definition says now"},
+		{Name: "suzuki-shunsuke/tfcmt", ID: next, Description: "Fork of tfnotify"},
 	}
 	if diff := cmp.Diff(want, got.Packages); diff != "" {
 		t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
@@ -194,14 +211,14 @@ func TestController_Sync(t *testing.T) {
 func TestController_Sync_upToDate(t *testing.T) {
 	t.Parallel()
 	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
-		{Name: "cli/cli", Description: "GitHub's official command line tool"},
+		{Name: "cli/cli", ID: minted, Description: "GitHub's official command line tool"},
 	}}
 	reg := &fakeRegistry{index: index, files: rendered(t, index)}
 	defs := definitions(t, map[string]*aquag2.Config{
 		"cli/cli": config("GitHub's official command line tool"),
 	})
 
-	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if reg.committed != nil {
@@ -218,15 +235,15 @@ func TestController_Sync_upToDate(t *testing.T) {
 func TestController_Sync_keepsWhatHasNoDefinition(t *testing.T) {
 	t.Parallel()
 	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
-		{Name: "cli/cli", Description: "GitHub's official command line tool"},
-		{Name: "sst/opencode"},
+		{Name: "cli/cli", ID: minted, Description: "GitHub's official command line tool"},
+		{Name: "sst/opencode", ID: next},
 	}}
 	reg := &fakeRegistry{index: index, files: rendered(t, index)}
 	defs := definitions(t, map[string]*aquag2.Config{
 		"cli/cli": config("GitHub's official command line tool"),
 	})
 
-	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if reg.committed != nil {
@@ -242,7 +259,7 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 		openPR: &gogithub.PullRequest{Number: new(7)},
 		index:  &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "aquaproj/aqua"}}},
 	}
-	err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
+	err := newController(reg, &fakeMerger{}, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +284,7 @@ func TestController_Sync_noConfigYet(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{files: rendered(t, &aquag2.Index{})}
 	defs := definitions(t, map[string]*aquag2.Config{"cli/cli": nil})
-	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if reg.committed != nil {
@@ -285,7 +302,7 @@ func TestController_Sync_noConfigYet(t *testing.T) {
 func TestController_Sync_fileMissing(t *testing.T) {
 	t.Parallel()
 	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
-		{Name: "cli/cli", Description: "GitHub's official command line tool"},
+		{Name: "cli/cli", ID: minted, Description: "GitHub's official command line tool"},
 	}}
 	files := rendered(t, index)
 	delete(files, aquag2.AliasesFileName)
@@ -294,7 +311,7 @@ func TestController_Sync_fileMissing(t *testing.T) {
 		"cli/cli": config("GitHub's official command line tool"),
 	})
 
-	if err := New(reg, &fakeMerger{}, "main", defs).Sync(t.Context(), logger()); err != nil {
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
 		t.Fatal(err)
 	}
 	if len(reg.committed) != 1 || reg.committed[0].Path != aquag2.AliasesFileName {
@@ -335,7 +352,7 @@ func TestController_AddPackage_autoMerge(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	merger := &fakeMerger{}
-	if err := New(reg, merger, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
+	if err := newController(reg, merger, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool")); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +367,7 @@ func TestController_AddPackage_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	merger := &fakeMerger{err: errors.New("auto-merge is off for this repository")}
-	if err := New(reg, merger, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
+	if err := newController(reg, merger, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool")); err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +380,7 @@ func TestController_AddPackage_autoMergeFails(t *testing.T) {
 func TestController_AddPackage_noAutoMerger(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	if err := New(reg, nil, "main", nil).AddPackage(t.Context(), logger(), "cli/cli",
+	if err := newController(reg, nil, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool")); err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +400,7 @@ func TestController_AddPackage_aliases(t *testing.T) {
 	reg := &fakeRegistry{}
 	cfg := config("The AI coding agent built for the terminal")
 	cfg.Aliases = []*aquaregistry.Alias{{Name: "sst/opencode"}}
-	if err := New(reg, &fakeMerger{}, "main", nil).AddPackage(t.Context(), logger(),
+	if err := newController(reg, &fakeMerger{}, nil).AddPackage(t.Context(), logger(),
 		"anomalyco/opencode", cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +429,7 @@ func TestController_Rename(t *testing.T) {
 	cfg := config("The AI coding agent built for the terminal")
 	cfg.Aliases = []*aquaregistry.Alias{{Name: "sst/opencode"}}
 
-	if err := New(reg, &fakeMerger{}, "main", nil).Rename(t.Context(), logger(),
+	if err := newController(reg, &fakeMerger{}, nil).Rename(t.Context(), logger(),
 		"sst/opencode", "anomalyco/opencode", cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +474,7 @@ func TestController_Refresh(t *testing.T) {
 		configs: map[string]*aquag2.Config{"cli/cli": cfg},
 	}
 
-	if err := New(reg, &fakeMerger{}, "main", nil).Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
+	if err := newController(reg, &fakeMerger{}, nil).Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(reg.committed) == 0 {
@@ -468,7 +485,7 @@ func TestController_Refresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []*aquag2.IndexPackage{
-		{Name: "cli/cli", Description: "what the definition says now", Aliases: []string{"github/hub"}},
+		{Name: "cli/cli", ID: minted, Description: "what the definition says now", Aliases: []string{"github/hub"}},
 		{Name: "sst/opencode"},
 	}
 	if diff := cmp.Diff(want, got.Packages); diff != "" {
@@ -491,14 +508,14 @@ func TestController_Refresh_unchanged(t *testing.T) {
 	t.Parallel()
 	cfg := config("the same as ever")
 	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
-		{Name: "cli/cli", Description: "the same as ever"},
+		{Name: "cli/cli", ID: minted, Description: "the same as ever"},
 	}}
 	reg := &fakeRegistry{
 		index:   index,
 		files:   rendered(t, index),
 		configs: map[string]*aquag2.Config{"cli/cli": cfg},
 	}
-	if err := New(reg, &fakeMerger{}, "main", nil).Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
+	if err := newController(reg, &fakeMerger{}, nil).Refresh(t.Context(), logger(), []string{"cli/cli"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(reg.committed) != 0 {
@@ -515,7 +532,7 @@ func TestController_Refresh_unchanged(t *testing.T) {
 func TestController_Refresh_noDefinition(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{configs: map[string]*aquag2.Config{}}
-	err := New(reg, &fakeMerger{}, "main", nil).Refresh(t.Context(), logger(), []string{"cli/cli"})
+	err := newController(reg, &fakeMerger{}, nil).Refresh(t.Context(), logger(), []string{"cli/cli"})
 	if !errors.Is(err, errNoDefinition) {
 		t.Fatalf("a package without a definition should be refused, got %v", err)
 	}
