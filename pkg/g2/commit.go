@@ -23,6 +23,20 @@ const (
 	blobType = "blob"
 )
 
+// deletedEntry is the tree entry that takes a path out.
+//
+// An entry with no content and no sha is serialized with "sha": null, which is how the Git
+// data API says the path is gone. The mode and the type go with it: the API answers "Must
+// supply a valid tree.mode" to an entry without a mode even when it is only removing one,
+// where go-github documents both as ignored.
+func deletedEntry(path string) *gogithub.TreeEntry {
+	return &gogithub.TreeEntry{
+		Path: new(path),
+		Mode: new(blobMode),
+		Type: new(blobType),
+	}
+}
+
 // Commit writes the files onto a new commit on top of parent and points branch at it.
 //
 // The commit is built through the Git data API rather than a checkout. A package
@@ -47,9 +61,7 @@ func (c *Client) Commit(ctx context.Context, branch, parent, message string, fil
 	entries := make([]*gogithub.TreeEntry, 0, len(files))
 	for _, file := range files {
 		if file.Deleted {
-			// Only the path: an entry with no content and no sha is serialized with
-			// "sha": null, which the API reads as taking that path out.
-			entries = append(entries, &gogithub.TreeEntry{Path: new(file.Path)})
+			entries = append(entries, deletedEntry(file.Path))
 			continue
 		}
 		entries = append(entries, &gogithub.TreeEntry{
