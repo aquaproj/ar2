@@ -28,6 +28,10 @@ import (
 type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
 	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	// HeadBranch is the branch the pull request is opened from. It answers false for a
+	// package the registry doesn't hold, which is every package until
+	// EnsurePackageBranch has minted the id its branch is named after.
+	HeadBranch(pkgName string) (string, bool)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
@@ -205,12 +209,18 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 	if err != nil {
 		return fmt.Errorf("create the package branch: %w", err)
 	}
+	// After the branch, because creating it is what mints the id both branches are named
+	// after.
+	head, ok := c.g2.HeadBranch(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
+	}
 	content, err := marshal(cfg)
 	if err != nil {
 		return err
 	}
 	title := "feat(" + pkgName + "): add the package"
-	if err := c.g2.Commit(ctx, g2.HeadBranchName(pkgName), base, title, []*g2.File{
+	if err := c.g2.Commit(ctx, head, base, title, []*g2.File{
 		{Path: g2.ConfigFileName, Content: content},
 	}); err != nil {
 		return fmt.Errorf("commit the package definition: %w", err)
