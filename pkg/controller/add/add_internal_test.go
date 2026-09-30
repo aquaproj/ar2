@@ -15,9 +15,13 @@ import (
 
 // fakeRegistry stands in for aqua-registry-g2 and records what was written to it.
 type fakeRegistry struct {
-	config    *aquag2.Config
-	committed []*g2.File
-	created   int
+	// held says the package branch has been created, which is what gives it an id.
+	held bool
+	// commitBranch is where the definition was committed.
+	commitBranch string
+	config       *aquag2.Config
+	committed    []*g2.File
+	created      int
 }
 
 func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, error) {
@@ -25,10 +29,21 @@ func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, erro
 }
 
 func (f *fakeRegistry) EnsurePackageBranch(_ context.Context, _ string) (string, error) {
+	f.held = true
 	return "base-sha", nil
 }
 
-func (f *fakeRegistry) Commit(_ context.Context, _, _, _ string, files []*g2.File) error {
+// HeadBranch answers only once the branch has been created, because creating it is what mints
+// the id both branches are named after.
+func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
+	if !f.held {
+		return "", false
+	}
+	return g2.HeadBranchName("1790772767"), true
+}
+
+func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g2.File) error {
+	f.commitBranch = branch
 	f.committed = files
 	return nil
 }
@@ -75,6 +90,10 @@ func TestController_Add(t *testing.T) {
 	}
 	if len(reg.committed) != 1 || reg.committed[0].Path != g2.ConfigFileName {
 		t.Fatalf("committed %v", reg.committed)
+	}
+	// The head branch is named after the package's id, which creating its branch minted.
+	if want := g2.HeadBranchName("1790772767"); reg.commitBranch != want {
+		t.Errorf("committed to %q, want %q", reg.commitBranch, want)
 	}
 	content := reg.committed[0].Content
 	for _, want := range []string{
