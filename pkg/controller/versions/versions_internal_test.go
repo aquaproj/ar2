@@ -233,6 +233,22 @@ func TestWrite_versionAdded(t *testing.T) {
 	}
 }
 
+// A versions directory holding nothing that reads as a version gets no list: an empty one
+// would say the registry holds no version of the package, where what is true is that none
+// was found.
+func TestWrite_noVersionInTheDirectory(t *testing.T) {
+	t.Parallel()
+	reg := registryOf(t)
+	reg.versions["pkg_1"] = map[string]struct{}{}
+	c := New(reg, defs())
+	if err := c.Write(context.Background(), discardLogger(), &Args{}); err != nil {
+		t.Fatal(err)
+	}
+	if reg.pushes != 0 {
+		t.Errorf("the branch was pushed to %d times", reg.pushes)
+	}
+}
+
 // A dry run says what it would write and writes nothing.
 func TestWrite_dryRun(t *testing.T) {
 	t.Parallel()

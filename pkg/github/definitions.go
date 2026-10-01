@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // refsPerPage is how many branches one request asks about.
@@ -50,6 +51,13 @@ func (b *Branches) Files(ctx context.Context, logger *slog.Logger, prefix, path 
 		}
 		refs := page.Data.Repository.Refs
 		for _, node := range refs.Nodes {
+			// The query is a search rather than a filter: GitHub answers with every
+			// branch whose name holds the string anywhere, so asking for "pkg_" also
+			// returns ar2_yarnpkg_2fberry -- the head branch of a pull request. The
+			// caller asked for the branches the prefix names, which is what this is.
+			if !strings.HasPrefix(node.Name, prefix) {
+				continue
+			}
 			text, ok := blobText(logger, node, path)
 			if !ok {
 				continue
