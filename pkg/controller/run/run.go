@@ -144,6 +144,12 @@ type Renamer interface {
 
 // Input holds the parameters of a loop run.
 type Input struct {
+	// Packages are the packages to work through instead of the order. Empty is the
+	// order itself, which is what a scheduled run does.
+	//
+	// Nothing else changes: a named package is taken over, generated and put to a pull
+	// request the way the order would have, whenever its turn came.
+	Packages []string
 	// Limit bounds how many package versions are generated in one run.
 	Limit int
 	// OutputDir is where registry.json files are written. When it is empty the
@@ -269,7 +275,42 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 func (c *Controller) candidates(logger *slog.Logger, input *Input, cfg *g2.RegistryConfig) []*Candidate {
 	// Dropped before the sweep, so that a repository nobody expects to answer isn't
 	// asked about either.
-	return rejoin(logger, ignore(logger, order(input.State), cfg.Ignored()))
+	candidates := rejoin(logger, ignore(logger, order(input.State), cfg.Ignored()))
+	return only(logger, candidates, input.Packages)
+}
+
+// only narrows the run to the packages it was asked for, in the order it would have
+// reached them.
+//
+// The order is kept rather than the order they were named in, because what the order
+// decides is which package has waited longest, and naming a few doesn't change that
+// between them.
+//
+// A name that isn't among the candidates is said rather than ignored. It is a package
+// aqua-registry doesn't have -- 'ar2 add' is what puts one in the order -- or one the
+// registry is told to leave alone, and either way nothing would happen for it.
+func only(logger *slog.Logger, candidates []*Candidate, pkgNames []string) []*Candidate {
+	if len(pkgNames) == 0 {
+		return candidates
+	}
+	asked := make(map[string]struct{}, len(pkgNames))
+	for _, pkgName := range pkgNames {
+		asked[pkgName] = struct{}{}
+	}
+	out := make([]*Candidate, 0, len(pkgNames))
+	for _, candidate := range candidates {
+		if _, ok := asked[candidate.Name]; !ok {
+			continue
+		}
+		delete(asked, candidate.Name)
+		out = append(out, candidate)
+	}
+	for pkgName := range asked {
+		logger.Warn("the package isn't one this run could reach",
+			"package", pkgName,
+			"reason", "aqua-registry doesn't have it, or the registry is told to leave it alone")
+	}
+	return out
 }
 
 // rejoin puts a package that was outside the order back at the end of it.

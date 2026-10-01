@@ -28,7 +28,12 @@ import (
 type Args struct {
 	*flag.GlobalFlags
 
-	Target      string // positional argument: <package name>[@<version>]
+	// Target is a positional "<package name>@<version>", which is generated on its own
+	// without touching the repository.
+	Target string
+	// Packages are positional package names, which the run works through instead of
+	// the order.
+	Packages    []string
 	SkipPR      bool
 	Output      string
 	RegistryRef string
@@ -68,7 +73,7 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		GlobalFlags: gFlags,
 	}
 	cmd := &cobra.Command{
-		Use:   "run [<package name>[@<version>]]",
+		Use:   "run [<package name>... | <package name>@<version>]",
 		Short: "Generate registry.json from an upstream release",
 		Long: `Generate registry.json from an upstream release.
 
@@ -81,12 +86,32 @@ newest version first, skipping what the state says is already generated. The sta
 records progress, so the next run continues rather than starting over.
 
 $ ar2 run --skip-pr --output-dir out
+
+Named packages are worked through instead of the order, and nothing else changes:
+each one is taken over, generated and put to a pull request the way the order would
+have, whenever its turn came. Which is what makes it worth naming one -- a package
+the order reaches in a week, because something was fixed and it is the package that
+was waiting for it.
+
+$ ar2 run ko-build/ko
+$ ar2 run ko-build/ko sigstore/cosign
+
+A package aqua-registry doesn't have isn't in the order to be named: 'ar2 add' is
+what puts one there.
+
+One package and version is generated on its own, without touching the repository.
+It is the form used while working on a package.
+
 $ ar2 run cli/cli@v2.101.0 --skip-pr
 $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, positional []string) error {
-			if len(positional) > 0 {
+			// A version can only be asked for one package at a time, and asking for
+			// one is what tells the two apart.
+			if len(positional) == 1 && strings.Contains(positional[0], "@") {
 				args.Target = positional[0]
+			} else {
+				args.Packages = positional
 			}
 			return action(cmd.Context(), logger, args)
 		},
