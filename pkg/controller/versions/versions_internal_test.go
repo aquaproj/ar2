@@ -20,9 +20,19 @@ func discardLogger() *slog.Logger {
 type fakeRegistry struct {
 	versions map[string]map[string]struct{}
 	files    map[string]string
-	pushed   []*g2.File
-	parent   string
-	pushes   int
+	// tree is the sha of each branch's versions directory, which is what says whether a
+	// list is still of what the branch holds.
+	tree   map[string]string
+	pushed []*g2.File
+	parent string
+	pushes int
+	// read counts the files read, which is what says a branch answered for by its sha
+	// alone cost nothing more.
+	read int
+}
+
+func (f *fakeRegistry) VersionsTree(_ context.Context, ref string) (string, error) {
+	return f.tree[ref], nil
 }
 
 func (f *fakeRegistry) Branch(pkgName string) (string, bool) {
@@ -39,6 +49,7 @@ func (f *fakeRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, ref stri
 }
 
 func (f *fakeRegistry) File(_ context.Context, _, path string) (string, error) {
+	f.read++
 	return f.files[path], nil
 }
 
@@ -67,6 +78,7 @@ func registryOf(t *testing.T) *fakeRegistry {
 	t.Helper()
 	return &fakeRegistry{
 		versions: map[string]map[string]struct{}{"pkg_1": {"v2.100.0": {}, "v2.101.0": {}}},
+		tree:     map[string]string{"pkg_1": "versions-tree-sha"},
 		files: map[string]string{
 			"versions/v2.100.0/registry-1.json": held(t, "2026-09-01T00:00:00Z"),
 			"versions/v2.101.0/registry-1.json": held(t, "2026-09-15T14:24:34Z"),
@@ -102,7 +114,7 @@ func TestWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Source != "parent-sha" {
+	if got.Source != "versions-tree-sha" {
 		t.Errorf("the source is %q", got.Source)
 	}
 	want := []*aquag2.Version{
@@ -122,9 +134,10 @@ func TestWrite(t *testing.T) {
 	}
 }
 
-// A branch already holding this list is left alone, however long ago it was written: the
-// commit the list says it came from is not part of what is compared, or every run would
-// write every list again.
+// A branch whose list is of the versions directory it holds is answered for by the
+// directory's sha and the list naming it: the versions aren't read, nor a file per version,
+// and nothing is written. A sweep over a registry that is up to date costs two requests a
+// package.
 func TestWrite_alreadyListed(t *testing.T) {
 	t.Parallel()
 	reg := registryOf(t)
@@ -134,15 +147,59 @@ func TestWrite_alreadyListed(t *testing.T) {
 	}
 	listed := reg.pushed[0].Content
 
-	// The list as it was written, but from an older commit of the branch.
 	reg2 := registryOf(t)
-	reg2.files["versions.json"] = strings.Replace(listed, `"source": "parent-sha"`, `"source": "an older commit"`, 1)
+	reg2.files["versions.json"] = listed
 	c2 := New(reg2, defs())
 	if err := c2.Write(context.Background(), discardLogger(), &Args{}); err != nil {
 		t.Fatal(err)
 	}
 	if reg2.pushes != 0 {
 		t.Errorf("the branch was pushed to %d times for a list it already holds", reg2.pushes)
+	}
+	if reg2.read != 1 {
+		t.Errorf("%d files were read where the list alone answers", reg2.read)
+	}
+}
+
+// A branch whose directory has moved on is read and written again. The list names the
+// directory it was made from, so the next run is cheap again.
+func TestWrite_sourceMoved(t *testing.T) {
+	t.Parallel()
+	reg := registryOf(t)
+	c := New(reg, defs())
+	if err := c.Write(context.Background(), discardLogger(), &Args{}); err != nil {
+		t.Fatal(err)
+	}
+	reg.files["versions.json"] = reg.pushed[0].Content
+	reg.tree["pkg_1"] = "another-versions-tree-sha"
+	reg.pushes = 0
+	if err := c.Write(context.Background(), discardLogger(), &Args{}); err != nil {
+		t.Fatal(err)
+	}
+	if reg.pushes != 1 {
+		t.Fatalf("the branch was pushed to %d times", reg.pushes)
+	}
+	got, err := aquag2.ReadVersions(strings.NewReader(reg.pushed[0].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != "another-versions-tree-sha" {
+		t.Errorf("the source is %q", got.Source)
+	}
+}
+
+// A branch holding no versions has no list to write: an empty one would say the registry
+// holds nothing of a package it has just taken over.
+func TestWrite_noVersions(t *testing.T) {
+	t.Parallel()
+	reg := registryOf(t)
+	reg.tree["pkg_1"] = ""
+	c := New(reg, defs())
+	if err := c.Write(context.Background(), discardLogger(), &Args{}); err != nil {
+		t.Fatal(err)
+	}
+	if reg.pushes != 0 {
+		t.Errorf("the branch was pushed to %d times", reg.pushes)
 	}
 }
 
@@ -158,6 +215,8 @@ func TestWrite_versionAdded(t *testing.T) {
 	reg.files["versions.json"] = reg.pushed[0].Content
 	reg.versions["pkg_1"]["v2.102.0"] = struct{}{}
 	reg.files["versions/v2.102.0/registry-1.json"] = held(t, "2026-09-30T00:00:00Z")
+	// The directory holds another version, so its sha is another sha.
+	reg.tree["pkg_1"] = "versions-tree-sha-with-v2.102.0"
 	reg.pushes = 0
 	if err := c.Write(context.Background(), discardLogger(), &Args{}); err != nil {
 		t.Fatal(err)

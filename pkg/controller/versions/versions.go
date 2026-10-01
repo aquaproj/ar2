@@ -27,6 +27,7 @@ import (
 type Registry interface {
 	Branch(pkgName string) (string, bool)
 	BranchSHA(ctx context.Context, branch string) (string, error)
+	VersionsTree(ctx context.Context, ref string) (string, error)
 	VersionsOnRef(ctx context.Context, logger *slog.Logger, ref string) (map[string]struct{}, error)
 	File(ctx context.Context, ref, path string) (string, error)
 	Push(ctx context.Context, branch, parent, message string, files []*g2.File) error
@@ -110,48 +111,85 @@ func (c *Controller) branches(logger *slog.Logger, args *Args) []string {
 }
 
 // write writes one branch's list, and reports whether anything was written.
+//
+// What the list is of is the versions directory, so the directory's sha is what says
+// whether the list is still it. The list records the sha it was made from, and a branch
+// whose directory is still that one is answered for by two requests: the sha, and the list
+// that names it. Everything else -- the versions, and a file per version -- is read only
+// when something has changed.
 func (c *Controller) write(ctx context.Context, logger *slog.Logger, branch string, dryRun bool) (bool, error) {
-	sha, err := c.registry.BranchSHA(ctx, branch)
+	tree, err := c.registry.VersionsTree(ctx, branch)
 	if err != nil {
 		return false, err //nolint:wrapcheck // the error names the branch
 	}
-	if sha == "" {
+	if tree == "" {
+		// A branch holding no versions. There is no list to write, and writing an empty
+		// one would say the registry holds nothing of a package it has just taken over.
 		return false, nil
-	}
-	versions, err := c.list(ctx, logger, branch, sha)
-	if err != nil {
-		return false, err
 	}
 	held, err := c.registry.File(ctx, branch, aquag2.VersionsFileName)
 	if err != nil {
 		return false, fmt.Errorf("read the list the branch holds: %w", err)
 	}
-	if same(held, versions) {
-		logger.Debug("the list is what the branch holds")
+	if source(held) == tree {
+		logger.Debug("the list is of the versions the branch holds")
 		return false, nil
+	}
+
+	versions, err := c.list(ctx, logger, branch, tree)
+	if err != nil {
+		return false, err
 	}
 	content, err := marshal(versions)
 	if err != nil {
 		return false, err
 	}
+	if content == held {
+		return false, nil
+	}
 	logger.Info("writing the versions", "versions", len(versions.Versions))
 	if dryRun {
 		return true, nil
 	}
-	files := []*g2.File{{Path: aquag2.VersionsFileName, Content: content}}
-	if err := c.registry.Push(ctx, branch, sha, message(len(versions.Versions)), files); err != nil {
-		return false, fmt.Errorf("push the versions onto the package branch: %w", err)
+	return true, c.push(ctx, branch, content, len(versions.Versions))
+}
+
+// push writes the list onto the package branch.
+func (c *Controller) push(ctx context.Context, branch, content string, versions int) error {
+	sha, err := c.registry.BranchSHA(ctx, branch)
+	if err != nil {
+		return err //nolint:wrapcheck // the error names the branch
 	}
-	return true, nil
+	if sha == "" {
+		return nil
+	}
+	files := []*g2.File{{Path: aquag2.VersionsFileName, Content: content}}
+	if err := c.registry.Push(ctx, branch, sha, message(versions), files); err != nil {
+		return fmt.Errorf("push the versions onto the package branch: %w", err)
+	}
+	return nil
+}
+
+// source is the versions directory the list the branch holds was made from, and empty when
+// the branch holds no list or one that can't be read.
+func source(held string) string {
+	if held == "" {
+		return ""
+	}
+	versions, err := aquag2.ReadVersions(strings.NewReader(held))
+	if err != nil {
+		return ""
+	}
+	return versions.Source
 }
 
 // list is what the branch holds, read from the branch.
-func (c *Controller) list(ctx context.Context, logger *slog.Logger, branch, sha string) (*aquag2.Versions, error) {
+func (c *Controller) list(ctx context.Context, logger *slog.Logger, branch, tree string) (*aquag2.Versions, error) {
 	held, err := c.registry.VersionsOnRef(ctx, logger, branch)
 	if err != nil {
 		return nil, fmt.Errorf("list the versions the branch holds: %w", err)
 	}
-	out := &aquag2.Versions{Source: sha, Versions: make([]*aquag2.Version, 0, len(held))}
+	out := &aquag2.Versions{Source: tree, Versions: make([]*aquag2.Version, 0, len(held))}
 	for version := range held {
 		entry, err := c.entry(ctx, logger, branch, version)
 		if err != nil {
@@ -204,32 +242,6 @@ func marshal(versions *aquag2.Versions) (string, error) {
 		return "", fmt.Errorf("marshal %s: %w", aquag2.VersionsFileName, err)
 	}
 	return string(b) + "\n", nil
-}
-
-// same reports whether the branch already holds this list, the versions being what is
-// compared.
-//
-// The source is left out of it. It names the commit the list was generated from, which
-// moves whenever anything on the branch does, so comparing it would write the list again
-// on every run to say that the versions are the versions.
-func same(held string, generated *aquag2.Versions) bool {
-	parsed, err := aquag2.ReadVersions(strings.NewReader(held))
-	if err != nil {
-		// No list, or one that can't be read. Either way what is there isn't this.
-		return false
-	}
-	if len(parsed.Versions) != len(generated.Versions) {
-		return false
-	}
-	for i, version := range parsed.Versions {
-		if version == nil || generated.Versions[i] == nil {
-			return false
-		}
-		if *version != *generated.Versions[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // message is what the commit says.
