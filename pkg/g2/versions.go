@@ -152,6 +152,24 @@ func (c *Client) VersionsOnRef(ctx context.Context, logger *slog.Logger, ref str
 	return out, nil
 }
 
+// VersionsTree is the sha of a ref's versions directory, and empty when it holds none.
+//
+// It is what says whether anything about a package's versions has changed: the directory's
+// own sha moves when a version is added, taken out or generated again, and not when
+// anything else on the branch does. One request, where reading the versions is one per
+// hundred of them and a request per version after that.
+func (c *Client) VersionsTree(ctx context.Context, ref string) (string, error) {
+	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, ref+":"+aquag2.VersionDir, false)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			// A branch carrying nothing but a definition.
+			return "", nil
+		}
+		return "", fmt.Errorf("get the versions directory of %s: %w", ref, err)
+	}
+	return tree.GetSHA(), nil
+}
+
 // versionOf reads the version whose registry.json a tree entry is, and reports false for
 // an entry that is not one.
 //
