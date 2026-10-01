@@ -59,3 +59,13 @@ func TestParseSigner_notJSON(t *testing.T) {
 		t.Fatal("an error should be returned")
 	}
 }
+
+// A certificate that isn't one. Anything can be beside an asset under a name ending in
+// .pem, and what it says about the signer is nothing.
+func TestParseCertificateSigner_notACertificate(t *testing.T) {
+	t.Parallel()
+	_, err := parseCertificateSigner([]byte("<html>"))
+	if !errors.Is(err, errCertificateEncoding) {
+		t.Fatalf("the error is %v", err)
+	}
+}

@@ -8,7 +8,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/google/go-cmp/cmp"
 )
 
 func names(n ...string) map[string]struct{} {
@@ -37,6 +40,29 @@ func discardLogger() *slog.Logger {
 // keylessBundle is a Sigstore bundle of the kind keyless signing produces: a Fulcio
 // certificate naming the workflow that asked for it and the issuer that vouched for it.
 func keylessBundle(t *testing.T, identity, issuer string) []byte {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
+		"mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+		"verificationMaterial": map[string]any{
+			"certificate": map[string]any{"rawBytes": fulcioCertificate(t, identity, issuer)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// certificatePEM is the same certificate as the release publishes it beside a signature,
+// which is PEM rather than the bundle's DER.
+func certificatePEM(t *testing.T, identity, issuer string) []byte {
+	t.Helper()
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fulcioCertificate(t, identity, issuer)})
+}
+
+// fulcioCertificate is a certificate of the kind Fulcio issues to a workflow: the
+// workflow in a URI of the subject, and the issuer in the extension Fulcio records it in.
+func fulcioCertificate(t *testing.T, identity, issuer string) []byte {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -64,16 +90,7 @@ func keylessBundle(t *testing.T, identity, issuer string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := json.Marshal(map[string]any{
-		"mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
-		"verificationMaterial": map[string]any{
-			"certificate": map[string]any{"rawBytes": der},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
+	return der
 }
 
 // keyBundle is what signing with a key produces: a hint for the key, and no
@@ -171,6 +188,101 @@ func TestInferSigning(t *testing.T) {
 	}
 	if reg.Assets[1].Cosign != nil {
 		t.Errorf("the asset with nothing beside it must not be signed: %+v", reg.Assets[1].Cosign)
+	}
+}
+
+// smallstep signs its releases from a workflow in smallstep/workflows and publishes a
+// signature and a certificate rather than a bundle. The certificate names the signer, so
+// the entry is held to it rather than to a workflow of smallstep/certificates -- which is
+// what the inference assumes and what no version of this package can verify under.
+func TestInferSigning_certificate(t *testing.T) {
+	t.Parallel()
+	const (
+		asset    = "step_darwin_0.28.4_arm64.tar.gz"
+		signedBy = "https://github.com/smallstep/workflows/.github/workflows/goreleaser.yml@refs/heads/main"
+	)
+	download := "/smallstep/certificates/releases/download/v0.28.4/"
+	g := serving(t, map[string][]byte{download + asset + ".pem": certificatePEM(t, signedBy, issuer)})
+	reg := registryOf(&aquag2.Asset{OS: "darwin", Arch: "arm64", Asset: asset})
+	in := &Input{PkgName: "smallstep/certificates", Version: "v0.28.4"}
+	if err := g.inferSigning(context.Background(), discardLogger(), in, reg,
+		names(asset, asset+".sig", asset+".pem")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := reg.Assets[0].Cosign
+	if got == nil {
+		t.Fatal("the asset with a signature beside it must be signed")
+	}
+	url := "https://github.com/smallstep/certificates/releases/download/{{.Version}}/" + asset
+	want := []string{
+		"--certificate", url + ".pem",
+		"--certificate-identity", signedBy,
+		"--certificate-oidc-issuer", issuer,
+		"--signature", url + ".sig",
+	}
+	if diff := cmp.Diff(want, got.Opts); diff != "" {
+		t.Error(diff)
+	}
+}
+
+// smallstep publishes the certificate base64 encoded, which is the other way cosign
+// takes one, and the identity reads the same out of it.
+func TestParseCertificateSigner_base64(t *testing.T) {
+	t.Parallel()
+	encoded := base64.StdEncoding.EncodeToString(certificatePEM(t, identity, issuer))
+	// Wrapped across lines, as a file holding base64 may be.
+	for _, body := range []string{encoded, encoded[:20] + "\n" + encoded[20:] + "\n"} {
+		got, err := parseCertificateSigner([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Identity != identity {
+			t.Errorf("the identity is %q", got.Identity)
+		}
+		if got.Issuer != issuer {
+			t.Errorf("the issuer is %q", got.Issuer)
+		}
+	}
+}
+
+// What the certificate is read for is the identity. Where cosign reads the signature
+// from is the rest of the arguments, and an entry that lost those would verify nothing.
+func TestHeldTo(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		opts []string
+		want []string
+	}{
+		{
+			name: "a regexp becomes the identity it was a pattern for",
+			opts: []string{"--certificate-identity-regexp", "^https://github\\.com/owner/.+$", "--certificate-oidc-issuer", "assumed"},
+			want: []string{"--certificate-identity", identity, "--certificate-oidc-issuer", issuer},
+		},
+		{
+			name: "the arguments that aren't about the identity are kept, in place",
+			opts: []string{"--certificate", "a.pem", "--certificate-identity-regexp", "a pattern", "--certificate-oidc-issuer", "assumed", "--signature", "a.sig"},
+			want: []string{"--certificate", "a.pem", "--certificate-identity", identity, "--certificate-oidc-issuer", issuer, "--signature", "a.sig"},
+		},
+		{
+			name: "an entry saying nothing about the identity is told",
+			opts: []string{"--signature", "a.sig"},
+			want: []string{"--signature", "a.sig", "--certificate-identity", identity, "--certificate-oidc-issuer", issuer},
+		},
+		{
+			name: "a flag with no value left to read ends it",
+			opts: []string{"--certificate-oidc-issuer"},
+			want: []string{"--certificate-oidc-issuer", issuer, "--certificate-identity", identity},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, heldTo(tt.opts, &signer{Identity: identity, Issuer: issuer})); diff != "" {
+				t.Error(diff)
+			}
+		})
 	}
 }
 
