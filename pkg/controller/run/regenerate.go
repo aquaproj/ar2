@@ -103,7 +103,7 @@ func (c *Controller) Regenerate(ctx context.Context, logger *slog.Logger, in *Re
 		}
 		return len(changed), nil
 	}
-	if err := c.commitRegenerated(ctx, logger, in.PkgName, changed, where); err != nil {
+	if err := c.commitRegenerated(ctx, logger, def, in.PkgName, changed, where); err != nil {
 		return 0, err
 	}
 	return len(changed), nil
@@ -296,7 +296,7 @@ func (c *Controller) regenerate(ctx context.Context, logger *slog.Logger, input 
 // version nothing held, so CI passing is the whole of what it needed; this one
 // replaces what the registry already serves, and what CI can say about the new file
 // is that it describes a real release -- not that replacing the old one was right.
-func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger, pkgName string, versions []*regenerated, where *target) error {
+func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, versions []*regenerated, where *target) error {
 	base, err := c.regenerationParent(ctx, pkgName, where)
 	if err != nil {
 		return err
@@ -325,7 +325,8 @@ func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger,
 			"branch", branch, "num_of_versions", len(versions))
 		return nil
 	}
-	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, regenerateBody(versions))
+	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title,
+		regenerateBody(versions, releasesOf(def.config)))
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
@@ -355,11 +356,11 @@ func regenerateTitle(pkgName string, versions []*regenerated) string {
 }
 
 // regenerateBody says which versions changed and that the change is a replacement.
-func regenerateBody(versions []*regenerated) string {
+func regenerateBody(versions []*regenerated, rel releases) string {
 	var b strings.Builder
 	b.WriteString("Generated again by `ar2 regenerate`, from the definition on the package's branch.\n\n")
 	for _, r := range versions {
-		b.WriteString("- " + r.version.Version + "\n")
+		b.WriteString("- " + rel.link(r.version.Version) + "\n")
 	}
 	b.WriteString("\nEach of these comes out differently from what the branch holds, so this replaces a " +
 		"file the registry is already serving. A version whose file was unchanged isn't here.\n")

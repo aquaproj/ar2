@@ -446,7 +446,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 // for the other, which is the point of telling them apart.
 func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, generated []*version, inFlight map[string]struct{}) error {
 	sound, unresolved := partition(generated)
-	if err := c.openUnresolved(ctx, logger, pkgName, unresolved, inFlight); err != nil {
+	if err := c.openUnresolved(ctx, logger, def, pkgName, unresolved, inFlight); err != nil {
 		return err
 	}
 	if len(sound) == 0 {

@@ -209,7 +209,8 @@ func TestOpenPullRequest_paths(t *testing.T) {
 
 func TestPRBodyReason(t *testing.T) {
 	t.Parallel()
-	body := prBody([]*version{{Version: "v1.18.32"}}, []string{`Version in ["v0.1.84", "v0.1.92"]`}, true)
+	body := prBody([]*version{{Version: "v1.18.32"}}, []string{`Version in ["v0.1.84", "v0.1.92"]`},
+		true, releases{})
 	for _, want := range []string{"v1.18.32", "couldn't be turned into boundaries", `Version in ["v0.1.84", "v0.1.92"]`, "Auto-merge is off. What it is waiting on is above."} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("the body doesn't mention %q:\n%s", want, body)
@@ -231,7 +232,7 @@ func TestOpenUnresolved(t *testing.T) {
 		{Version: "v0.9.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
 		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
 	}
-	if err := c.openUnresolved(t.Context(), discardLogger(), "ogham/exa", versions, nil); err != nil {
+	if err := c.openUnresolved(t.Context(), discardLogger(), &definition{}, "ogham/exa", versions, nil); err != nil {
 		t.Fatal(err)
 	}
 	if want := "ar2_1790772767_v0.8.0"; reg.commitBranch != want {
@@ -261,7 +262,7 @@ func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 	versions := []*version{
 		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
 	}
-	if err := c.openUnresolved(t.Context(), discardLogger(), "ogham/exa", versions, inFlight); err != nil {
+	if err := c.openUnresolved(t.Context(), discardLogger(), &definition{}, "ogham/exa", versions, inFlight); err != nil {
 		t.Fatal(err)
 	}
 	if reg.created != 0 || reg.committed != nil {
