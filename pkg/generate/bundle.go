@@ -1,13 +1,17 @@
 package generate
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
+	"unicode"
 )
 
 // signer is how a Sigstore bundle was signed, read from the bundle itself.
@@ -33,13 +37,36 @@ const bundleLimit = 1 << 20
 
 // readSigner downloads a Sigstore bundle and reads how it was signed.
 func readSigner(ctx context.Context, httpClient *http.Client, url string) (*signer, error) {
+	b, err := readSmallAsset(ctx, httpClient, url)
+	if err != nil {
+		return nil, err
+	}
+	return parseSigner(b)
+}
+
+// readCertificateSigner downloads the certificate beside a signature and reads who it names.
+//
+// A release that signs with a certificate and a signature rather than with a bundle says the
+// same thing in another file: the certificate is the one Fulcio issued to whatever asked for
+// it, and reading it is what tells the entry who to hold the signature to.
+func readCertificateSigner(ctx context.Context, httpClient *http.Client, url string) (*signer, error) {
+	b, err := readSmallAsset(ctx, httpClient, url)
+	if err != nil {
+		return nil, err
+	}
+	return parseCertificateSigner(b)
+}
+
+// readSmallAsset downloads one of the small files beside an asset -- a bundle, a certificate --
+// and reads it whole.
+func readSmallAsset(ctx context.Context, httpClient *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create a request for the bundle: %w", err)
+		return nil, fmt.Errorf("create a request for the signing material: %w", err)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request the bundle: %w", err)
+		return nil, fmt.Errorf("request the signing material: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -47,9 +74,9 @@ func readSigner(ctx context.Context, httpClient *http.Client, url string) (*sign
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, bundleLimit))
 	if err != nil {
-		return nil, fmt.Errorf("read the bundle: %w", err)
+		return nil, fmt.Errorf("read the signing material: %w", err)
 	}
-	return parseSigner(b)
+	return b, nil
 }
 
 // rawBundle is the part of the Sigstore bundle format that says who signed.
@@ -88,9 +115,58 @@ func parseSigner(b []byte) (*signer, error) {
 	default:
 		return nil, errBundleMaterial
 	}
+	return signerOf(der)
+}
+
+// parseCertificateSigner reads the certificate beside a signature.
+func parseCertificateSigner(b []byte) (*signer, error) {
+	der, err := certificateDER(b)
+	if err != nil {
+		return nil, err
+	}
+	return signerOf(der)
+}
+
+// certificateDER is the certificate's own bytes, however the release wrote it down.
+//
+// cosign's --certificate takes the certificate as PEM or as base64 of it, so a release
+// publishes whichever it was given -- smallstep publishes the base64. Either way what
+// says who signed is the DER inside.
+func certificateDER(b []byte) ([]byte, error) {
+	if block, _ := pem.Decode(b); block != nil {
+		return block.Bytes, nil
+	}
+	decoded, err := unbase64(b)
+	if err != nil {
+		return nil, errCertificateEncoding
+	}
+	if block, _ := pem.Decode(decoded); block != nil {
+		return block.Bytes, nil
+	}
+	return decoded, nil
+}
+
+// unbase64 decodes base64 that may have been wrapped across lines.
+func unbase64(b []byte) ([]byte, error) {
+	packed := bytes.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, b)
+	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(packed)))
+	n, err := base64.StdEncoding.Decode(decoded, packed)
+	if err != nil {
+		return nil, fmt.Errorf("decode the certificate as base64: %w", err)
+	}
+	return decoded[:n], nil
+}
+
+// signerOf reads who a certificate names.
+func signerOf(der []byte) (*signer, error) {
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, fmt.Errorf("read the bundle's certificate: %w", err)
+		return nil, fmt.Errorf("read the certificate: %w", err)
 	}
 	if len(cert.URIs) == 0 {
 		return nil, errCertificateNoIdentity

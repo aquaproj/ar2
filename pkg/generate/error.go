@@ -10,7 +10,10 @@ var (
 	// errBundleMaterial is returned for a bundle that holds neither a certificate nor a
 	// public key, which is neither of the ways cosign verifies one.
 	errBundleMaterial = errors.New("the signature bundle says neither a certificate nor a key verifies it")
+	// errCertificateEncoding is returned when the file beside a signature isn't a
+	// certificate written either of the ways cosign reads one.
+	errCertificateEncoding = errors.New("the certificate beside the signature is neither PEM nor base64")
 	// errCertificateNoIdentity is returned for a certificate with no subject to hold a
 	// signature to.
-	errCertificateNoIdentity = errors.New("the bundle's certificate names no identity")
+	errCertificateNoIdentity = errors.New("the certificate names no identity")
 )
