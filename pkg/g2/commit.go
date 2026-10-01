@@ -53,6 +53,27 @@ func deletedEntry(path string) *gogithub.TreeEntry {
 // branch that already has an open pull request is a synchronize event, and one made
 // with GITHUB_TOKEN leaves that pull request's checks waiting for approval.
 func (c *Client) Commit(ctx context.Context, branch, parent, message string, files []*File) error {
+	// Force, because a head branch left behind by an earlier run was written against a
+	// base that has since moved, so what it holds is stale.
+	return c.commit(ctx, c.prGH, true, branch, parent, message, files)
+}
+
+// Push writes the files straight onto a package branch.
+//
+// A package branch takes changes through a pull request, which is what the registry's
+// review is, and the writer here is the one app that bypasses that requirement. What it
+// is for is a file the review has nothing to say about: one derived from what the branch
+// already holds, where a pull request per package would be hundreds of pull requests
+// asserting what their own diff already proves.
+//
+// It never forces. A package branch is the registry, and a push that isn't a
+// fast-forward would be rewriting what has been published rather than adding to it.
+func (c *Client) Push(ctx context.Context, branch, parent, message string, files []*File) error {
+	return c.commit(ctx, c.branchGH, false, branch, parent, message, files)
+}
+
+// commit builds the commit and moves the branch to it.
+func (c *Client) commit(ctx context.Context, gh *gogithub.Client, force bool, branch, parent, message string, files []*File) error {
 	parentCommit, _, err := c.gh.Git.GetCommit(ctx, c.owner, c.repo, parent)
 	if err != nil {
 		return fmt.Errorf("get the parent commit: %w", err)
@@ -73,12 +94,12 @@ func (c *Client) Commit(ctx context.Context, branch, parent, message string, fil
 	}
 	// The parent's tree is the base, so the commit adds files rather than replacing
 	// everything the branch holds.
-	tree, _, err := c.prGH.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(), entries)
+	tree, _, err := gh.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(), entries)
 	if err != nil {
 		return fmt.Errorf("create a tree: %w", err)
 	}
 
-	commit, _, err := c.prGH.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
+	commit, _, err := gh.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
 		Message: new(message),
 		Tree:    tree,
 		Parents: []*gogithub.Commit{{SHA: new(parent)}},
@@ -93,7 +114,7 @@ func (c *Client) Commit(ctx context.Context, branch, parent, message string, fil
 		return err
 	}
 	if sha == "" {
-		_, _, err = c.prGH.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
+		_, _, err = gh.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
 			Ref: ref,
 			SHA: commit.GetSHA(),
 		})
@@ -102,11 +123,9 @@ func (c *Client) Commit(ctx context.Context, branch, parent, message string, fil
 		}
 		return nil
 	}
-	// A branch left behind by an earlier run is reset rather than added to: it was
-	// written against a base that has since moved, so what it holds is stale.
-	_, _, err = c.prGH.Git.UpdateRef(ctx, c.owner, c.repo, "heads/"+branch, gogithub.UpdateRef{
+	_, _, err = gh.Git.UpdateRef(ctx, c.owner, c.repo, "heads/"+branch, gogithub.UpdateRef{
 		SHA:   commit.GetSHA(),
-		Force: new(true),
+		Force: new(force),
 	})
 	if err != nil {
 		return fmt.Errorf("update the branch: %w", err)
