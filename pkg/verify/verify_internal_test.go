@@ -11,17 +11,26 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// newArchive writes the given paths as empty files and returns the directory,
-// standing in for an extracted archive.
-func newArchive(t *testing.T, paths ...string) string {
+// newArchive writes the given paths as empty files and returns the directory, standing in
+// for an extracted archive. A path in executables is written as a file that can be run,
+// which is what an archive records for a command.
+func newArchive(t *testing.T, paths []string, executables ...string) string {
 	t.Helper()
+	runnable := make(map[string]struct{}, len(executables))
+	for _, p := range executables {
+		runnable[p] = struct{}{}
+	}
 	dir := t.TempDir()
 	for _, p := range paths {
 		full := filepath.Join(dir, filepath.FromSlash(p))
 		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(full, nil, 0o600); err != nil {
+		mode := os.FileMode(0o600)
+		if _, ok := runnable[p]; ok {
+			mode = 0o700
+		}
+		if err := os.WriteFile(full, nil, mode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,6 +51,9 @@ type resolveCase struct {
 	want        []*generate.File
 	needsReview bool
 	unresolved  []string
+	// executables are the archive's paths that can be run, which is how a command is
+	// told from a file named after one.
+	executables []string
 }
 
 func resolveCases() []resolveCase {
@@ -113,6 +125,17 @@ func resolvedCases() []resolveCase {
 			files:   []*generate.File{{Name: "gh"}},
 			want:    []*generate.File{{Name: "gh"}},
 		},
+		{
+			// A release that ships a completion script named after its command: CMake's
+			// archive holds bin/cmake and share/bash-completion/completions/cmake. The
+			// script isn't executable, so the archive says which is the command and
+			// nothing is being guessed.
+			name:        "a completion script carries the name too",
+			archive:     []string{"CMake.app/Contents/bin/cmake", "CMake.app/Contents/share/bash-completion/completions/cmake"},
+			executables: []string{"CMake.app/Contents/bin/cmake"},
+			files:       []*generate.File{{Name: "cmake", Src: "cmake-4.4.3-macos-universal/CMake.app/Contents/bin/cmake"}},
+			want:        []*generate.File{{Name: "cmake", Src: "CMake.app/Contents/bin/cmake"}},
+		},
 	}
 }
 
@@ -156,7 +179,7 @@ func TestResolveFiles(t *testing.T) {
 	for _, tt := range resolveCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			dir := newArchive(t, tt.archive...)
+			dir := newArchive(t, tt.archive, tt.executables...)
 			files, needsReview, unresolved, holds := resolveFiles(discardLogger(), dir, tt.goos, tt.files)
 			if diff := cmp.Diff(tt.want, files); diff != "" {
 				t.Errorf("files are wrong (-want +got):\n%s", diff)
@@ -177,12 +200,13 @@ func TestResolveFiles(t *testing.T) {
 // of it, and that there is a second one at all is what makes choosing it a guess.
 func TestIndexByName(t *testing.T) {
 	t.Parallel()
-	dir := newArchive(t, "share/doc/gh", "bin/gh")
+	dir := newArchive(t, []string{"share/doc/gh", "bin/gh"}, "bin/gh")
 	index, err := indexByName(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff([]string{"bin/gh", "share/doc/gh"}, index["gh"]); diff != "" {
+	want := []*found{{Path: "bin/gh", Executable: true}, {Path: "share/doc/gh"}}
+	if diff := cmp.Diff(want, index["gh"]); diff != "" {
 		t.Errorf("indexByName is wrong (-want +got):\n%s", diff)
 	}
 }
