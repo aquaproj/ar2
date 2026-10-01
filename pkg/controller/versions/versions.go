@@ -140,6 +140,13 @@ func (c *Controller) write(ctx context.Context, logger *slog.Logger, branch stri
 	if err != nil {
 		return false, err
 	}
+	if len(versions.Versions) == 0 {
+		// A versions directory holding nothing this reads as a version. Writing the list
+		// would say the registry holds no version of the package, where what is true is
+		// that this couldn't find one.
+		logger.Warn("the versions directory holds no version")
+		return false, nil
+	}
 	content, err := marshal(versions)
 	if err != nil {
 		return false, err
