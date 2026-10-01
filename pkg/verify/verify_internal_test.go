@@ -45,6 +45,12 @@ type resolveCase struct {
 }
 
 func resolveCases() []resolveCase {
+	return append(resolvedCases(), guessedCases()...)
+}
+
+// resolvedCases are the archives that answer for themselves: the definition's files are
+// where it says, or are the same files elsewhere in the archive.
+func resolvedCases() []resolveCase {
 	return []resolveCase{
 		{
 			// The common case: nothing moved, so the registry's template is carried
@@ -55,31 +61,22 @@ func resolveCases() []resolveCase {
 			want:    []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
 		},
 		{
-			// The upstream reorganized the archive. The executable is found by name
-			// and relocated, but relocating is a guess, so it has to be reviewed.
-			name:        "src moved",
-			archive:     []string{"bin/gh"},
-			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
-			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
-			needsReview: true,
+			// The upstream reorganized the archive: it dropped the directory it used to
+			// pack everything under. The file is the same file under the same name, so
+			// recording where it is now says what the definition said and the pull
+			// request can merge on its own.
+			name:    "src moved",
+			archive: []string{"bin/gh"},
+			files:   []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
+			want:    []*generate.File{{Name: "gh", Src: "bin/gh"}},
 		},
 		{
 			// Windows executables carry an extension the registry's name doesn't.
-			name:        "src moved to a windows executable",
-			goos:        "windows",
-			archive:     []string{"bin/gh.exe"},
-			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
-			want:        []*generate.File{{Name: "gh", Src: "bin/gh.exe"}},
-			needsReview: true,
-		},
-		{
-			// Nothing in the archive carries the name, so there is nothing to guess.
-			name:        "the executable is gone",
-			archive:     []string{"README.md"},
-			files:       []*generate.File{{Name: "gh", Src: "bin/gh"}},
-			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
-			needsReview: true,
-			unresolved:  []string{"gh"},
+			name:    "src moved to a windows executable",
+			goos:    "windows",
+			archive: []string{"bin/gh.exe"},
+			files:   []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
+			want:    []*generate.File{{Name: "gh", Src: "bin/gh.exe"}},
 		},
 		{
 			// aqua resolves files[].src with the Windows extension added, and renames
@@ -103,12 +100,11 @@ func resolveCases() []resolveCase {
 			// A release can ship a file of the command's name that isn't the command:
 			// git-bug's archive holds git-bug.exe beside a completion script called
 			// git-bug. On Windows the executable is the one with the extension.
-			name:        "a windows archive holds the name and the executable",
-			goos:        "windows",
-			archive:     []string{"git-bug_0.11.0_windows_amd64/git-bug.exe", "git-bug_0.11.0_windows_amd64/completion/bash/git-bug"},
-			files:       []*generate.File{{Name: "git-bug", Src: "git-bug.exe"}},
-			want:        []*generate.File{{Name: "git-bug", Src: "git-bug_0.11.0_windows_amd64/git-bug.exe"}},
-			needsReview: true,
+			name:    "a windows archive holds the name and the executable",
+			goos:    "windows",
+			archive: []string{"git-bug_0.11.0_windows_amd64/git-bug.exe", "git-bug_0.11.0_windows_amd64/completion/bash/git-bug"},
+			files:   []*generate.File{{Name: "git-bug", Src: "git-bug.exe"}},
+			want:    []*generate.File{{Name: "git-bug", Src: "git-bug_0.11.0_windows_amd64/git-bug.exe"}},
 		},
 		{
 			// A raw asset has no src; the name alone locates it.
@@ -116,6 +112,41 @@ func resolveCases() []resolveCase {
 			archive: []string{"gh"},
 			files:   []*generate.File{{Name: "gh"}},
 			want:    []*generate.File{{Name: "gh"}},
+		},
+	}
+}
+
+// guessedCases are the archives where resolving a file takes a guess, which is what a
+// human is asked to look at.
+func guessedCases() []resolveCase {
+	return []resolveCase{
+		{
+			// Two files of that name, and the name can't say which of them is the
+			// command. The shallower one is recorded, because that is where an archive
+			// normally puts it, and a human is asked whether it is the right one.
+			name:        "the archive holds the name twice",
+			archive:     []string{"share/doc/gh", "bin/gh"},
+			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
+			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
+			needsReview: true,
+		},
+		{
+			// The definition named a file the archive doesn't hold, and what was found
+			// is a file of another name. Whether that is the same command is a guess.
+			name:        "found under another name",
+			archive:     []string{"gh"},
+			files:       []*generate.File{{Name: "gh", Src: "bin/gh-linux-amd64"}},
+			want:        []*generate.File{{Name: "gh", Src: "gh"}},
+			needsReview: true,
+		},
+		{
+			// Nothing in the archive carries the name, so there is nothing to guess.
+			name:        "the executable is gone",
+			archive:     []string{"README.md"},
+			files:       []*generate.File{{Name: "gh", Src: "bin/gh"}},
+			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
+			needsReview: true,
+			unresolved:  []string{"gh"},
 		},
 	}
 }
@@ -141,8 +172,9 @@ func TestResolveFiles(t *testing.T) {
 	}
 }
 
-// TestIndexByName checks that a name appearing twice resolves to the shallower path,
-// which is where an archive normally puts the command rather than a copy of it.
+// TestIndexByName checks that a name appearing twice keeps both paths, shallowest
+// first: the first one is where an archive normally puts the command rather than a copy
+// of it, and that there is a second one at all is what makes choosing it a guess.
 func TestIndexByName(t *testing.T) {
 	t.Parallel()
 	dir := newArchive(t, "share/doc/gh", "bin/gh")
@@ -150,7 +182,7 @@ func TestIndexByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("bin/gh", index["gh"]); diff != "" {
+	if diff := cmp.Diff([]string{"bin/gh", "share/doc/gh"}, index["gh"]); diff != "" {
 		t.Errorf("indexByName is wrong (-want +got):\n%s", diff)
 	}
 }
