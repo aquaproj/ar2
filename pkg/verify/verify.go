@@ -200,7 +200,16 @@ type resolver struct {
 	logger *slog.Logger
 	dir    string
 	goos   string
-	index  map[string][]string
+	index  map[string][]*found
+}
+
+// found is one file of a name in the extracted archive.
+type found struct {
+	// Path is where it is, relative to the archive's root.
+	Path string
+	// Executable is whether it can be run, which is what tells a command from a file
+	// named after one.
+	Executable bool
 }
 
 // resolve returns the entry to record, and whether finding it took a guess. It
@@ -241,14 +250,20 @@ func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
 }
 
 // byName is where in the archive a file of that name is, with or without the Windows
-// extension, and how many other paths carry that same name.
+// extension, and how many other paths carry that same name without answering for it.
 //
 // On Windows the extension is looked for first. git-bug's archive holds git-bug.exe
 // beside a completion script called git-bug, and the name alone finds the script.
 //
-// The others are what makes the answer a guess or not. One path of the name is the
-// file; several are an archive that says the name twice, where which one is the command
-// is not something the name can decide.
+// Where several files carry the name, the one that can be run is the command. A release
+// shipping a completion script named after its command is the ordinary case -- CMake's
+// archive holds bin/cmake and share/bash-completion/completions/cmake -- and the script
+// is not executable, so the archive answers which is which rather than leaving it to a
+// guess about paths.
+//
+// The others are what makes the answer a guess or not: none left is a file the archive
+// identified, and any left is an archive saying the name more than once with nothing to
+// tell them apart.
 func (r *resolver) byName(name string) (string, int, bool) {
 	if r.index == nil {
 		index, err := indexByName(r.dir)
@@ -258,11 +273,30 @@ func (r *resolver) byName(name string) (string, int, bool) {
 		r.index = index
 	}
 	for _, candidate := range r.candidates(name) {
-		if found, ok := r.index[candidate]; ok && len(found) > 0 {
-			return found[0], len(found) - 1, true
+		paths, ok := r.index[candidate]
+		if !ok || len(paths) == 0 {
+			continue
 		}
+		if runnable := executables(paths); len(runnable) == 1 {
+			return runnable[0].Path, 0, true
+		}
+		return paths[0].Path, len(paths) - 1, true
 	}
 	return "", 0, false
+}
+
+// executables is the files of the name that can be run.
+//
+// An archive that carries no modes at all -- a zip written on Windows -- has none, and
+// then the name is all there is to go on.
+func executables(paths []*found) []*found {
+	out := make([]*found, 0, len(paths))
+	for _, path := range paths {
+		if path.Executable {
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 // candidates is the names to look for, in the order the environment makes likely.
@@ -312,10 +346,12 @@ func resolveFiles(logger *slog.Logger, dir, goos string, files []*generate.File)
 const holdsLimit = 20
 
 // holds is what the archive holds, as paths, in order and capped.
-func holds(index map[string][]string) []string {
+func holds(index map[string][]*found) []string {
 	paths := make([]string, 0, len(index))
-	for _, found := range index {
-		paths = append(paths, found...)
+	for _, entries := range index {
+		for _, entry := range entries {
+			paths = append(paths, entry.Path)
+		}
 	}
 	sort.Strings(paths)
 	if len(paths) > holdsLimit {
@@ -349,8 +385,8 @@ func exists(dir, src string) bool {
 // indexByName maps each extracted file's base name to its path relative to dir,
 // written with forward slashes. A name appearing more than once keeps the shallowest
 // path, which is the one an archive normally puts its commands at.
-func indexByName(dir string) (map[string][]string, error) {
-	index := map[string][]string{}
+func indexByName(dir string) (map[string][]*found, error) {
+	index := map[string][]*found{}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -362,7 +398,10 @@ func indexByName(dir string) (map[string][]string, error) {
 		if err != nil {
 			return err //nolint:wrapcheck
 		}
-		index[d.Name()] = append(index[d.Name()], filepath.ToSlash(rel))
+		index[d.Name()] = append(index[d.Name()], &found{
+			Path:       filepath.ToSlash(rel),
+			Executable: executable(d),
+		})
 		return nil
 	})
 	if err != nil {
@@ -371,14 +410,27 @@ func indexByName(dir string) (map[string][]string, error) {
 	// The shallowest path first, which is where an archive normally puts the command
 	// rather than a copy of it or a document about it.
 	for _, paths := range index {
-		slices.SortFunc(paths, func(a, b string) int {
-			if n := strings.Count(a, "/") - strings.Count(b, "/"); n != 0 {
+		slices.SortFunc(paths, func(a, b *found) int {
+			if n := strings.Count(a.Path, "/") - strings.Count(b.Path, "/"); n != 0 {
 				return n
 			}
-			return strings.Compare(a, b)
+			return strings.Compare(a.Path, b.Path)
 		})
 	}
 	return index, nil
+}
+
+// executable reports whether the file can be run.
+//
+// Any of the three bits, because what an archive records is whatever the machine that
+// packed it had: a release built on a Unix carries 0755 for its commands and 0644 for
+// what it ships beside them.
+func executable(d fs.DirEntry) bool {
+	info, err := d.Info()
+	if err != nil {
+		return false
+	}
+	return info.Mode().Perm()&0o111 != 0
 }
 
 // downloadURL returns where the asset is downloaded from.
