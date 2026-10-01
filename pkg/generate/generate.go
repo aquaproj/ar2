@@ -88,6 +88,9 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return nil, err
 	}
 	overrideSigning(reg, base)
+	// Before the inference, so that a release which moved from one way of signing to
+	// another has the old one dropped and the new one read off the same asset list.
+	dropUnpublished(logger, reg, rel.names)
 	if err := g.inferSigning(ctx, logger, input, reg, rel.names); err != nil {
 		return nil, err
 	}
