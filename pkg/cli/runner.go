@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/aquaproj/ar2/pkg/cli/add"
+	"github.com/aquaproj/ar2/pkg/cli/dates"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	identify "github.com/aquaproj/ar2/pkg/cli/identify"
 	"github.com/aquaproj/ar2/pkg/cli/index"
@@ -60,6 +61,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		show.New(logger, gFlags),
 		state.New(logger, gFlags),
 		test.New(logger, gFlags),
+		dates.New(logger, gFlags),
 		tidy.New(logger, gFlags),
 		validateindex.New(logger, gFlags),
 	)
