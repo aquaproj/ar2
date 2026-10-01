@@ -8,8 +8,12 @@
 // registry.json that resolves cleanly and fails at install time.
 //
 // So the archive decides the merge policy. A package whose files all resolve is
-// carried over unchanged and can be merged automatically. One whose files moved is
-// relocated by name and must be reviewed, because relocating is a guess.
+// carried over unchanged. One whose file is elsewhere in the archive under the same
+// name has moved rather than changed -- the directory an upstream adds around what it
+// packs, or drops -- and recording where it is now says what the definition said, so
+// that merges on its own too. What needs a human is a guess: a file found under a name
+// the definition didn't give it, a name the archive holds more than one of, or a name
+// the archive doesn't hold at all.
 package verify
 
 import (
@@ -23,7 +27,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -92,8 +98,9 @@ type Result struct {
 	// Files is the files list to record. It is the input list when every src was
 	// found, and a relocated one otherwise.
 	Files []*generate.File
-	// NeedsReview is set when a src had to be relocated or couldn't be found at all.
-	// A pull request carrying such a result must not be merged automatically.
+	// NeedsReview is set when resolving a src took a guess: the archive holds the file
+	// under another name, holds that name more than once, or doesn't hold it at all. A
+	// pull request carrying such a result must not be merged automatically.
 	NeedsReview bool
 	// Unresolved names the files that aren't anywhere in the archive.
 	Unresolved []string
@@ -193,11 +200,17 @@ type resolver struct {
 	logger *slog.Logger
 	dir    string
 	goos   string
-	index  map[string]string
+	index  map[string][]string
 }
 
 // resolve returns the entry to record, and whether finding it took a guess. It
 // returns nil when the archive holds nothing of the name.
+//
+// A file of the same name elsewhere in the archive is the same file: what changed is
+// the directory the release puts it in, which is what an upstream adds or drops around
+// what it packs, and recording where it is now says what the definition said. That is a
+// move, not a guess. Finding it under another name, or under a name the archive holds
+// more than one of, is a guess about which file was meant.
 func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
 	src := file.Src
 	if src == "" {
@@ -213,21 +226,30 @@ func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
 	if bare, ok := withoutWindowsExt(r.goos, src); ok && exists(r.dir, bare) {
 		return &generate.File{Name: file.Name, Src: bare}, false
 	}
-	found, ok := r.byName(file.Name)
+	found, others, ok := r.byName(file.Name)
 	if !ok {
 		return nil, false
 	}
+	if path.Base(src) == path.Base(found) && others == 0 {
+		r.logger.Info("files[].src is elsewhere in the archive under the same name",
+			"name", file.Name, "old_src", src, "new_src", found)
+		return &generate.File{Name: file.Name, Src: found}, false
+	}
 	r.logger.Warn("files[].src doesn't match the archive; relocating it",
-		"name", file.Name, "old_src", src, "new_src", found)
+		"name", file.Name, "old_src", src, "new_src", found, "other_paths_of_that_name", others)
 	return &generate.File{Name: file.Name, Src: found}, true
 }
 
 // byName is where in the archive a file of that name is, with or without the Windows
-// extension.
+// extension, and how many other paths carry that same name.
 //
 // On Windows the extension is looked for first. git-bug's archive holds git-bug.exe
 // beside a completion script called git-bug, and the name alone finds the script.
-func (r *resolver) byName(name string) (string, bool) {
+//
+// The others are what makes the answer a guess or not. One path of the name is the
+// file; several are an archive that says the name twice, where which one is the command
+// is not something the name can decide.
+func (r *resolver) byName(name string) (string, int, bool) {
 	if r.index == nil {
 		index, err := indexByName(r.dir)
 		if err != nil {
@@ -236,11 +258,11 @@ func (r *resolver) byName(name string) (string, bool) {
 		r.index = index
 	}
 	for _, candidate := range r.candidates(name) {
-		if found, ok := r.index[candidate]; ok {
-			return found, true
+		if found, ok := r.index[candidate]; ok && len(found) > 0 {
+			return found[0], len(found) - 1, true
 		}
 	}
-	return "", false
+	return "", 0, false
 }
 
 // candidates is the names to look for, in the order the environment makes likely.
@@ -290,10 +312,10 @@ func resolveFiles(logger *slog.Logger, dir, goos string, files []*generate.File)
 const holdsLimit = 20
 
 // holds is what the archive holds, as paths, in order and capped.
-func holds(index map[string]string) []string {
+func holds(index map[string][]string) []string {
 	paths := make([]string, 0, len(index))
-	for _, path := range index {
-		paths = append(paths, path)
+	for _, found := range index {
+		paths = append(paths, found...)
 	}
 	sort.Strings(paths)
 	if len(paths) > holdsLimit {
@@ -327,28 +349,34 @@ func exists(dir, src string) bool {
 // indexByName maps each extracted file's base name to its path relative to dir,
 // written with forward slashes. A name appearing more than once keeps the shallowest
 // path, which is the one an archive normally puts its commands at.
-func indexByName(dir string) (map[string]string, error) {
-	index := map[string]string{}
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+func indexByName(dir string) (map[string][]string, error) {
+	index := map[string][]string{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-		rel, err := filepath.Rel(dir, path)
+		rel, err := filepath.Rel(dir, p)
 		if err != nil {
 			return err //nolint:wrapcheck
 		}
-		rel = filepath.ToSlash(rel)
-		if old, ok := index[d.Name()]; ok && strings.Count(old, "/") <= strings.Count(rel, "/") {
-			return nil
-		}
-		index[d.Name()] = rel
+		index[d.Name()] = append(index[d.Name()], filepath.ToSlash(rel))
 		return nil
 	})
 	if err != nil {
 		return index, fmt.Errorf("walk the extracted archive: %w", err)
+	}
+	// The shallowest path first, which is where an archive normally puts the command
+	// rather than a copy of it or a document about it.
+	for _, paths := range index {
+		slices.SortFunc(paths, func(a, b string) int {
+			if n := strings.Count(a, "/") - strings.Count(b, "/"); n != 0 {
+				return n
+			}
+			return strings.Compare(a, b)
+		})
 	}
 	return index, nil
 }
