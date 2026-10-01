@@ -184,3 +184,45 @@ func TestRejoin(t *testing.T) {
 		t.Errorf("the package waiting its turn moved to %d, want 8", s.Packages["b/waiting"].Round)
 	}
 }
+
+// Naming packages narrows the run to them, in the order it would have reached them: what
+// the order decides is which package has waited longest, and naming a few doesn't change
+// that between them.
+func TestOnly(t *testing.T) {
+	t.Parallel()
+	candidates := []*Candidate{
+		{Name: "cli/cli"},
+		{Name: "junegunn/fzf"},
+		{Name: "ko-build/ko"},
+	}
+	got := only(discardLogger(), candidates, []string{"ko-build/ko", "cli/cli"})
+	want := []string{"cli/cli", "ko-build/ko"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d candidates, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("candidate %d is %s, want %s", i, got[i].Name, name)
+		}
+	}
+}
+
+// Naming none is the order itself, which is what a scheduled run does.
+func TestOnly_none(t *testing.T) {
+	t.Parallel()
+	candidates := []*Candidate{{Name: "cli/cli"}}
+	if got := only(discardLogger(), candidates, nil); len(got) != 1 {
+		t.Errorf("got %d candidates, want the order itself", len(got))
+	}
+}
+
+// A name the run couldn't reach is said rather than ignored: it is a package aqua-registry
+// doesn't have, or one the registry is told to leave alone, and either way nothing would
+// happen for it.
+func TestOnly_unreachable(t *testing.T) {
+	t.Parallel()
+	got := only(discardLogger(), []*Candidate{{Name: "cli/cli"}}, []string{"nobody/nothing"})
+	if len(got) != 0 {
+		t.Errorf("got %d candidates, want none", len(got))
+	}
+}

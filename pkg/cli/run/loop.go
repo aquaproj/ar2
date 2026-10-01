@@ -51,6 +51,7 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 
 	logger.Info("generating registry.json", "limit", args.Limit, "output_dir", args.OutputDir)
 	generated, err := c.Run(ctx, logger.Logger, &ctrl.Input{
+		Packages:    args.Packages,
 		Limit:       args.Limit,
 		OutputDir:   args.OutputDir,
 		SkipPR:      args.SkipPR,
