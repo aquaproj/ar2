@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	aquaconfig "github.com/aquaproj/aqua/v2/pkg/config"
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -87,6 +88,9 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	if err != nil {
 		return nil, err
 	}
+	// What the release says about itself, which the version string doesn't: a reader
+	// asking whether a version is old enough to install has nothing else to ask.
+	reg.PublishedAt = rel.publishedAt
 	overrideSigning(reg, base)
 	// Before the inference, so that a release which moved from one way of signing to
 	// another has the old one dropped and the new one read off the same asset list.
@@ -259,6 +263,9 @@ type release struct {
 	digests map[string]string
 	// names holds every asset name, which is what the signatures are found by.
 	names map[string]struct{}
+	// publishedAt is when the release was published, as RFC 3339. A draft that was
+	// never published has no such moment, and then it is empty.
+	publishedAt string
 }
 
 // release reads the release's asset list.
@@ -277,8 +284,9 @@ func (g *Generator) release(ctx context.Context, input *Input) (*release, error)
 		return nil, fmt.Errorf("get the release: %w", err)
 	}
 	out := &release{
-		digests: map[string]string{},
-		names:   map[string]struct{}{},
+		digests:     map[string]string{},
+		names:       map[string]struct{}{},
+		publishedAt: publishedAt(rel.GetPublishedAt().Time),
 	}
 	for _, asset := range rel.Assets {
 		if asset.GetState() != assetStateUploaded {
@@ -294,6 +302,16 @@ func (g *Generator) release(ctx context.Context, input *Input) (*release, error)
 
 // assetStateUploaded is the state of an asset whose upload has completed.
 const assetStateUploaded = "uploaded"
+
+// publishedAt is when a release was published, written the one way every reader of the
+// generated file can compare: RFC 3339, in UTC. The zero time is a release that has no
+// such moment rather than one published at the beginning of the epoch.
+func publishedAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
 
 // repo returns the repository a package is released from.
 //
