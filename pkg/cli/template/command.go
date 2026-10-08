@@ -54,6 +54,11 @@ repository, so a branch holding the template's blob holds the template's file, a
 that writes one names the blob the default branch holds rather than uploading it again. A
 branch that is already right costs the one request that read its tree.
 
+One way, and nothing is deleted. What the template names is written where the branch holds
+something else; what the branch holds and the template doesn't is left alone, which is how
+a definition and a package's versions survive this. So a file taken out of the template
+stays on the branches that have it, and taking one off them is not this command.
+
 It pushes onto the package branches, which is AR2_BRANCH_TOKEN's bypass. The diff is a file
 the registry itself wrote, and the pull request it would otherwise take would be one per
 package.`,

@@ -8,6 +8,13 @@
 // What that leaves is a file added to the template afterwards, which the branches created
 // before it don't have, and a file whose call has to change. Both are this: the template
 // says what a branch should hold, and a branch holding something else is written to.
+//
+// One way, and nothing is deleted. The template names the paths it answers for and the rest
+// of the branch is the branch's own -- the definition, the versions, the list of them -- so
+// what isn't named is not touched. A file taken out of the template therefore stays where it
+// was copied, and taking it off the branches is a separate thing to decide: the rule it
+// would need is which paths the template owns rather than which files it has, since the
+// branch holds plenty the template never did.
 package template
 
 import (
