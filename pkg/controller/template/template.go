@@ -12,9 +12,18 @@
 // One way, and nothing is deleted. The template names the paths it answers for and the rest
 // of the branch is the branch's own -- the definition, the versions, the list of them -- so
 // what isn't named is not touched. A file taken out of the template therefore stays where it
-// was copied, and taking it off the branches is a separate thing to decide: the rule it
-// would need is which paths the template owns rather than which files it has, since the
-// branch holds plenty the template never did.
+// was copied.
+//
+// Taking one off the branches needs something this doesn't have: a way to know that a file
+// on a branch is the template's copy. "Not in the template" won't do, because that is also
+// every file the template never had. What would is the file saying so itself -- a line the
+// template's files carry -- which is read from the file rather than from the tree, and only
+// for a path the template doesn't name, so the branches that have nothing to delete cost
+// nothing to establish that. The deletion itself is then better said than inferred: the
+// path to take off, with the line as the guard that it is the one being thought of.
+//
+// Every file the template holds today is a workflow, which can carry such a line in a
+// comment. A format that can't is a reason to think again, and there isn't one yet.
 package template
 
 import (
