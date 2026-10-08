@@ -25,6 +25,10 @@ const (
 	checksumKey = "checksum"
 	// overridesKey is the field that says what an environment does differently.
 	overridesKey = "overrides"
+	// typeKey is the field that says where a package comes from.
+	typeKey = "type"
+	// typeGitHubRelease is the type whose assets are what the spellings are read off.
+	typeGitHubRelease = "github_release"
 )
 
 // selectorKeys are what an override says about which environment it is for.
@@ -76,8 +80,16 @@ func Definition(content string) (string, *Removed, error) {
 		return content, removed, nil
 	}
 	nodes := mappings(file.Docs[0].Body)
+	// The spellings are read off the asset names, so they are the parser's to work out
+	// only where there are asset names: a package the registry downloads by a URL puts
+	// the platform into that URL through the replacements, and nothing else in the
+	// definition says what it should be. Taking them out of one leaves a URL asking for
+	// darwin/amd64 where the release publishes darwin/x64.
+	spellings := releasedOnGitHub(nodes)
 	for _, mapping := range nodes {
-		removed.Spellings = append(removed.Spellings, trim(mapping)...)
+		if spellings {
+			removed.Spellings = append(removed.Spellings, trim(mapping)...)
+		}
 		if dropChecksum(mapping) {
 			removed.Checksums++
 		}
@@ -93,6 +105,30 @@ func Definition(content string) (string, *Removed, error) {
 	// Exactly one newline at the end, whether or not the rendering kept the one the
 	// file had.
 	return strings.TrimSuffix(file.String(), "\n") + "\n", removed, nil
+}
+
+// releasedOnGitHub reports whether every type the definition names is a GitHub release.
+//
+// Every type, because a version_override can name another one: a package that was
+// published somewhere else before it had releases says so there, and the replacements that
+// era needs are the ones in it.
+func releasedOnGitHub(nodes []*ast.MappingNode) bool {
+	found := false
+	for _, mapping := range nodes {
+		value := mappingValue(mapping, typeKey)
+		if value == nil {
+			continue
+		}
+		scalar, ok := value.Value.(ast.ScalarNode)
+		if !ok {
+			return false
+		}
+		if fmt.Sprint(scalar.GetValue()) != typeGitHubRelease {
+			return false
+		}
+		found = true
+	}
+	return found
 }
 
 // dropChecksum takes the checksum file out of the mapping, and says whether there was
