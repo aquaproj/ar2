@@ -308,3 +308,20 @@ func TestWrite_noFile(t *testing.T) {
 		t.Error(diff)
 	}
 }
+
+// The head branch of a pull request is cut from a package branch, so it holds the versions
+// too and a push to it looks like a push to one. Writing a list onto it would be writing
+// into somebody's pull request, so a branch that isn't named after an id is left alone.
+func TestWrite_notAPackageBranch(t *testing.T) {
+	t.Parallel()
+	reg := registryOf(t)
+	reg.tree["ar2_1790772767"] = "versions-tree-sha"
+	reg.versions["ar2_1790772767"] = map[string]struct{}{"v2.101.0": {}}
+	c := New(reg, nil)
+	if err := c.Write(context.Background(), discardLogger(), &Args{Branches: []string{"ar2_1790772767"}}); err != nil {
+		t.Fatal(err)
+	}
+	if reg.pushes != 0 {
+		t.Errorf("a pull request's branch was pushed to %d times", reg.pushes)
+	}
+}

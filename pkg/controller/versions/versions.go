@@ -88,7 +88,7 @@ func (c *Controller) Write(ctx context.Context, logger *slog.Logger, args *Args)
 // registry do the same thing in the same order.
 func (c *Controller) branches(logger *slog.Logger, args *Args) []string {
 	if len(args.Branches) > 0 {
-		return args.Branches
+		return packageBranches(logger, args.Branches)
 	}
 	if len(args.Packages) > 0 {
 		out := make([]string, 0, len(args.Packages))
@@ -107,6 +107,25 @@ func (c *Controller) branches(logger *slog.Logger, args *Args) []string {
 		out = append(out, branch)
 	}
 	slices.Sort(out)
+	return out
+}
+
+// packageBranches is the named branches that are package branches.
+//
+// What a list is of is the versions a package branch holds. The head branch of a pull
+// request is cut from one, so it holds the versions too and anything watching a package
+// branch watches its pull requests as well -- and writing a list onto one would be writing
+// into somebody's pull request. The branches are told apart by their names: a package
+// branch is named after an id.
+func packageBranches(logger *slog.Logger, branches []string) []string {
+	out := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		if _, ok := g2.BranchID(branch); !ok {
+			logger.Info("not a package branch, so it holds no list to write", "branch", branch)
+			continue
+		}
+		out = append(out, branch)
+	}
 	return out
 }
 
