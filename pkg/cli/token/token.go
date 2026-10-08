@@ -7,10 +7,13 @@
 package token
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	gogithub "github.com/google/go-github/v92/github"
+	"golang.org/x/oauth2"
 )
 
 // BranchEnv holds the token that creates the package branches.
@@ -33,6 +36,18 @@ const BranchEnv = "AR2_BRANCH_TOKEN"
 // The app is not a bypass actor for anything: it opens pull requests and that is
 // all, so the checks still decide what merges.
 const PREnv = "AR2_PR_TOKEN"
+
+// HTTPClient returns an HTTP client carrying the token in env, or nil when it isn't set.
+//
+// It is for the parts of GitHub ar2 reaches through GraphQL, which take a client rather
+// than a token.
+func HTTPClient(ctx context.Context, env string) *http.Client {
+	t := os.Getenv(env)
+	if t == "" {
+		return nil
+	}
+	return oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: t}))
+}
 
 // Client returns a client for the token in env, or nil when it isn't set.
 func Client(env string) (*gogithub.Client, error) {

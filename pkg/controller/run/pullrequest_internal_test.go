@@ -304,3 +304,40 @@ func TestPartition(t *testing.T) {
 		t.Errorf("the ones waiting are %+v", unresolved)
 	}
 }
+
+// countingAutoMerger records that it was the one asked.
+type countingAutoMerger struct{ calls int }
+
+func (c *countingAutoMerger) EnableAutoMerge(_ context.Context, _ string) error {
+	c.calls++
+	return nil
+}
+
+// Which token turns auto-merge on decides whether the merge raises a workflow run, so a run
+// told an app's client asks that rather than the one it reads with.
+func TestController_UseAutoMerger(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	app := &countingAutoMerger{}
+	c.UseAutoMerger(app)
+	if got := c.autoMerger(); got != AutoMerger(app) {
+		t.Fatalf("what turns auto-merge on is %T", got)
+	}
+	if err := c.autoMerger().EnableAutoMerge(context.Background(), "an id"); err != nil {
+		t.Fatal(err)
+	}
+	if app.calls != 1 {
+		t.Errorf("the app was asked %d times", app.calls)
+	}
+}
+
+// A run with no app token turns it on with what it reads with, which is what a local run
+// and a repository with no apps have.
+func TestController_autoMergerFallsBack(t *testing.T) {
+	t.Parallel()
+	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	if _, ok := c.autoMerger().(failingAutoMerger); !ok {
+		t.Errorf("what turns auto-merge on is %T", c.autoMerger())
+	}
+}

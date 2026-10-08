@@ -31,6 +31,9 @@ type Controller struct {
 	generator *generate.Generator
 	g2        Registry
 	graphql   GraphQL
+	// autoMerge turns auto-merge on, where it is the app's token that must. Nil leaves
+	// it to the reading client. See UseAutoMerger.
+	autoMerge AutoMerger
 	verifier  *verify.Verifier
 	attester  *attest.Checker
 	summary   *summary.Writer
@@ -135,6 +138,25 @@ func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graph
 		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
 		renamer: renamer, attester: attest.New(gh.Repositories), summary: summary.New(),
 	}
+}
+
+// AutoMerger turns a pull request over to its checks.
+type AutoMerger interface {
+	EnableAutoMerge(ctx context.Context, pullRequestID string) error
+}
+
+// UseAutoMerger says what turns auto-merge on, where the reading client does it otherwise.
+//
+// Which token does it decides what happens after the checks pass. The merge is a push onto
+// the package branch, and GitHub raises no workflow run for a push GITHUB_TOKEN made --
+// what waits on that push is the branch's own workflow asking for its list of versions to
+// be written. Turned on with the app that opened the pull request, the merge is that app's
+// and the branch hears about it.
+//
+// Reading stays with the repository's own token: the sweep is the heavy part of a run, and
+// its rate limit is the repository's rather than an installation's.
+func (c *Controller) UseAutoMerger(m AutoMerger) {
+	c.autoMerge = m
 }
 
 // Renamer moves a package to the name its repository has now.
@@ -624,4 +646,13 @@ func partition(versions []*version) (sound, unresolved []*version) {
 		sound = append(sound, v)
 	}
 	return sound, unresolved
+}
+
+// autoMerger is what turns auto-merge on: the one it was told, or the reading client, which
+// is what a run with no app token has.
+func (c *Controller) autoMerger() AutoMerger {
+	if c.autoMerge != nil {
+		return c.autoMerge
+	}
+	return c.graphql
 }

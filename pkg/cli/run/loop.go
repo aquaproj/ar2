@@ -99,8 +99,17 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if !args.SkipPR {
 		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch, nil))
 	}
-	return ctrl.New(gh, generate.New(gh.Repositories, httpClient), reg,
-		github.NewClient(httpClient), v, renamer), nil
+	c := ctrl.New(gh, generate.New(gh.Repositories, httpClient), reg,
+		github.NewClient(httpClient), v, renamer)
+	// Auto-merge is turned on with the app that opened the pull request, where everything
+	// read here is the repository's own token. The merge is a push onto the package
+	// branch, and GitHub raises no workflow run for a push GITHUB_TOKEN made: the
+	// branch's workflow asking for its list of versions would never hear about the
+	// version it just gained.
+	if prClient := token.HTTPClient(ctx, token.PREnv); prClient != nil {
+		c.UseAutoMerger(github.NewClient(prClient))
+	}
+	return c, nil
 }
 
 // verifier builds what downloads an asset and decides whether the entry for it can
