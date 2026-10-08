@@ -74,11 +74,6 @@ func (c *Client) Push(ctx context.Context, branch, parent, message string, files
 
 // commit builds the commit and moves the branch to it.
 func (c *Client) commit(ctx context.Context, gh *gogithub.Client, force bool, branch, parent, message string, files []*File) error {
-	parentCommit, _, err := c.gh.Git.GetCommit(ctx, c.owner, c.repo, parent)
-	if err != nil {
-		return fmt.Errorf("get the parent commit: %w", err)
-	}
-
 	entries := make([]*gogithub.TreeEntry, 0, len(files))
 	for _, file := range files {
 		if file.Deleted {
@@ -92,6 +87,17 @@ func (c *Client) commit(ctx context.Context, gh *gogithub.Client, force bool, br
 			Content: new(file.Content),
 		})
 	}
+	return c.commitEntries(ctx, gh, force, branch, parent, message, entries)
+}
+
+// commitEntries builds the commit from tree entries, which is what a file carrying content
+// and a file naming a blob the repository already holds both come to.
+func (c *Client) commitEntries(ctx context.Context, gh *gogithub.Client, force bool, branch, parent, message string, entries []*gogithub.TreeEntry) error {
+	parentCommit, _, err := c.gh.Git.GetCommit(ctx, c.owner, c.repo, parent)
+	if err != nil {
+		return fmt.Errorf("get the parent commit: %w", err)
+	}
+
 	// The parent's tree is the base, so the commit adds files rather than replacing
 	// everything the branch holds.
 	tree, _, err := gh.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(), entries)
@@ -131,4 +137,16 @@ func (c *Client) commit(ctx context.Context, gh *gogithub.Client, force bool, br
 		return fmt.Errorf("update the branch: %w", err)
 	}
 	return nil
+}
+
+// PushEntries writes tree entries straight onto a package branch.
+//
+// The entries name blobs the repository already holds rather than carrying content, which
+// is how the template is copied: a git object belongs to the repository, so a tree on a
+// package branch can name the blob the default branch holds and nothing is uploaded again.
+//
+// Push, with everything that says about why it is the branch app's and why it never
+// forces, applies here too.
+func (c *Client) PushEntries(ctx context.Context, branch, parent, message string, entries []*gogithub.TreeEntry) error {
+	return c.commitEntries(ctx, c.branchGH, false, branch, parent, message, entries)
 }

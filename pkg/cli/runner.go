@@ -18,6 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/run"
 	"github.com/aquaproj/ar2/pkg/cli/show"
 	"github.com/aquaproj/ar2/pkg/cli/state"
+	"github.com/aquaproj/ar2/pkg/cli/template"
 	"github.com/aquaproj/ar2/pkg/cli/test"
 	"github.com/aquaproj/ar2/pkg/cli/tidy"
 	"github.com/aquaproj/ar2/pkg/cli/validateindex"
@@ -63,6 +64,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		state.New(logger, gFlags),
 		test.New(logger, gFlags),
 		dates.New(logger, gFlags),
+		template.New(logger, gFlags),
 		tidy.New(logger, gFlags),
 		versions.New(logger, gFlags),
 		validateindex.New(logger, gFlags),
