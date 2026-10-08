@@ -151,3 +151,60 @@ files:
 		t.Errorf("what went is wrong (-want +got):\n%s", diff)
 	}
 }
+
+// A package the registry downloads by a URL puts the platform into that URL through the
+// replacements. Nothing else in the definition says what it should be, and the asset names
+// the spellings are otherwise read off don't exist, so they stay.
+//
+// microsoft/vscode/code is the one this was found on: its replacements were taken out, and
+// the URL then asked update.code.visualstudio.com for cli-darwin-amd64, which is a 404
+// where cli-darwin-x64 is the download.
+func TestDefinition_keepsTheSpellingsAUrlNeeds(t *testing.T) {
+	t.Parallel()
+	in := "type: http\nurl: https://example.com/{{.OS}}-{{.Arch}}\nreplacements:\n  amd64: x64\n"
+	got, removed, err := tidy.Definition(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != in {
+		t.Errorf("the definition changed:\n%s", got)
+	}
+	if len(removed.Spellings) != 0 {
+		t.Errorf("the spellings that went are %v", removed.Spellings)
+	}
+}
+
+// A version_override can name another type, and the replacements that era needs are the
+// ones in it. So a definition that is a release now and wasn't before keeps them.
+func TestDefinition_keepsThemWhenAnEraIsntARelease(t *testing.T) {
+	t.Parallel()
+	in := `type: github_release
+version_overrides:
+  - version_constraint: semver("< 1.0.0")
+    type: http
+    url: https://example.com/{{.OS}}-{{.Arch}}
+    replacements:
+      amd64: x64
+`
+	got, _, err := tidy.Definition(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != in {
+		t.Errorf("the definition changed:\n%s", got)
+	}
+}
+
+// A definition that says no type at all says nothing about where the spellings come from,
+// so they stay.
+func TestDefinition_keepsThemWithoutAType(t *testing.T) {
+	t.Parallel()
+	in := "repo_owner: astral-sh\nrepo_name: uv\nreplacements:\n  amd64: x86_64\n"
+	got, _, err := tidy.Definition(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != in {
+		t.Errorf("the definition changed:\n%s", got)
+	}
+}
