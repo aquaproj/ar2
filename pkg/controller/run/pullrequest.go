@@ -75,7 +75,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 		logger.Warn("leaving the pull request for review", "number", pr.GetNumber())
 		return nil
 	}
-	if err := c.graphql.EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
+	if err := c.autoMerger().EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
 		// The pull request is the work; auto-merge is how it lands without anyone
 		// clicking. Failing the package here would leave the pull request open and
 		// uncounted, so the next package would get one too and the run would never
