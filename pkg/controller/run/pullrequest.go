@@ -10,6 +10,7 @@ import (
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/verify"
 )
 
 // version is one generated registry.json waiting to be committed.
@@ -28,6 +29,10 @@ type version struct {
 	// so it can't merge, and in the pull request with the rest it would stop the versions
 	// that were right from merging either.
 	Unresolved []string
+	// Excluded are the environments this version isn't offered for, with the entry each
+	// had and why it went. The file says nothing about them, so they are reported as an
+	// issue: see reportExcluded.
+	Excluded []*verify.Excluded
 }
 
 // openPullRequest commits every version generated for a package and opens one pull

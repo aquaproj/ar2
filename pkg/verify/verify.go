@@ -458,7 +458,7 @@ func (v *Verifier) download(ctx context.Context, url, path string) (string, erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download the asset: status code %d", resp.StatusCode)
+		return "", fmt.Errorf("download the asset: %w", &StatusError{Code: resp.StatusCode})
 	}
 
 	f, err := os.Create(path)
