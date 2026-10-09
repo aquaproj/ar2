@@ -109,6 +109,10 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if prClient := token.HTTPClient(ctx, token.PREnv); prClient != nil {
 		c.UseAutoMerger(github.NewClient(prClient))
 	}
+	// An environment the registry can't offer is said as an issue on the registry itself,
+	// which is where what reads them looks. The repository's own token opens it: an issue
+	// is not a push, so nothing waits on an event for it.
+	c.UseIssues(gh.Issues, args.G2Owner, args.G2Repo)
 	return c, nil
 }
 

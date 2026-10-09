@@ -34,9 +34,14 @@ type Controller struct {
 	// autoMerge turns auto-merge on, where it is the app's token that must. Nil leaves
 	// it to the reading client. See UseAutoMerger.
 	autoMerge AutoMerger
-	verifier  *verify.Verifier
-	attester  *attest.Checker
-	summary   *summary.Writer
+	// issues is where an environment the registry can't offer is said. Nil says it in
+	// the log and the summary and nowhere else. See UseIssues.
+	issues      Issues
+	issuesOwner string
+	issuesRepo  string
+	verifier    *verify.Verifier
+	attester    *attest.Checker
+	summary     *summary.Writer
 	// problems are the versions this run didn't publish. A run is read through its
 	// summary, so what it left out belongs there rather than only in the log.
 	problems []*summary.Problem
@@ -471,6 +476,9 @@ func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, 
 	if err := c.openUnresolved(ctx, logger, def, pkgName, unresolved, inFlight); err != nil {
 		return err
 	}
+	// After the pull requests, so that what the issue says is in the registry is on its
+	// way there rather than only generated.
+	defer c.reportExcluded(ctx, logger, pkgName, sound)
 	if len(sound) == 0 {
 		return nil
 	}
@@ -579,7 +587,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
-	needsReview, unresolved, err := c.verifier.Fill(ctx, logger, pkgName, tag, reg, input.Verify)
+	filled, err := c.verifier.Complete(ctx, logger, pkgName, tag, reg, input.Verify)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
 	}
@@ -595,12 +603,20 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	for _, asset := range reg.Assets {
 		sign.Render(asset, tag)
 	}
-	return &version{
+	v := &version{
 		Version:     tag,
 		Registry:    reg,
-		NeedsReview: needsReview || dropped || len(unresolved) > 0,
-		Unresolved:  unresolved,
-	}, nil
+		NeedsReview: filled.NeedsReview || dropped,
+		Excluded:    filled.Excluded,
+	}
+	if filled.Offered == 0 {
+		// Nothing to publish: what the file would say is that the registry holds this
+		// version for nowhere. Such a version goes to the pull request of the ones
+		// waiting for a definition, carrying what was generated for it.
+		v.NeedsReview = true
+		v.Unresolved = filled.Unresolved
+	}
+	return v, nil
 }
 
 // writeAll writes the generated files out instead of opening a pull request.
