@@ -39,9 +39,9 @@ type Input struct {
 	// aqua-registry-g2 has one of its own, and after that it is no longer consulted.
 	Config *g2.Config
 	// Repos is where the release is read from, when that is not GitHub. A package on
-	// a Forgejo or Gitea instance is read from the instance, by a client that answers
-	// what GitHub's does: the asset naming is then inferred by the same code, and
-	// only the host it was read from differs. It may be nil, which is GitHub.
+	// a forge instance is read from the instance, by a client that answers what
+	// GitHub's does: the asset naming is then inferred by the same code, and only the
+	// host it was read from differs. It may be nil, which is GitHub.
 	Repos genrgst.RepositoriesService
 }
 
@@ -238,7 +238,10 @@ func (g *Generator) packageInfo(ctx context.Context, logger *slog.Logger, input 
 	}
 
 	buf := &bytes.Buffer{}
-	ctrl := genrgst.NewController(g.repos(input), nil, nil, buf)
+	// No client for GitLab: aqua gr reads a project named gitlab.com/... through one,
+	// and what is asked for here is a repository, read through the client the package's
+	// own instance is behind.
+	ctrl := genrgst.NewController(g.repos(input), nil, nil, nil, buf)
 	if err := ctrl.GenerateRegistry(ctx, param, logger, arg); err != nil {
 		return nil, fmt.Errorf("generate a registry: %w", err)
 	}
@@ -343,22 +346,21 @@ func publishedAt(t time.Time) string {
 // inferable says whether the release publishes an asset list for the naming to be read
 // from.
 //
-// A GitHub release does, and so does a release on a Forgejo or Gitea instance: what
-// answers for the instance says the same things in the same words, which is why one
-// inference reads both.
+// A GitHub release does, and so does a release on a forge instance: a client for the
+// instance answers the same things in the same words, which is why one inference reads
+// them all.
 func inferable(base *aquaregistry.PackageInfo) bool {
-	switch base.Type {
-	case aquaregistry.PkgInfoTypeGitHubRelease, aquaregistry.PkgInfoTypeForgejoRelease, aquaregistry.PkgInfoTypeGiteaRelease:
-		return true
-	}
-	return false
+	return base.Type == aquaregistry.PkgInfoTypeGitHubRelease ||
+		aquaregistry.OnInstanceType(base.Type)
 }
 
 // OnInstance says whether the package is on a forge instance of its own rather than on
 // github.com, which is what decides where its releases are read from.
+//
+// The instance is the definition's, and a type may name it by default: a gitlab_release
+// package says no host when it is on gitlab.com, which GetHost answers with.
 func OnInstance(base *aquaregistry.PackageInfo) bool {
-	return base != nil && base.Host != "" &&
-		(base.Type == aquaregistry.PkgInfoTypeForgejoRelease || base.Type == aquaregistry.PkgInfoTypeGiteaRelease)
+	return base != nil && aquaregistry.OnInstanceType(base.Type) && base.GetHost() != ""
 }
 
 // repos is what the release is read from: the instance's client when the package is on

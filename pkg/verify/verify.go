@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -33,6 +34,7 @@ import (
 	"sort"
 	"strings"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
 	"github.com/aquaproj/aqua/v2/pkg/unarchive"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -435,9 +437,10 @@ func executable(d fs.DirEntry) bool {
 
 // downloadURL returns where the asset is downloaded from.
 //
-// The host is the entry's for a release on a forge instance, and github.com for the rest:
-// an instance serves a release asset at the path GitHub does, which is why the entry needs
-// to say nothing but which instance.
+// The host is the entry's for a release on a forge instance, and github.com for the rest.
+// The Gitea family serves a release asset at the path GitHub does, so for those the entry
+// needs to say nothing but which instance; GitLab serves it at its permanent release
+// link, which is a path of its own.
 func downloadURL(version string, asset *generate.Asset) (string, error) {
 	if asset.URL != "" {
 		return asset.URL, nil
@@ -449,8 +452,27 @@ func downloadURL(version string, asset *generate.Asset) (string, error) {
 	if host == "" {
 		host = "github.com"
 	}
+	if asset.Type == aquaregistry.PkgInfoTypeGitLabRelease {
+		// The namespace and the asset are read as paths -- a project in subgroups
+		// and an asset named by the file path its release link was created with --
+		// so their separators are kept and only what is inside a segment is
+		// escaped. The tag is one segment: a version holding a slash names the
+		// release rather than a path.
+		return fmt.Sprintf("https://%s/%s/%s/-/releases/%s/downloads/%s",
+			host, escapePath(asset.RepoOwner), url.PathEscape(asset.RepoName),
+			url.PathEscape(version), escapePath(asset.Asset)), nil
+	}
 	return fmt.Sprintf("https://%s/%s/%s/releases/download/%s/%s",
 		host, asset.RepoOwner, asset.RepoName, version, asset.Asset), nil
+}
+
+// escapePath escapes each segment of a path, keeping the separators between them.
+func escapePath(s string) string {
+	segments := strings.Split(s, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
 }
 
 // download writes the asset to path and returns its SHA256.

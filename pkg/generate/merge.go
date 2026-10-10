@@ -23,9 +23,13 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	// Which forge the release is on is the definition's. The inference reads an asset
 	// list the same way whatever answered with it, so what it says is a GitHub release
 	// even when an instance's client answered.
-	if base.Host != "" {
+	//
+	// The host is the one the definition means rather than the one it writes: a
+	// gitlab_release package says none when it is on gitlab.com, and what reads the
+	// generated entry reads nothing but the entry.
+	if OnInstance(base) {
 		p.Type = base.Type
-		p.Host = base.Host
+		p.Host = base.GetHost()
 	}
 
 	// files is not merged here. registry.yaml can set it in an override, so it has
