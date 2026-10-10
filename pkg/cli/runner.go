@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/aquaproj/ar2/pkg/cli/add"
+	"github.com/aquaproj/ar2/pkg/cli/consolidate"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/index"
 	"github.com/aquaproj/ar2/pkg/cli/initcmd"
@@ -60,6 +61,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		state.New(logger, gFlags),
 		test.New(logger, gFlags),
 		tidy.New(logger, gFlags),
+		consolidate.New(logger, gFlags),
 		validatedefinition.New(logger, gFlags),
 		validateindex.New(logger, gFlags),
 	)
