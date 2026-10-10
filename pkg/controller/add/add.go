@@ -153,10 +153,11 @@ func (c *Controller) newDefinition(ctx context.Context, logger *slog.Logger, in 
 	for _, command := range commands(in) {
 		pkgInfo.Files = append(pkgInfo.Files, &aquaregistry.File{Name: command})
 	}
-	if description := c.description(ctx, logger, owner, name); description != "" {
+	description, repoID := c.repository(ctx, logger, owner, name)
+	if description != "" {
 		pkgInfo.Description = description
 	}
-	return &aquag2.Config{PackageInfo: pkgInfo}
+	return &aquag2.Config{PackageInfo: pkgInfo, RepoID: repoID}
 }
 
 // commands are the executables the package installs.
@@ -172,19 +173,22 @@ func commands(in *Input) []string {
 	return []string{parts[len(parts)-1]}
 }
 
-// description is what the catalogue lists the package under.
+// repository is what the catalogue lists the package under, and the repository's id.
 //
-// Read from the repository rather than asked for: it is a sentence somebody has already
-// written, and a registry of thousands of packages is not improved by each of them being
-// described again by whoever added it. A repository that can't be read leaves it out,
-// which the catalogue can carry -- a package with no description is searchable by name.
-func (c *Controller) description(ctx context.Context, logger *slog.Logger, owner, name string) string {
+// The description is read from the repository rather than asked for: it is a sentence
+// somebody has already written, and a registry of thousands of packages is not improved by
+// each of them being described again by whoever added it. The id is what a run holds the
+// package's repository to from then on, since a name can be taken over and an id can't.
+//
+// A repository that can't be read leaves both out. The catalogue can carry a package with
+// no description, and a run records the id once it reads the repository.
+func (c *Controller) repository(ctx context.Context, logger *slog.Logger, owner, name string) (string, int64) {
 	repo, _, err := c.repos.Get(ctx, owner, name)
 	if err != nil {
 		logger.Warn("failed to read the repository for its description", "error", err.Error())
-		return ""
+		return "", 0
 	}
-	return strings.TrimSuffix(strings.TrimSpace(repo.GetDescription()), ".")
+	return strings.TrimSuffix(strings.TrimSpace(repo.GetDescription()), "."), repo.GetID()
 }
 
 // join puts the package into the order, and reports whether it wasn't there already.

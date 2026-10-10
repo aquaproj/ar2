@@ -57,6 +57,10 @@ func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates 
 		}
 		maps.Copy(byRepo, found.Versions)
 		maps.Copy(renamed, found.Names)
+		if c.repoIDs == nil {
+			c.repoIDs = make(map[string]int64, len(found.IDs))
+		}
+		maps.Copy(c.repoIDs, found.IDs)
 		for repo, reason := range found.Reasons {
 			logger.Debug("couldn't read a package's versions", "repository", repo, "reason", reason)
 		}

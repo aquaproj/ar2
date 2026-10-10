@@ -29,6 +29,10 @@ type Sweep struct {
 	// GitHub answers a query made with the old name and says which name it answered
 	// for, so a sweep finds this out without asking anything extra.
 	Names map[string]string
+	// IDs is each repository's numeric id on GitHub. A name can be taken over by another
+	// repository and an id can't, so it is what says the repository is still the one a
+	// package was taken over from.
+	IDs map[string]int64
 	// Reasons says why a repository couldn't be read.
 	Reasons map[string]string
 }
@@ -94,6 +98,7 @@ func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read fu
 	out := &Sweep{
 		Versions: make(map[string][]string, len(repos)),
 		Names:    map[string]string{},
+		IDs:      make(map[string]int64, len(repos)),
 		Reasons:  map[string]string{},
 	}
 	for start := 0; start < len(repos); start += BatchSize {
@@ -101,6 +106,9 @@ func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read fu
 		batch := repos[start:end]
 		record := func(repo Repo, r *repository) {
 			out.Versions[repo.String()] = read(r)
+			if r.DatabaseID != 0 {
+				out.IDs[repo.String()] = r.DatabaseID
+			}
 			if renamed(repo.String(), r.NameWithOwner) {
 				out.Names[repo.String()] = r.NameWithOwner
 			}
@@ -119,13 +127,13 @@ func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read fu
 
 func releases(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
-		"repository(owner: $%s, name: $%s) { nameWithOwner releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
+		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
 		ownerVar, nameVar, SweepDepth)
 }
 
 func tags(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
-		"repository(owner: $%s, name: $%s) { nameWithOwner refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
+		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
 		ownerVar, nameVar, SweepDepth)
 }
 

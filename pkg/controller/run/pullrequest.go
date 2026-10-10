@@ -2,7 +2,6 @@ package run
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -136,18 +135,13 @@ func (c *Controller) filesToCommit(logger *slog.Logger, def *definition, pkgName
 	return out, nil
 }
 
-// marshal renders registry.json the way it is stored: on one line.
-//
-// Nothing reads it by eye. Indenting it is 30% of the bytes every aqua user
-// downloads and costs nothing in the repository, where git compresses the
-// whitespace away — measured at 6,094 against 4,283 bytes raw and no difference
-// packed. The indented form goes to the job summary instead.
+// marshal renders registry.json the way it is stored. See generate.Marshal.
 func marshal(reg *generate.Registry) (string, error) {
-	b, err := json.Marshal(reg)
+	b, err := generate.Marshal(reg)
 	if err != nil {
-		return "", fmt.Errorf("marshal registry.json: %w", err)
+		return "", err //nolint:wrapcheck // the error says what it couldn't marshal
 	}
-	return string(b) + "\n", nil
+	return string(b), nil
 }
 
 // addToSummary records what was generated, indented, where a person can read it.

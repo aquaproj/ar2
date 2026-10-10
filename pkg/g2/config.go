@@ -1,6 +1,7 @@
 package g2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -71,4 +72,57 @@ func (c *Client) ConfigOnRef(ctx context.Context, ref, pkgName string) (*aquag2.
 		return nil, fmt.Errorf("read the package definition as YAML: %w", err)
 	}
 	return cfg, nil
+}
+
+// yamlIndent is the indentation a definition is written with.
+const yamlIndent = 2
+
+// MarshalConfig renders a definition the way the registry stores it.
+//
+// repo_id goes right after repo_name, where somebody reading the definition looks for which
+// repository the package is. aqua's type holds it apart from the fields it inlines, so left
+// to the encoder it would come after everything else.
+func MarshalConfig(cfg *aquag2.Config) (string, error) {
+	node := &yaml.Node{}
+	if err := node.Encode(cfg); err != nil {
+		return "", fmt.Errorf("marshal the package definition: %w", err)
+	}
+	moveAfter(node, "repo_id", "repo_name")
+	buf := &bytes.Buffer{}
+	encoder := yaml.NewEncoder(buf)
+	encoder.SetIndent(yamlIndent)
+	if err := encoder.Encode(node); err != nil {
+		return "", fmt.Errorf("marshal the package definition: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return "", fmt.Errorf("close the YAML encoder: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// moveAfter moves a key of a mapping to right after another, when both are there.
+func moveAfter(node *yaml.Node, key, after string) {
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return
+	}
+	from := -1
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			from = i
+		}
+	}
+	if from < 0 {
+		return
+	}
+	pair := []*yaml.Node{node.Content[from], node.Content[from+1]}
+	rest := append(append([]*yaml.Node{}, node.Content[:from]...), node.Content[from+2:]...)
+	for i := 0; i < len(rest); i += 2 {
+		if rest[i].Value == after {
+			node.Content = append(append(append([]*yaml.Node{}, rest[:i+2]...), pair...), rest[i+2:]...)
+			return
+		}
+	}
 }

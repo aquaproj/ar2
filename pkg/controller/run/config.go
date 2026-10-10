@@ -1,7 +1,6 @@
 package run
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -15,7 +14,6 @@ import (
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/state"
-	"go.yaml.in/yaml/v3"
 )
 
 // newConfig is the definition a run writes for a package aqua-registry-g2 hasn't
@@ -155,25 +153,10 @@ func hasAlias(cfg *aquag2.Config, name string) bool {
 	return false
 }
 
-// yamlIndent is how far a registry file indents, which is what aqua-registry uses.
-const yamlIndent = 2
-
-// marshalConfig renders the definition the way aqua-registry writes one.
-//
-// The indentation is set rather than left to the encoder, whose default is four
-// spaces. Registry files are written and read by people, and one that doesn't look
-// like the others is one more thing to notice.
+// marshalConfig renders the definition the way the registry stores one. See
+// g2.MarshalConfig.
 func marshalConfig(cfg *aquag2.Config) (string, error) {
-	buf := &bytes.Buffer{}
-	encoder := yaml.NewEncoder(buf)
-	encoder.SetIndent(yamlIndent)
-	if err := encoder.Encode(cfg); err != nil {
-		return "", fmt.Errorf("marshal the package definition: %w", err)
-	}
-	if err := encoder.Close(); err != nil {
-		return "", fmt.Errorf("close the YAML encoder: %w", err)
-	}
-	return buf.String(), nil
+	return g2.MarshalConfig(cfg) //nolint:wrapcheck // the error says what it couldn't marshal
 }
 
 // pinSigner records who signs the package's releases, so that a later one signed by
