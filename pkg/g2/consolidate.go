@@ -120,3 +120,14 @@ func (c *Client) CommitEntries(ctx context.Context, branch, parent, message stri
 	}
 	return c.moveBranch(ctx, branch, sha)
 }
+
+// CommitTree writes tree entries onto a new commit on top of parent and returns it, without
+// pointing any branch at it.
+func (c *Client) CommitTree(ctx context.Context, parent, message string, entries []*gogithub.TreeEntry) (string, error) {
+	return c.commitTree(ctx, parent, message, entries)
+}
+
+// MoveBranch points the branch at the commit, creating it when it doesn't exist.
+func (c *Client) MoveBranch(ctx context.Context, branch, commit string) error {
+	return c.moveBranch(ctx, branch, commit)
+}

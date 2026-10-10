@@ -148,3 +148,25 @@ func tags(ownerVar, nameVar string) string {
 func renamed(asked, answered string) bool {
 	return answered != "" && !strings.EqualFold(asked, answered)
 }
+
+// RepoIDs returns each repository's numeric id, fifty repositories to a request.
+func (c *Client) RepoIDs(ctx context.Context, repos []Repo) (map[string]int64, error) {
+	out := make(map[string]int64, len(repos))
+	reasons := map[string]string{}
+	for start := 0; start < len(repos); start += BatchSize {
+		batch := repos[start:min(start+BatchSize, len(repos))]
+		record := func(repo Repo, r *repository) {
+			if r.DatabaseID != 0 {
+				out[repo.String()] = r.DatabaseID
+			}
+		}
+		if err := c.fetch(ctx, batch, repoID, record, reasons); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func repoID(ownerVar, nameVar string) string {
+	return fmt.Sprintf("repository(owner: $%s, name: $%s) { databaseId }", ownerVar, nameVar)
+}

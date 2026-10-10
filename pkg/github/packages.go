@@ -193,11 +193,6 @@ func (r *Repository) OpenPullRequestHeads(ctx context.Context) ([]string, error)
 	}
 }
 
-// vars is what every query is asked about: the repository.
-func (r *Repository) vars() map[string]any {
-	return map[string]any{"owner": r.owner, "name": r.repo}
-}
-
 const pullRequestsQuery = `query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(states: OPEN, first: 100, after: $cursor) {
@@ -232,4 +227,119 @@ func firstError(errs []graphQLError) error {
 		return nil
 	}
 	return fmt.Errorf("%s", errs[0].Message) //nolint:err113 // GitHub's own message
+}
+
+// FilesTwoDeep returns, for each expression naming a tree, the files two levels under it,
+// such as "v1.0.0/registry-1.json" under "main:pkgs/67/1790772767/versions". An expression
+// naming nothing has no entry.
+func (r *Repository) FilesTwoDeep(ctx context.Context, expressions []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(expressions))
+	for start := 0; start < len(expressions); start += treesPerQuery {
+		batch := expressions[start:min(start+treesPerQuery, len(expressions))]
+		result := &treesResponse{}
+		if err := r.c.post(ctx, objectsQuery(batch, treeSelection), r.vars(), result); err != nil {
+			return nil, err
+		}
+		if err := firstError(result.Errors); err != nil {
+			return nil, fmt.Errorf("read trees: %w", err)
+		}
+		for i, expression := range batch {
+			tree := result.Data.Repository[blobAlias(i)]
+			if tree == nil {
+				continue
+			}
+			out[expression] = tree.files()
+		}
+	}
+	return out, nil
+}
+
+// OIDs returns the sha of the object each expression names, keyed by the expression.
+func (r *Repository) OIDs(ctx context.Context, expressions []string) (map[string]string, error) {
+	out := make(map[string]string, len(expressions))
+	for start := 0; start < len(expressions); start += blobsPerQuery {
+		batch := expressions[start:min(start+blobsPerQuery, len(expressions))]
+		result := &oidsResponse{}
+		if err := r.c.post(ctx, objectsQuery(batch, "oid"), r.vars(), result); err != nil {
+			return nil, err
+		}
+		if err := firstError(result.Errors); err != nil {
+			return nil, fmt.Errorf("read objects: %w", err)
+		}
+		for i, expression := range batch {
+			if o := result.Data.Repository[blobAlias(i)]; o != nil {
+				out[expression] = o.OID
+			}
+		}
+	}
+	return out, nil
+}
+
+// treesPerQuery is how many trees one request lists. A package's versions directory is a
+// directory per version, so a hundred of them is tens of thousands of entries, which GitHub
+// takes long enough over to time out.
+const treesPerQuery = 10
+
+const treeSelection = "... on Tree { entries { name type object { ... on Tree { entries { name type } } } } }"
+
+// objectsQuery asks for each expression under an alias of its own, with the same selection.
+func objectsQuery(expressions []string, selection string) string {
+	var b strings.Builder
+	b.WriteString("query($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n")
+	for i, expression := range expressions {
+		literal, _ := json.Marshal(expression) //nolint:errchkjson // a string always marshals
+		fmt.Fprintf(&b, "    %s: object(expression: %s) { %s }\n", blobAlias(i), literal, selection)
+	}
+	b.WriteString("  }\n}")
+	return b.String()
+}
+
+type treesResponse struct {
+	Data struct {
+		Repository map[string]*twoDeepTree `json:"repository"`
+	} `json:"data"`
+	Errors []graphQLError `json:"errors"`
+}
+
+type twoDeepTree struct {
+	Entries []struct {
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Object *struct {
+			Entries []struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			} `json:"entries"`
+		} `json:"object"`
+	} `json:"entries"`
+}
+
+// files is the files two levels down, as dir/file.
+func (t *twoDeepTree) files() []string {
+	files := []string{}
+	for _, dir := range t.Entries {
+		if dir.Type != treeType || dir.Object == nil {
+			continue
+		}
+		for _, f := range dir.Object.Entries {
+			if f.Type == "blob" {
+				files = append(files, dir.Name+"/"+f.Name)
+			}
+		}
+	}
+	return files
+}
+
+type oidsResponse struct {
+	Data struct {
+		Repository map[string]*struct {
+			OID string `json:"oid"`
+		} `json:"repository"`
+	} `json:"data"`
+	Errors []graphQLError `json:"errors"`
+}
+
+// vars is what every query is asked about: the repository.
+func (r *Repository) vars() map[string]any {
+	return map[string]any{"owner": r.owner, "name": r.repo}
 }
