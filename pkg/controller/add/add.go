@@ -141,6 +141,11 @@ func (c *Controller) definition(ctx context.Context, logger *slog.Logger, in *In
 // is why that is the one thing asked for.
 func (c *Controller) newDefinition(ctx context.Context, logger *slog.Logger, in *Input, owner, name string) *aquag2.Config {
 	pkgInfo := &aquaregistry.PackageInfo{
+		// The package the branch holds. A branch is named after an id, so the
+		// definition is the only thing that says which package it is: the catalogue
+		// is built by reading it, and a definition that says no name is one
+		// validate-definition refuses.
+		Name:      in.PkgName,
 		Type:      aquaregistry.PkgInfoTypeGitHubRelease,
 		RepoOwner: owner,
 		RepoName:  name,
