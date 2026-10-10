@@ -172,7 +172,7 @@ func discardLogger() *slog.Logger {
 func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
@@ -189,7 +189,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
@@ -226,7 +226,7 @@ func TestPRBodyReason(t *testing.T) {
 func TestOpenUnresolved(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	// Newest first, the way a run holds them.
 	versions := []*version{
 		{Version: "v0.9.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
@@ -257,7 +257,7 @@ func TestOpenUnresolved(t *testing.T) {
 func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	inFlight := map[string]struct{}{"ar2_1790772767_v0.7.0": {}}
 	versions := []*version{
 		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
@@ -273,7 +273,7 @@ func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 // The pull request of the package itself is not one of these, so it doesn't stop them.
 func TestWaiting(t *testing.T) {
 	t.Parallel()
-	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	own := map[string]struct{}{"ar2_1790772767": {}}
 	if branch, ok := c.waiting("ogham/exa", own); ok {
 		t.Errorf("the package's own branch counted as one waiting: %q", branch)
@@ -318,7 +318,7 @@ func (c *countingAutoMerger) EnableAutoMerge(_ context.Context, _ string) error 
 func TestController_UseAutoMerger(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	app := &countingAutoMerger{}
 	c.UseAutoMerger(app)
 	if got := c.autoMerger(); got != AutoMerger(app) {
@@ -336,7 +336,7 @@ func TestController_UseAutoMerger(t *testing.T) {
 // and a repository with no apps have.
 func TestController_autoMergerFallsBack(t *testing.T) {
 	t.Parallel()
-	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	if _, ok := c.autoMerger().(failingAutoMerger); !ok {
 		t.Errorf("what turns auto-merge on is %T", c.autoMerger())
 	}

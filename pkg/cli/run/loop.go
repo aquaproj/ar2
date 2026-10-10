@@ -99,7 +99,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if !args.SkipPR {
 		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch, nil))
 	}
-	c := ctrl.New(gh, generate.New(gh.Repositories, httpClient), reg,
+	c := ctrl.New(gh, httpClient, generate.New(gh.Repositories, httpClient), reg,
 		github.NewClient(httpClient), v, renamer)
 	// Auto-merge is turned on with the app that opened the pull request, where everything
 	// read here is the repository's own token. The merge is a push onto the package

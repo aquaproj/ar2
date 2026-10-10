@@ -173,7 +173,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	}
 	// No renamer: a regeneration is for one package under the name it has, and
 	// noticing that the name has changed is the sweep's job.
-	return ctrl.New(gh, generate.New(gh.Repositories, httpClient), reg,
+	return ctrl.New(gh, httpClient, generate.New(gh.Repositories, httpClient), reg,
 		github.NewClient(httpClient), v, nil), nil
 }
 
