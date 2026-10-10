@@ -71,9 +71,8 @@ func ReadIdentities(ctx context.Context, logger *slog.Logger, defs Definitions) 
 // NewIdentities reads the table out of the definitions the package branches hold, keyed by
 // branch name.
 //
-// A branch still named after the package is not in it. Those are the ones 'ar2 identify'
-// carries over, and addressing one by the name it happens to have would write to a branch
-// nothing reads.
+// A branch still named after the package is not in it: addressing one by the name it
+// happens to have would write to a branch nothing reads.
 func NewIdentities(logger *slog.Logger, files map[string]string) *Identities {
 	ids := &Identities{
 		byName: make(map[string]string, len(files)),

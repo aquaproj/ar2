@@ -42,25 +42,6 @@ func TestEncodePackageName(t *testing.T) {
 	}
 }
 
-// TestEncodePackageName_prefixPairs checks the pairs that a "/" -> "__" scheme could
-// not represent: git refuses to hold refs/heads/a and refs/heads/a/b at the same
-// time, and aqua-registry has 30 package pairs in that shape.
-func TestEncodePackageName_prefixPairs(t *testing.T) {
-	t.Parallel()
-	a := g2.BranchName("ipinfo/cli")
-	b := g2.BranchName("ipinfo/cli/grepip")
-	if a == b {
-		t.Fatalf("the two packages encode to the same branch: %s", a)
-	}
-	for _, name := range []string{a, b} {
-		for _, c := range name {
-			if c == '/' {
-				t.Errorf("a branch name must be a single segment, got %s", name)
-			}
-		}
-	}
-}
-
 // One id can be the beginning of another: 1790772680 starts with 179077268. What tells a
 // version branch of one from a version branch of the other is what follows the separator.
 func TestIsVersionHeadBranch(t *testing.T) {

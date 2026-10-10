@@ -138,15 +138,3 @@ func (c *Client) commitEntries(ctx context.Context, gh *gogithub.Client, force b
 	}
 	return nil
 }
-
-// PushEntries writes tree entries straight onto a package branch.
-//
-// The entries name blobs the repository already holds rather than carrying content, which
-// is how the template is copied: a git object belongs to the repository, so a tree on a
-// package branch can name the blob the default branch holds and nothing is uploaded again.
-//
-// Push, with everything that says about why it is the branch app's and why it never
-// forces, applies here too.
-func (c *Client) PushEntries(ctx context.Context, branch, parent, message string, entries []*gogithub.TreeEntry) error {
-	return c.commitEntries(ctx, c.branchGH, false, branch, parent, message, entries)
-}

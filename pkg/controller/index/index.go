@@ -183,8 +183,8 @@ func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files m
 	for _, branch := range slices.Sorted(maps.Keys(files)) {
 		id, ok := g2.BranchID(branch)
 		if !ok {
-			// A branch still named after the package, which 'ar2 identify' carries
-			// over. Reading it would list the package twice, under the same name.
+			// A branch still named after the package. Reading it would list the
+			// package twice, under the same name.
 			continue
 		}
 		cfg := parseConfig(logger, branch, files[branch])
