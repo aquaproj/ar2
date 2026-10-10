@@ -434,6 +434,10 @@ func executable(d fs.DirEntry) bool {
 }
 
 // downloadURL returns where the asset is downloaded from.
+//
+// The host is the entry's for a release on a forge instance, and github.com for the rest:
+// an instance serves a release asset at the path GitHub does, which is why the entry needs
+// to say nothing but which instance.
 func downloadURL(version string, asset *generate.Asset) (string, error) {
 	if asset.URL != "" {
 		return asset.URL, nil
@@ -441,8 +445,12 @@ func downloadURL(version string, asset *generate.Asset) (string, error) {
 	if asset.RepoOwner == "" || asset.RepoName == "" || asset.Asset == "" {
 		return "", errNoDownloadURL
 	}
-	return fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
-		asset.RepoOwner, asset.RepoName, version, asset.Asset), nil
+	host := asset.Host
+	if host == "" {
+		host = "github.com"
+	}
+	return fmt.Sprintf("https://%s/%s/%s/releases/download/%s/%s",
+		host, asset.RepoOwner, asset.RepoName, version, asset.Asset), nil
 }
 
 // download writes the asset to path and returns its SHA256.

@@ -87,7 +87,7 @@ func TestExcludedBody(t *testing.T) {
 func TestController_reportExcluded(t *testing.T) {
 	t.Parallel()
 	issues := &fakeIssues{}
-	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	c.UseIssues(issues, "aquaproj", "aqua-registry-g2")
 
 	c.reportExcluded(context.Background(), discardLogger(), "an/owner", excludedVersions())
@@ -118,13 +118,13 @@ func TestController_reportExcluded(t *testing.T) {
 func TestController_reportExcluded_nothingToSay(t *testing.T) {
 	t.Parallel()
 	issues := &fakeIssues{}
-	c := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	c.UseIssues(issues, "aquaproj", "aqua-registry-g2")
 	c.reportExcluded(context.Background(), discardLogger(), "an/owner", []*version{{Version: "v1.2.3"}})
 	if len(issues.created) != 0 || len(issues.comments) != 0 {
 		t.Errorf("%d opened, %d commented", len(issues.created), len(issues.comments))
 	}
 
-	quiet := New(ghClient(t), nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	quiet := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	quiet.reportExcluded(context.Background(), discardLogger(), "an/owner", excludedVersions())
 }

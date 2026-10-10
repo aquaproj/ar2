@@ -9,6 +9,8 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	"github.com/aquaproj/aqua/v2/pkg/expr"
+	"github.com/aquaproj/ar2/pkg/forge"
+	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/expr-lang/expr/vm"
 	gogithub "github.com/google/go-github/v92/github"
@@ -28,8 +30,8 @@ const versionSourceTag = "github_tag"
 // tags 3.19.0-0.1.pre alongside 3.19.0, and its registry entry says a version is
 // three numbers and nothing else; generating the former fails on a download that
 // was never going to exist, and fails again on the next run, forever.
-func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *state.Package, base *aquaregistry.PackageInfo) ([]string, error) {
-	tags, err := c.listVersions(ctx, pkg, base)
+func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *state.Package, base *aquaregistry.PackageInfo, def *definition) ([]string, error) {
+	tags, err := c.listVersions(ctx, pkg, base, def)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +39,14 @@ func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *sta
 }
 
 // listVersions reads the versions from wherever the package publishes them.
-func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo) ([]string, error) {
+func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo, def *definition) ([]string, error) {
+	// A package on a forge instance publishes them there, and the repository is the
+	// definition's: the package name begins with the instance, and the state's copy of
+	// the repository is written from what GitHub was asked for.
+	if info := instanceOf(def, base); info != nil {
+		return c.instanceVersions(ctx, info)
+	}
+
 	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
 	if base != nil && base.VersionSource == versionSourceTag {
 		tags, _, err := c.gh.Repositories.ListTags(ctx, pkg.RepoOwner, pkg.RepoName, opts)
@@ -63,6 +72,42 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 			continue
 		}
 		versions = append(versions, release.GetTagName())
+	}
+	return versions, nil
+}
+
+// instanceOf is the definition of a package on a forge instance, and nil for a package on
+// github.com.
+//
+// The branch's definition answers first, because it is what generation reads: a package
+// aqua-registry still describes as an http package is generated from what its branch says
+// it is.
+func instanceOf(def *definition, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
+	if def != nil && def.config != nil && generate.OnInstance(def.config.PackageInfo) {
+		return def.config.PackageInfo
+	}
+	if generate.OnInstance(base) {
+		return base
+	}
+	return nil
+}
+
+// instanceVersions reads the releases of a package on a forge instance.
+//
+// Only its releases: a tag on an instance says nothing this can download, and the
+// version_source that reads tags instead is GitHub's.
+func (c *Controller) instanceVersions(ctx context.Context, info *aquaregistry.PackageInfo) ([]string, error) {
+	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
+	releases, _, err := forge.New(c.httpClient, info.Host).ListReleases(ctx, info.RepoOwner, info.RepoName, opts)
+	if err != nil {
+		return nil, fmt.Errorf("list the releases of the instance: %w", err)
+	}
+	versions := make([]string, 0, len(releases))
+	for _, release := range releases {
+		if release.Draft || release.Prerelease {
+			continue
+		}
+		versions = append(versions, release.TagName)
 	}
 	return versions, nil
 }

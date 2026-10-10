@@ -207,11 +207,11 @@ func decide(pkg *state.Package, swept []string, now time.Time) work {
 // The sweep already asked upstream, so its answer is used as it is. Walking the
 // history is the other way in, and the only one that reaches past what a sweep
 // looks at.
-func (c *Controller) candidateVersions(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, todo work, swept []string) ([]string, error) {
+func (c *Controller) candidateVersions(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, def *definition, todo work, swept []string) ([]string, error) {
 	if todo == workSweep {
 		return filterVersions(logger, swept, input.PkgInfos[candidate.Name])
 	}
-	return c.versions(ctx, logger, candidate.Package, input.PkgInfos[candidate.Name])
+	return c.versions(ctx, logger, candidate.Package, input.PkgInfos[candidate.Name], def)
 }
 
 // record writes down what the registry turned out to hold, so the next run can tell

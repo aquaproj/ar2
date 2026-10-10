@@ -38,6 +38,11 @@ type Input struct {
 	// into: aqua-registry is where a package's definition comes from until
 	// aqua-registry-g2 has one of its own, and after that it is no longer consulted.
 	Config *g2.Config
+	// Repos is where the release is read from, when that is not GitHub. A package on
+	// a Forgejo or Gitea instance is read from the instance, by a client that answers
+	// what GitHub's does: the asset naming is then inferred by the same code, and
+	// only the host it was read from differs. It may be nil, which is GitHub.
+	Repos genrgst.RepositoriesService
 }
 
 // Generator builds registry.json from a release.
@@ -69,18 +74,18 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return nil, err
 	}
 
-	// Only a GitHub release exposes an asset list to infer from. For every other
-	// type the URL or the path is a template that nothing but registry.yaml knows,
-	// so its definition is used as it is.
-	if base != nil && base.Type != aquaregistry.PkgInfoTypeGitHubRelease {
+	// Only a release exposes an asset list to infer from. For every other type the
+	// URL or the path is a template that nothing but registry.yaml knows, so its
+	// definition is used as it is.
+	if base != nil && !inferable(base) {
 		return resolve(logger, input.PkgName, base, nil, input.Version, nil)
 	}
 
-	inferred, err := g.packageInfo(ctx, logger, withSpellings(input, base))
+	inferred, err := g.packageInfo(ctx, logger, withSpellings(input, base), base)
 	if err != nil {
 		return nil, err
 	}
-	rel, err := g.release(ctx, input)
+	rel, err := g.release(ctx, input, base)
 	if err != nil {
 		return nil, err
 	}
@@ -95,8 +100,14 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// Before the inference, so that a release which moved from one way of signing to
 	// another has the old one dropped and the new one read off the same asset list.
 	dropUnpublished(logger, reg, rel.names)
-	if err := g.inferSigning(ctx, logger, input, reg, rel.names); err != nil {
-		return nil, err
+	// What is inferred about signing is GitHub's: the identity it assumes is a
+	// workflow of the package's repository on github.com, which a release on an
+	// instance is not signed by. A definition naming cosign itself is left alone,
+	// which is the only way such a release says who signed it.
+	if !OnInstance(base) {
+		if err := g.inferSigning(ctx, logger, input, reg, rel.names); err != nil {
+			return nil, err
+		}
 	}
 	return reg, nil
 }
@@ -199,7 +210,7 @@ func resolveBase(logger *slog.Logger, input *Input) (*aquaregistry.PackageInfo, 
 // parsed back rather than reimplemented. Reimplementing it would risk resolving
 // differently from aqua itself, which is the one thing the generated registry.json
 // must not do.
-func (g *Generator) packageInfo(ctx context.Context, logger *slog.Logger, input *Input) (*aquaregistry.PackageInfo, error) {
+func (g *Generator) packageInfo(ctx context.Context, logger *slog.Logger, input *Input, base *aquaregistry.PackageInfo) (*aquaregistry.PackageInfo, error) {
 	param := &aquaconfig.Param{
 		// Limit 1 makes aqua gr resolve the single release given by "<pkg>@<version>"
 		// instead of walking the release history to build version_overrides.
@@ -214,9 +225,21 @@ func (g *Generator) packageInfo(ctx context.Context, logger *slog.Logger, input 
 		param.GenerateConfigFilePath = path
 	}
 
+	// What aqua gr is asked for is the repository, which it reads out of the argument.
+	// The package name is that for a package on github.com; for one on an instance the
+	// name begins with the instance, so the repository is given instead.
+	arg := input.PkgName + "@" + input.Version
+	if OnInstance(base) {
+		owner, name, err := repoOf(input, base)
+		if err != nil {
+			return nil, err
+		}
+		arg = owner + "/" + name + "@" + input.Version
+	}
+
 	buf := &bytes.Buffer{}
-	ctrl := genrgst.NewController(g.gh, nil, nil, buf)
-	if err := ctrl.GenerateRegistry(ctx, param, logger, input.PkgName+"@"+input.Version); err != nil {
+	ctrl := genrgst.NewController(g.repos(input), nil, nil, buf)
+	if err := ctrl.GenerateRegistry(ctx, param, logger, arg); err != nil {
 		return nil, fmt.Errorf("generate a registry: %w", err)
 	}
 
@@ -274,12 +297,12 @@ type release struct {
 // request instead of two per version. Assets whose upload never completed are left
 // out: GitHub keeps them in the "starter" state, where they are hidden from the
 // release page and can't be downloaded.
-func (g *Generator) release(ctx context.Context, input *Input) (*release, error) {
-	owner, name, err := repo(input.PkgName)
+func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistry.PackageInfo) (*release, error) {
+	owner, name, err := repoOf(input, base)
 	if err != nil {
 		return nil, err
 	}
-	rel, _, err := g.gh.GetReleaseByTag(ctx, owner, name, input.Version)
+	rel, _, err := g.repos(input).GetReleaseByTag(ctx, owner, name, input.Version)
 	if err != nil {
 		return nil, fmt.Errorf("get the release: %w", err)
 	}
@@ -317,6 +340,48 @@ func publishedAt(t time.Time) string {
 //
 // A package name can have more than two segments — a monorepo publishing several
 // binaries — and the repository is the first two.
+// inferable says whether the release publishes an asset list for the naming to be read
+// from.
+//
+// A GitHub release does, and so does a release on a Forgejo or Gitea instance: what
+// answers for the instance says the same things in the same words, which is why one
+// inference reads both.
+func inferable(base *aquaregistry.PackageInfo) bool {
+	switch base.Type {
+	case aquaregistry.PkgInfoTypeGitHubRelease, aquaregistry.PkgInfoTypeForgejoRelease, aquaregistry.PkgInfoTypeGiteaRelease:
+		return true
+	}
+	return false
+}
+
+// OnInstance says whether the package is on a forge instance of its own rather than on
+// github.com, which is what decides where its releases are read from.
+func OnInstance(base *aquaregistry.PackageInfo) bool {
+	return base != nil && base.Host != "" &&
+		(base.Type == aquaregistry.PkgInfoTypeForgejoRelease || base.Type == aquaregistry.PkgInfoTypeGiteaRelease)
+}
+
+// repos is what the release is read from: the instance's client when the package is on
+// one, and GitHub otherwise.
+func (g *Generator) repos(input *Input) genrgst.RepositoriesService {
+	if input.Repos != nil {
+		return input.Repos
+	}
+	return g.gh
+}
+
+// repoOf is the repository the release is in.
+//
+// The package name is it for a package on github.com, and is not for one on an instance:
+// codeberg.org/mergiraf/mergiraf names the instance first, and what the API is asked for
+// is the owner and the name the definition gives.
+func repoOf(input *Input, base *aquaregistry.PackageInfo) (string, string, error) {
+	if OnInstance(base) && base.HasRepo() {
+		return base.RepoOwner, base.RepoName, nil
+	}
+	return repo(input.PkgName)
+}
+
 func repo(pkgName string) (string, string, error) {
 	owner, name, found := strings.Cut(pkgName, "/")
 	if !found {

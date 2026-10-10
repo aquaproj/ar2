@@ -55,7 +55,7 @@ func TestRegenerate_pullRequestInFlight(t *testing.T) {
 		inFlight: map[string]struct{}{g2.HeadBranchName(fakeID): {}},
 		config:   &aquag2.Config{},
 	}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	_, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{PkgName: "cli/cli"})
 	if !errors.Is(err, errPullRequestInFlight) {
 		t.Fatalf("a package with an open pull request should be refused, got %v", err)
@@ -73,7 +73,7 @@ func TestRegenerate_pullRequestInFlight(t *testing.T) {
 func TestRegenerate_noDefinition(t *testing.T) {
 	t.Parallel()
 	reg := &regenerateRegistry{inFlight: map[string]struct{}{}}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	_, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{PkgName: "cli/cli"})
 	if !errors.Is(err, errNoDefinition) {
 		t.Fatalf("a package without a definition on its branch should be refused, got %v", err)
@@ -89,7 +89,7 @@ func TestRegenerate_versionNotHeld(t *testing.T) {
 		config:   &aquag2.Config{},
 		versions: map[string]struct{}{"v2.1.0": {}},
 	}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	_, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{
 		PkgName:  "cli/cli",
 		Versions: []string{"v2.2.0"},
@@ -111,7 +111,7 @@ func TestRegenerate_nothingChanged(t *testing.T) {
 		config:   &aquag2.Config{},
 		versions: map[string]struct{}{},
 	}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	changed, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{PkgName: "cli/cli"})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestRegenerate_pendingWorksOnThatBranch(t *testing.T) {
 		Number: new(9),
 		Head:   &gogithub.PullRequestBranch{Ref: new(branch)},
 	}}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	changed, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{
 		PkgName: "ogham/exa",
 		Pending: true,
@@ -205,7 +205,7 @@ func TestRegenerate_pendingWithNothingWaiting(t *testing.T) {
 	t.Parallel()
 	held := regenerateRegistry{config: &aquag2.Config{}}
 	reg := &waitingRegistry{regenerateRegistry: held}
-	c := New(ghClient(t), nil, reg, failingAutoMerger{}, nil, nil)
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	_, err := c.Regenerate(t.Context(), discardLogger(), &RegenerateInput{
 		PkgName: "ogham/exa",
 		Pending: true,

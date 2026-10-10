@@ -20,6 +20,14 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	}
 	p := inferred.Copy()
 
+	// Which forge the release is on is the definition's. The inference reads an asset
+	// list the same way whatever answered with it, so what it says is a GitHub release
+	// even when an instance's client answered.
+	if base.Host != "" {
+		p.Type = base.Type
+		p.Host = base.Host
+	}
+
 	// files is not merged here. registry.yaml can set it in an override, so it has
 	// to be resolved per environment rather than copied once: cli/cli's Windows
 	// override puts the executable at bin/gh.exe while every other platform has it

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,8 +13,10 @@ import (
 	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/attest"
+	"github.com/aquaproj/ar2/pkg/forge"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/github"
@@ -27,10 +30,13 @@ import (
 
 // Controller runs the loop.
 type Controller struct {
-	gh        *gogithub.Client
-	generator *generate.Generator
-	g2        Registry
-	graphql   GraphQL
+	gh *gogithub.Client
+	// httpClient reads a forge instance, which is not GitHub and has no client of
+	// its own here: one is made per package, for the host its definition names.
+	httpClient *http.Client
+	generator  *generate.Generator
+	g2         Registry
+	graphql    GraphQL
 	// autoMerge turns auto-merge on, where it is the app's token that must. Nil leaves
 	// it to the reading client. See UseAutoMerger.
 	autoMerge AutoMerger
@@ -138,10 +144,11 @@ type GraphQL interface {
 // 'ar2 index' lists the branches that have a definition and adds what the catalogue
 // is missing. A run that added it as it went would leave an entry behind whenever a
 // pull request didn't merge, describing a package nothing can install.
-func New(gh *gogithub.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, renamer Renamer) *Controller {
+func New(gh *gogithub.Client, httpClient *http.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, renamer Renamer) *Controller {
 	return &Controller{
-		gh: gh, generator: generator, g2: reg, graphql: graphql, verifier: verifier,
-		renamer: renamer, attester: attest.New(gh.Repositories), summary: summary.New(),
+		gh: gh, httpClient: httpClient, generator: generator, g2: reg, graphql: graphql,
+		verifier: verifier, renamer: renamer, attester: attest.New(gh.Repositories),
+		summary: summary.New(),
 	}
 }
 
@@ -436,7 +443,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		return 0, 0, err
 	}
 
-	versions, err := c.candidateVersions(ctx, logger, input, candidate, todo, swept)
+	versions, err := c.candidateVersions(ctx, logger, input, candidate, def, todo, swept)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -576,6 +583,17 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 	return generated, attempted
 }
 
+// repos is what a package's releases are read from: the instance's client when the
+// definition says the package is on one, and nil otherwise, which the generator reads as
+// GitHub.
+func (c *Controller) repos(def *definition, base *aquaregistry.PackageInfo) genrgst.RepositoriesService {
+	info := instanceOf(def, base)
+	if info == nil {
+		return nil
+	}
+	return forge.New(c.httpClient, info.Host)
+}
+
 // generate builds registry.json for one package version and completes it.
 func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string) (*version, error) {
 	reg, err := c.generator.Generate(ctx, logger, &generate.Input{
@@ -583,6 +601,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 		Version: tag,
 		Base:    input.PkgInfos[pkgName],
 		Config:  def.config,
+		Repos:   c.repos(def, input.PkgInfos[pkgName]),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
