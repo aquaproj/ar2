@@ -11,17 +11,6 @@ import (
 // branch ruleset cover all of them with a single pattern.
 const BranchPrefix = "pkg_"
 
-// BranchName returns the branch a package's generated registry.json was held on while
-// branches were named after the package.
-//
-// Nothing addresses a package this way any more: a branch is named after the package's id,
-// so that a repository being renamed doesn't move anything. It is what 'ar2 identify' reads
-// to carry a package over to the branch named after its id, and it goes when those branches
-// go.
-func BranchName(pkgName string) string {
-	return BranchPrefix + EncodePackageName(pkgName)
-}
-
 // IDBranchName returns the branch holding the package whose id this is.
 func IDBranchName(id string) string {
 	return BranchPrefix + id

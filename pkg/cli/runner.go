@@ -7,9 +7,7 @@ import (
 	"context"
 
 	"github.com/aquaproj/ar2/pkg/cli/add"
-	"github.com/aquaproj/ar2/pkg/cli/dates"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
-	identify "github.com/aquaproj/ar2/pkg/cli/identify"
 	"github.com/aquaproj/ar2/pkg/cli/index"
 	"github.com/aquaproj/ar2/pkg/cli/initcmd"
 	"github.com/aquaproj/ar2/pkg/cli/regenerate"
@@ -18,7 +16,6 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/run"
 	"github.com/aquaproj/ar2/pkg/cli/show"
 	"github.com/aquaproj/ar2/pkg/cli/state"
-	"github.com/aquaproj/ar2/pkg/cli/template"
 	"github.com/aquaproj/ar2/pkg/cli/test"
 	"github.com/aquaproj/ar2/pkg/cli/tidy"
 	"github.com/aquaproj/ar2/pkg/cli/validatedefinition"
@@ -60,12 +57,9 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		regenerate.New(logger, gFlags),
 		remove.New(logger, gFlags),
 		index.New(logger, gFlags),
-		identify.New(logger, gFlags),
 		show.New(logger, gFlags),
 		state.New(logger, gFlags),
 		test.New(logger, gFlags),
-		dates.New(logger, gFlags),
-		template.New(logger, gFlags),
 		tidy.New(logger, gFlags),
 		versions.New(logger, gFlags),
 		validatedefinition.New(logger, gFlags),
