@@ -53,15 +53,14 @@ func (c *Client) PackagesInFlight(ctx context.Context) (map[string]struct{}, err
 	}
 }
 
-// CreatePullRequest opens a pull request from the package's head branch into its
-// package branch.
+// CreatePullRequest opens a pull request from the package's head branch into the default
+// branch.
 func (c *Client) CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error) {
 	head, ok := c.HeadBranch(pkgName)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", errNoIdentity, pkgName)
 	}
-	base, _ := c.Branch(pkgName)
-	return c.CreatePullRequestFrom(ctx, logger, head, base, title, body)
+	return c.CreatePullRequestFrom(ctx, logger, head, DefaultBranch, title, body)
 }
 
 // CreatePullRequestFrom opens a pull request from head into base.
@@ -171,8 +170,8 @@ const labelColor = "ededed"
 // definition, or nil when it has none.
 //
 // It is the one whose head branch is named after a version rather than after the package: the
-// pull request a run opens for everything it generated is on the package's own branch, and
-// this is the other kind.
+// pull request a run opens for everything it generated is on the package's own head branch,
+// and this is the other kind.
 func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogithub.PullRequest, error) {
 	opts := &gogithub.PullRequestListOptions{State: stateOpen}
 	opts.PerPage = pullRequestsPerPage

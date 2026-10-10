@@ -27,7 +27,7 @@ func TestPackageConfig(t *testing.T) {
 		{
 			// Every package but the first time it is worked on.
 			name: "the branch already has one",
-			def:  &definition{config: converted, fromBranch: true},
+			def:  &definition{config: converted, held: true},
 		},
 		{
 			// aqua-registry doesn't have the package; what was generated came from

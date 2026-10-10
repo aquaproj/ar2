@@ -80,8 +80,8 @@ func entries(index *aquag2.Index) []string {
 
 // identifiers reports two packages saying they are the same one.
 //
-// What a package's branch is named after is its identifier, so two packages carrying one
-// identifier is two packages reading and writing one branch -- each one's versions
+// What a package's directory is named after is its identifier, so two packages carrying one
+// identifier is two packages reading and writing one directory -- each one's versions
 // answering for the other. A name is checked for being listed twice above; this is the
 // same question about the thing that outlives the name.
 //

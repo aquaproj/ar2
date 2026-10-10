@@ -12,7 +12,7 @@ import (
 // RegistryConfigFileName is the registry's own configuration, on the default branch.
 //
 // It says what ar2 should do differently for this registry, which is nothing about
-// any one package's contents: those live on the package's branch. Today that is the
+// any one package's contents: those live in the package's directory. Today that is the
 // list of packages to leave alone.
 const RegistryConfigFileName = "ar2.yaml"
 

@@ -5,7 +5,7 @@
 // doesn't have -- one somebody asked for in an issue -- has no way in at all, which is
 // what this is.
 //
-// Two things make a package known. Its definition, on its own branch, which is what
+// Two things make a package known. Its definition, in its own directory, which is what
 // generating reads; and its place in the order, which is what decides when it is
 // generated. Neither follows from the other, so both are written here, and either can
 // already be there: this is run again after a failure rather than unpicked.
@@ -27,12 +27,12 @@ import (
 // Registry is what a package is added to.
 type Registry interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
-	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	PackageBase(ctx context.Context, pkgName string) (string, error)
 	// HeadBranch is the branch the pull request is opened from. It answers false for a
-	// package the registry doesn't hold, which is every package until
-	// EnsurePackageBranch has minted the id its branch is named after.
+	// package the registry doesn't hold, which is every package until PackageBase has
+	// minted the id it is kept under.
 	HeadBranch(pkgName string) (string, bool)
-	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+	CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*g2.File) error
 	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
 
@@ -126,7 +126,7 @@ func (c *Controller) definition(ctx context.Context, logger *slog.Logger, in *In
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}
 	if held != nil {
-		logger.Info("the package's branch already holds a definition")
+		logger.Info("the registry already holds a definition of the package")
 		return nil, nil //nolint:nilnil
 	}
 	return c.newDefinition(ctx, logger, in, owner, name), nil
@@ -141,7 +141,7 @@ func (c *Controller) definition(ctx context.Context, logger *slog.Logger, in *In
 // is why that is the one thing asked for.
 func (c *Controller) newDefinition(ctx context.Context, logger *slog.Logger, in *Input, owner, name string) *aquag2.Config {
 	pkgInfo := &aquaregistry.PackageInfo{
-		// The package the branch holds. A branch is named after an id, so the
+		// The package the directory holds. A directory is named after an id, so the
 		// definition is the only thing that says which package it is: the catalogue
 		// is built by reading it, and a definition that says no name is one
 		// validate-definition refuses.
@@ -210,12 +210,11 @@ func (c *Controller) join(logger *slog.Logger, in *Input, owner, name string) bo
 // are none yet -- and the definition is the one thing here a person writes, deciding
 // everything generated from it afterwards.
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error {
-	base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
+	base, err := c.g2.PackageBase(ctx, pkgName)
 	if err != nil {
-		return fmt.Errorf("create the package branch: %w", err)
+		return fmt.Errorf("take the package over: %w", err)
 	}
-	// After the branch, because creating it is what mints the id both branches are named
-	// after.
+	// After the base, because that is what mints the id the head branch is named after.
 	head, ok := c.g2.HeadBranch(pkgName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
@@ -225,7 +224,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 		return err
 	}
 	title := "feat(" + pkgName + "): add the package"
-	if err := c.g2.Commit(ctx, head, base, title, []*g2.File{
+	if err := c.g2.CommitPackage(ctx, logger, pkgName, head, base, title, []*g2.File{
 		{Path: g2.ConfigFileName, Content: content},
 	}); err != nil {
 		return fmt.Errorf("commit the package definition: %w", err)

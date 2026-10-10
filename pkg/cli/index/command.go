@@ -111,7 +111,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	graphql := github.NewClient(httpClient)
 
-	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
+	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	// The definitions come back with the table they were read out of, which is what the
 	// reconciliation compares the catalogue against.
 	_, files, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo)

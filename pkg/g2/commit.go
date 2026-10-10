@@ -3,14 +3,17 @@ package g2
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"strings"
 
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 )
 
 // File is a file to commit.
 type File struct {
-	// Path is where the file goes on the package branch, such as
-	// versions/v1.2.3/registry-1.json.
+	// Path is where the file goes: from the root of the repository for Commit, and from
+	// the package's directory for CommitPackage, such as versions/v1.2.3/registry-1.json.
 	Path    string
 	Content string
 	// Deleted takes the path out of the tree instead of writing it. The entry is sent
@@ -37,11 +40,12 @@ func deletedEntry(path string) *gogithub.TreeEntry {
 	}
 }
 
-// Commit writes the files onto a new commit on top of parent and points branch at it.
+// Commit writes the files onto a new commit on top of parent and points branch at it. The
+// paths are from the root of the repository.
 //
-// The commit is built through the Git data API rather than a checkout. A package
-// branch is an orphan and there are as many of them as there are packages, so
-// cloning to write one file would be the expensive way to do this.
+// The commit is built through the Git data API rather than a checkout. The default branch
+// holds every package, so cloning it to write one file would be the expensive way to do
+// this.
 //
 // GitHub signs the commits it creates this way when the caller is a GitHub App
 // installation or GitHub Actions, which is how ar2 runs, so they satisfy a ruleset
@@ -52,86 +56,141 @@ func deletedEntry(path string) *gogithub.TreeEntry {
 // It is the pull request's client that writes, not the reading one. A commit onto a
 // branch that already has an open pull request is a synchronize event, and one made
 // with GITHUB_TOKEN leaves that pull request's checks waiting for approval.
+//
+// It forces, because a head branch left behind by an earlier run was written against a
+// base that has since moved, so what it holds is stale.
 func (c *Client) Commit(ctx context.Context, branch, parent, message string, files []*File) error {
-	// Force, because a head branch left behind by an earlier run was written against a
-	// base that has since moved, so what it holds is stale.
-	return c.commit(ctx, c.prGH, true, branch, parent, message, files)
+	sha, err := c.commitTree(ctx, parent, message, treeEntries("", files))
+	if err != nil {
+		return err
+	}
+	return c.moveBranch(ctx, branch, sha)
 }
 
-// Push writes the files straight onto a package branch.
+// CommitPackage writes the package's files onto a new commit on top of parent and points
+// branch at it. The paths are from the package's directory, such as
+// versions/v1.2.3/registry-1.json.
 //
-// A package branch takes changes through a pull request, which is what the registry's
-// review is, and the writer here is the one app that bypasses that requirement. What it
-// is for is a file the review has nothing to say about: one derived from what the branch
-// already holds, where a pull request per package would be hundreds of pull requests
-// asserting what their own diff already proves.
+// A commit that changes the versions also writes versions.json, the list of them, so that
+// the list arrives in the same pull request as what it lists and is never behind the
+// registry. Two commits rather than one: the list records the sha of the versions
+// directory it was made from, which is known only once there is a tree holding them. The
+// pull request is squashed when it merges, so the default branch gets one.
 //
-// It never forces. A package branch is the registry, and a push that isn't a
-// fast-forward would be rewriting what has been published rather than adding to it.
-func (c *Client) Push(ctx context.Context, branch, parent, message string, files []*File) error {
-	return c.commit(ctx, c.branchGH, false, branch, parent, message, files)
+// Everything Commit says about how and by whom applies here too.
+func (c *Client) CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*File) error {
+	dir, ok := c.Dir(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoIdentity, pkgName)
+	}
+	sha, err := c.commitTree(ctx, parent, message, treeEntries(dir+"/", files))
+	if err != nil {
+		return err
+	}
+	if touchesVersions(files) {
+		listed, err := c.commitVersionsList(ctx, logger, dir, parent, sha, files)
+		if err != nil {
+			return err
+		}
+		sha = listed
+	}
+	return c.moveBranch(ctx, branch, sha)
 }
 
-// commit builds the commit and moves the branch to it.
-func (c *Client) commit(ctx context.Context, gh *gogithub.Client, force bool, branch, parent, message string, files []*File) error {
+// CommitWaiting writes the package's files onto a new commit on top of parent and points
+// branch at it, the way CommitPackage does, but leaves versions.json alone.
+//
+// It is for the pull request of versions waiting for a definition, which a person merges
+// whenever the definition is written. The package's own pull requests go on merging in the
+// meantime and each writes the list, so a list written here too would conflict with
+// whichever of them merged first -- every time, since that is what happens while a person
+// is away. Left alone, the list is behind once this merges, and the next commit for the
+// package sees that its source isn't the versions directory any more and makes it again.
+func (c *Client) CommitWaiting(ctx context.Context, pkgName, branch, parent, message string, files []*File) error {
+	dir, ok := c.Dir(pkgName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errNoIdentity, pkgName)
+	}
+	sha, err := c.commitTree(ctx, parent, message, treeEntries(dir+"/", files))
+	if err != nil {
+		return err
+	}
+	return c.moveBranch(ctx, branch, sha)
+}
+
+// touchesVersions reports whether any of the files is under versions/.
+func touchesVersions(files []*File) bool {
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, aquag2.VersionDir+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// treeEntries is the files as tree entries, each path under prefix.
+func treeEntries(prefix string, files []*File) []*gogithub.TreeEntry {
 	entries := make([]*gogithub.TreeEntry, 0, len(files))
 	for _, file := range files {
 		if file.Deleted {
-			entries = append(entries, deletedEntry(file.Path))
+			entries = append(entries, deletedEntry(prefix+file.Path))
 			continue
 		}
 		entries = append(entries, &gogithub.TreeEntry{
-			Path:    new(file.Path),
+			Path:    new(prefix + file.Path),
 			Mode:    new(blobMode),
 			Type:    new(blobType),
 			Content: new(file.Content),
 		})
 	}
-	return c.commitEntries(ctx, gh, force, branch, parent, message, entries)
+	return entries
 }
 
-// commitEntries builds the commit from tree entries, which is what a file carrying content
-// and a file naming a blob the repository already holds both come to.
-func (c *Client) commitEntries(ctx context.Context, gh *gogithub.Client, force bool, branch, parent, message string, entries []*gogithub.TreeEntry) error {
+// commitTree creates a commit on top of parent whose tree is parent's with the entries
+// written over it, and returns the commit. No branch moves.
+func (c *Client) commitTree(ctx context.Context, parent, message string, entries []*gogithub.TreeEntry) (string, error) {
 	parentCommit, _, err := c.gh.Git.GetCommit(ctx, c.owner, c.repo, parent)
 	if err != nil {
-		return fmt.Errorf("get the parent commit: %w", err)
+		return "", fmt.Errorf("get the parent commit: %w", err)
 	}
 
 	// The parent's tree is the base, so the commit adds files rather than replacing
-	// everything the branch holds.
-	tree, _, err := gh.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(), entries)
+	// everything the default branch holds.
+	tree, _, err := c.prGH.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(), entries)
 	if err != nil {
-		return fmt.Errorf("create a tree: %w", err)
+		return "", fmt.Errorf("create a tree: %w", err)
 	}
 
-	commit, _, err := gh.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
+	commit, _, err := c.prGH.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
 		Message: new(message),
 		Tree:    tree,
 		Parents: []*gogithub.Commit{{SHA: new(parent)}},
 	}, nil)
 	if err != nil {
-		return fmt.Errorf("create a commit: %w", err)
+		return "", fmt.Errorf("create a commit: %w", err)
 	}
+	return commit.GetSHA(), nil
+}
 
-	ref := "refs/heads/" + branch
+// moveBranch points the branch at the commit, creating it when it doesn't exist.
+func (c *Client) moveBranch(ctx context.Context, branch, commit string) error {
 	sha, err := c.BranchSHA(ctx, branch)
 	if err != nil {
 		return err
 	}
 	if sha == "" {
-		_, _, err = gh.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
-			Ref: ref,
-			SHA: commit.GetSHA(),
+		_, _, err = c.prGH.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
+			Ref: "refs/heads/" + branch,
+			SHA: commit,
 		})
 		if err != nil {
 			return fmt.Errorf("create the branch: %w", err)
 		}
 		return nil
 	}
-	_, _, err = gh.Git.UpdateRef(ctx, c.owner, c.repo, "heads/"+branch, gogithub.UpdateRef{
-		SHA:   commit.GetSHA(),
-		Force: new(force),
+	_, _, err = c.prGH.Git.UpdateRef(ctx, c.owner, c.repo, "heads/"+branch, gogithub.UpdateRef{
+		SHA:   commit,
+		Force: new(true),
 	})
 	if err != nil {
 		return fmt.Errorf("update the branch: %w", err)

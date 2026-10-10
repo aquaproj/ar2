@@ -15,7 +15,7 @@ import (
 
 // fakeRegistry stands in for aqua-registry-g2 and records what was written to it.
 type fakeRegistry struct {
-	// held says the package branch has been created, which is what gives it an id.
+	// held says the package has been taken over, which is what gives it an id.
 	held bool
 	// commitBranch is where the definition was committed.
 	commitBranch string
@@ -28,13 +28,13 @@ func (f *fakeRegistry) Config(_ context.Context, _ string) (*aquag2.Config, erro
 	return f.config, nil
 }
 
-func (f *fakeRegistry) EnsurePackageBranch(_ context.Context, _ string) (string, error) {
+func (f *fakeRegistry) PackageBase(_ context.Context, _ string) (string, error) {
 	f.held = true
 	return "base-sha", nil
 }
 
-// HeadBranch answers only once the branch has been created, because creating it is what mints
-// the id both branches are named after.
+// HeadBranch answers only once the package has been taken over, because that is what mints
+// the id the head branch is named after.
 func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
 	if !f.held {
 		return "", false
@@ -42,7 +42,7 @@ func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
 	return g2.HeadBranchName("1790772767"), true
 }
 
-func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g2.File) error {
+func (f *fakeRegistry) CommitPackage(_ context.Context, _ *slog.Logger, _, branch, _, _ string, files []*g2.File) error {
 	f.commitBranch = branch
 	f.committed = files
 	return nil

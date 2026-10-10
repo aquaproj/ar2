@@ -42,12 +42,13 @@ A repository that is renamed or transferred leaves the package under a name nobo
 
 $ ar2 rename sst/opencode anomalyco/opencode
 
-The branch doesn't move, which is what naming it after the package's id is for: nothing
-is copied and nothing that wrote the id down is left pointing at nothing. What moves is
-the definition on the branch, because the definition is the only thing that says which
-package the branch holds -- one still naming the old package would be found under a name
-nobody uses, and a run asking for the new name would find no branch and make a second
-one. That goes into a pull request, since committing onto a package branch takes one.
+The package's directory doesn't move, which is what naming it after the package's id is
+for: nothing is copied and nothing that wrote the id down is left pointing at nothing.
+What moves is the definition, because the definition is the only thing that says which
+package the directory holds -- one still naming the old package would be found under a
+name nobody uses, and a run asking for the new name would find nothing and take the
+package over a second time. That goes into a pull request, since committing onto the
+default branch takes one.
 
 The old name becomes an alias of the package, which is how a configuration still asking
 for it resolves: aqua reads the table beside the catalogue, which holds both names, and
@@ -61,9 +62,8 @@ request settles is which name the registry answers for when a run next asks.
 summary. A rename GitHub can't see -- a package that changed names because one
 repository started publishing several commands, say -- is this command and nothing else.
 
-Three tokens are read from the environment. GITHUB_TOKEN reads the repository,
-AR2_BRANCH_TOKEN is accepted for consistency with a run, and AR2_PR_TOKEN commits the
-renamed definition and opens the pull requests.`,
+Two tokens are read from the environment. GITHUB_TOKEN reads the repository, and
+AR2_PR_TOKEN commits the renamed definition and opens the pull requests.`,
 		Args: cobra.ExactArgs(2), //nolint:mnd
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0], as[1])
@@ -88,24 +88,20 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, from, to s
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
-	branchGH, err := token.Client(token.BranchEnv)
-	if err != nil {
-		return err //nolint:wrapcheck // the error already names the token it is for
-	}
 	prGH, err := token.Client(token.PREnv)
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
-	registry := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version)
+	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return err //nolint:wrapcheck
 	}
 	// No auto-merge: a rename is dispatched by a person, and the catalogue's pull
 	// request is the last place it can be looked at before the old name stops being
 	// listed.
-	// No reader of the package branches either: a rename brings one package, and
+	// No reader of every definition either: a rename brings one package, and
 	// reconciling the whole catalogue isn't what was asked for.
 	index := indexctrl.New(registry, nil, args.BaseBranch, nil)
 	return ctrl.New(registry, index).Rename(ctx, logger.Logger, from, to) //nolint:wrapcheck

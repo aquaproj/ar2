@@ -67,24 +67,23 @@ func (f *fakeRegistry) CreateIndexPullRequest(_ context.Context, _ *slog.Logger,
 	return &gogithub.PullRequest{Number: new(1), NodeID: new("PR_node")}, nil
 }
 
-// definitions renders each package's definition onto its branch, the way the repository
-// holds it.
-// definitions is what every package branch holds, keyed by the branch: the branch is named
-// after the package's id and the definition on it is what says which package it holds.
+// definitions is every package's definition, keyed by id, the way the identities are read:
+// the directory is named after the package's id and the definition in it is what says which
+// package it holds.
 func definitions(t *testing.T, configs map[string]*aquag2.Config) map[string]string {
 	t.Helper()
 	files := make(map[string]string, len(configs))
 	for id, cfg := range configs {
 		if cfg == nil {
-			// A branch with nothing generated onto it yet holds no definition at all,
-			// which the reader leaves out rather than reporting.
+			// A package with no definition at all, which the reader leaves out rather
+			// than reporting.
 			continue
 		}
 		b, err := yaml.Marshal(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		files[g2.IDBranchName(id)] = string(b)
+		files[id] = string(b)
 	}
 	return files
 }
@@ -93,7 +92,7 @@ func config(description string) *aquag2.Config {
 	return &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{Description: description}}
 }
 
-// named is the definition a branch holds: it says which package it is, because the branch's
+// named is a package's definition: it says which package it is, because the directory's
 // own name is an id and says nothing.
 func named(pkgName, description string) *aquag2.Config {
 	return &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
@@ -144,7 +143,7 @@ func TestController_AddPackage(t *testing.T) {
 	if !strings.Contains(reg.committed[0].Content, "cli/cli") {
 		t.Errorf("the catalogue doesn't hold the package:\n%s", reg.committed[0].Content)
 	}
-	// The definition came with the call, so no branch is read for it.
+	// The definition came with the call, so nothing is read for it.
 	if len(reg.configRead) != 0 {
 		t.Errorf("read %v, want nothing", reg.configRead)
 	}
@@ -168,7 +167,7 @@ func TestController_AddPackage_alreadyThere(t *testing.T) {
 	}
 }
 
-// The catalogue is made to say what the branches say: a package it doesn't have is added,
+// The catalogue is made to say what the definitions say: a package it doesn't have is added,
 // and an entry whose definition says something else now is read out of it again.
 func TestController_Sync(t *testing.T) {
 	t.Parallel()
@@ -191,9 +190,9 @@ func TestController_Sync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The identifier of each entry is the branch the definition was read from: the
-	// branch is there, so what the catalogue has to say about where the package is has
-	// an answer already.
+	// The identifier of each entry is the directory the definition was read from: the
+	// package has one, so what the catalogue has to say about where it is has an answer
+	// already.
 	want := []*aquag2.IndexPackage{
 		{Name: "cli/cli", ID: minted, Description: "what the definition says now"},
 		{Name: "suzuki-shunsuke/tfcmt", ID: next, Description: "Fork of tfnotify"},
@@ -206,7 +205,7 @@ func TestController_Sync(t *testing.T) {
 	}
 }
 
-// A catalogue already saying what every branch says is committed nothing, which is what
+// A catalogue already saying what every definition says is committed nothing, which is what
 // the reconciliation comes to on almost every run.
 func TestController_Sync_upToDate(t *testing.T) {
 	t.Parallel()
@@ -229,7 +228,7 @@ func TestController_Sync_upToDate(t *testing.T) {
 	}
 }
 
-// An entry is not removed because a branch has no definition. It is a package waiting for
+// An entry is not removed because the registry holds no definition of it. It is a package waiting for
 // the pull request that brings one, which a run has already added to the catalogue, and
 // removing it would undo that.
 func TestController_Sync_keepsWhatHasNoDefinition(t *testing.T) {
@@ -278,8 +277,7 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 	}
 }
 
-// A branch with nothing generated onto it yet has no definition to describe the package
-// with. The run that writes one brings it here.
+// A package with nothing generated for it yet has no definition to describe it with. The run that writes one brings it here.
 func TestController_Sync_noConfigYet(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{files: rendered(t, &aquag2.Index{})}
@@ -526,7 +524,7 @@ func TestController_Refresh_unchanged(t *testing.T) {
 	}
 }
 
-// A name that has no definition on its branch is said rather than skipped: named
+// A name that has no definition is said rather than skipped: named
 // explicitly, it is a name that is wrong rather than a package waiting for its first
 // run.
 func TestController_Refresh_noDefinition(t *testing.T) {

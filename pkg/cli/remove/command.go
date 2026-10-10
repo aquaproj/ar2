@@ -49,9 +49,8 @@ package, stops listing it, and stops holding what it generated. Any one alone le
 state nobody meant -- an entry for a package that can't be fetched, or files nothing
 lists that the next run adds to.
 
-It opens two pull requests, because they are on different branches. The first carries
-the registry's configuration and the catalogue; the second takes the generated files off
-the package's branch. Merge the first one first: a package still in the order has its
+It opens two pull requests. The first carries the registry's configuration and the
+catalogue; the second takes the generated files out of the package's directory. Merge the first one first: a package still in the order has its
 files generated again by the next run. Neither is set to auto-merge.
 
 A reason is required. It goes into ignored_packages, which is what the next person to
@@ -61,8 +60,8 @@ What this cannot reach is a lock file. One that already holds the package carrie
 and the checksum of every file it needs, and nothing here takes that away. Where that
 matters, saying so where people will read it is the part that reaches them.
 
-Three tokens are read from the environment: GITHUB_TOKEN reads the repository,
-AR2_PR_TOKEN commits and opens the pull requests, and AR2_BRANCH_TOKEN is not used.`,
+Two tokens are read from the environment: GITHUB_TOKEN reads the repository, and
+AR2_PR_TOKEN commits and opens the pull requests.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0])
@@ -96,7 +95,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 	// No branch token: a package being removed is one the registry holds, so every
 	// branch this touches is already there.
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
-	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
+	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return err //nolint:wrapcheck
 	}

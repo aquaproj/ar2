@@ -35,9 +35,9 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		Short: "Say what the registry knows about one package",
 		Long: `Say what the registry knows about one package.
 
-A package's branch is named after an identifier rather than after the package, so neither
-can be read off the other. A name in a pull request title, a branch in a log, an
-identifier in a lock file: each one leaves the others to be looked up, and the catalogue
+A package's directory is named after an identifier rather than after the package, so
+neither can be read off the other. A name in a pull request title, a directory in a log,
+an identifier in a lock file: each one leaves the others to be looked up, and the catalogue
 is where all of it is.
 
 $ ar2 show cli/cli
@@ -73,6 +73,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, out io.Wri
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
-	c := ctrl.New(g2.New(gh, nil, nil, args.G2Owner, args.G2Repo, args.Version), args.BaseBranch)
+	c := ctrl.New(g2.New(gh, nil, args.G2Owner, args.G2Repo, args.Version), args.BaseBranch)
 	return c.Show(ctx, out, query) //nolint:wrapcheck // the error already names what it failed to find
 }

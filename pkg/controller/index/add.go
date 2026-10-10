@@ -162,7 +162,7 @@ func (ch *change) packages() []*aquag2.IndexPackage {
 }
 
 // empty says the change writes nothing, which is what a catalogue already in step with
-// the branches comes to.
+// the definitions comes to.
 func (ch *change) empty() bool {
 	return len(ch.added) == 0 && len(ch.updated) == 0
 }

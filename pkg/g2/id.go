@@ -7,7 +7,7 @@ import (
 
 // MintID returns an identifier for a package that no other package has.
 //
-// A package's branch is named after this rather than after the package, because a name is
+// A package's directory is named after this rather than after the package, because a name is
 // not an identity: a repository can be renamed, and the name it leaves behind can be taken
 // by a different repository. What the identifier has to be is unchanging, unique, and
 // mintable without asking anybody -- not random, and not meaningful.
@@ -17,6 +17,11 @@ import (
 // carries would be 122 bits spent on a few thousand identifiers that are minted one at a
 // time, and it would be paid for in the table a consumer resolves through: high-entropy
 // strings don't compress, and there is one per package in it.
+//
+// The layout depends on it too. A package's directory is sharded by the id's last two
+// digits (see PackageDir), which spread evenly only because they are the low digits of a
+// clock: an id minted any other way -- rounded, or counted from a round number -- would
+// pile packages into a few shards.
 //
 // Uniqueness doesn't rest on the clock. Whoever mints holds the catalogue, so taken says
 // which identifiers are already spoken for, and a second that is taken is stepped past.

@@ -63,7 +63,7 @@ func (r *Removed) Any() bool {
 // nothing but which environment it is for. It says what went.
 //
 // The file is edited as a syntax tree rather than read into a definition and written back
-// out. A definition on a package branch is a file a maintainer edits: the comment saying
+// out. A package's definition is a file a maintainer edits: the comment saying
 // why a filter is there is the most valuable line in it, and re-rendering would drop it
 // while claiming to have tidied up.
 //

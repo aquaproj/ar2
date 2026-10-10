@@ -31,11 +31,11 @@ func (f *regenerateRegistry) Config(_ context.Context, _ string) (*aquag2.Config
 
 // ConfigOnRef and VersionsOnRef are what a regeneration reads, whichever branch it is working
 // on: the package's own for what the registry holds.
-func (f *regenerateRegistry) ConfigOnRef(_ context.Context, _ string) (*aquag2.Config, error) {
+func (f *regenerateRegistry) ConfigOnRef(_ context.Context, _, _ string) (*aquag2.Config, error) {
 	return f.config, nil
 }
 
-func (f *regenerateRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
+func (f *regenerateRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, _, _ string) (map[string]struct{}, error) {
 	return f.versions, nil
 }
 

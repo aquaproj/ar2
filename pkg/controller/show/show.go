@@ -1,7 +1,7 @@
 // Package show answers what the registry knows about one package.
 //
-// A package's branch is named after an identifier rather than after the package, so
-// neither can be read off the other: a name in a pull request title, a branch in a log,
+// A package's directory is named after an identifier rather than after the package, so
+// neither can be read off the other: a name in a pull request title, a directory in a log,
 // an identifier in a lock file -- each one leaves the others to be looked up. The
 // catalogue holds all of it, and this is the lookup.
 package show
@@ -76,12 +76,11 @@ func write(w io.Writer, pkg *aquag2.IndexPackage) {
 	fmt.Fprintf(w, "package:     %s\n", pkg.Name)
 	if pkg.ID != "" {
 		fmt.Fprintf(w, "id:          %s (%s)\n", pkg.ID, minted(pkg.ID))
-		fmt.Fprintf(w, "branch:      %s\n", g2.IDBranchName(pkg.ID))
+		fmt.Fprintf(w, "dir:         %s\n", g2.PackageDir(pkg.ID))
 	} else {
 		// A package taken over before the registry minted identifiers. The next
-		// reconciliation gives it one.
+		// reconciliation gives it one, and until then it has no directory to name.
 		fmt.Fprintf(w, "id:          none yet\n")
-		fmt.Fprintf(w, "branch:      %s\n", g2.IDBranchName(pkg.ID))
 	}
 	if pkg.Description != "" {
 		fmt.Fprintf(w, "description: %s\n", pkg.Description)

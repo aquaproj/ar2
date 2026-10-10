@@ -83,9 +83,9 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, err
 	}
-	// What each package's branch is named after, before anything is read or written: a
-	// branch is named after the package's id, so nothing about its name says which
-	// package it holds.
+	// The id each package is kept under, before anything is read or written: a package's
+	// directory is named after its id, so nothing about the directory says which package
+	// it holds.
 	if _, _, err := identities.Read(ctx, logger.Logger, reg, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -102,10 +102,9 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	c := ctrl.New(gh, httpClient, generate.New(gh.Repositories, httpClient), reg,
 		github.NewClient(httpClient), v, renamer)
 	// Auto-merge is turned on with the app that opened the pull request, where everything
-	// read here is the repository's own token. The merge is a push onto the package
-	// branch, and GitHub raises no workflow run for a push GITHUB_TOKEN made: the
-	// branch's workflow asking for its list of versions would never hear about the
-	// version it just gained.
+	// read here is the repository's own token. The merge is a push onto the default
+	// branch, and GitHub raises no workflow run for a push GITHUB_TOKEN made: what waits
+	// on that push would never hear about it.
 	if prClient := token.HTTPClient(ctx, token.PREnv); prClient != nil {
 		c.UseAutoMerger(github.NewClient(prClient))
 	}
@@ -151,17 +150,13 @@ func syncState(ctx context.Context, logger *slogutil.Logger, c *ctrl.Controller,
 
 // registryClient builds the client that reads and writes aqua-registry-g2.
 //
-// Three tokens go into it, because two of the things a run does are things the
-// repository's own token can't: create a package branch past the ruleset, and open a
-// pull request whose checks start without a person approving them.
+// Two tokens go into it, because one of the things a run does is something the
+// repository's own token can't: open a pull request whose checks start without a person
+// approving them.
 func registryClient(gh *gogithub.Client, args *Args) (*g2.Client, error) {
-	branchGH, err := token.Client(token.BranchEnv)
-	if err != nil {
-		return nil, err //nolint:wrapcheck // the error already names the token it is for
-	}
 	prGH, err := token.Client(token.PREnv)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // the error already names the token it is for
 	}
-	return g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version), nil
+	return g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version), nil
 }

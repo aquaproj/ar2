@@ -67,40 +67,45 @@ type Registry interface {
 	PullRequests
 }
 
-// Contents is what aqua-registry-g2 holds, and how a branch of it is written.
+// Contents is what aqua-registry-g2 holds, and how a head branch of it is written.
 type Contents interface {
 	Definitions
 	Branches
 	Versions(ctx context.Context, logger *slog.Logger, pkgName string) (map[string]struct{}, error)
-	// VersionsOnRef reads a branch that isn't a package's own, which is where a version
+	// VersionsOnRef reads a branch other than the default one, which is where a version
 	// waiting for a definition lives.
-	VersionsOnRef(ctx context.Context, logger *slog.Logger, ref string) (map[string]struct{}, error)
+	VersionsOnRef(ctx context.Context, logger *slog.Logger, ref, pkgName string) (map[string]struct{}, error)
 	Version(ctx context.Context, pkgName, version string) (*aquag2.Registry, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
-	EnsurePackageBranch(ctx context.Context, pkgName string) (string, error)
+	PackageBase(ctx context.Context, pkgName string) (string, error)
 	// File is the bytes a ref holds at a path, or "" when it holds nothing there.
 	// A regeneration compares what it would commit against them.
 	File(ctx context.Context, ref, path string) (string, error)
-	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+	CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*g2.File) error
+	// CommitWaiting is the commit of versions waiting for a definition, which leaves the
+	// list of versions alone.
+	CommitWaiting(ctx context.Context, pkgName, branch, parent, message string, files []*g2.File) error
 }
 
 // Definitions is what the registry says a package is, and what it says about itself.
 //
-// ConfigOnRef reads a branch that isn't a package's own, which is where a definition
+// ConfigOnRef reads a branch other than the default one, which is where a definition
 // somebody has just written lives until its pull request merges.
 type Definitions interface {
 	Config(ctx context.Context, pkgName string) (*aquag2.Config, error)
-	ConfigOnRef(ctx context.Context, ref string) (*aquag2.Config, error)
+	ConfigOnRef(ctx context.Context, ref, pkgName string) (*aquag2.Config, error)
 	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 }
 
 // Branches is where a package's work goes.
 //
-// A branch is named after the package's id, so each of these answers false for a package the
-// registry doesn't hold yet -- which is the package EnsurePackageBranch is about to mint an
-// id for.
+// A head branch is named after the package's id, so each of these answers false for a
+// package the registry doesn't hold yet -- which is the package PackageBase is about to mint
+// an id for.
 type Branches interface {
-	Branch(pkgName string) (string, bool)
+	// Dir is the directory holding the package, which the paths of what it holds are
+	// under.
+	Dir(pkgName string) (string, bool)
 	HeadBranch(pkgName string) (string, bool)
 	VersionHeadBranch(pkgName, version string) (string, bool)
 	IsVersionHeadBranch(pkgName, branch string) bool
@@ -138,11 +143,10 @@ type GraphQL interface {
 
 // New creates a Controller.
 //
-// The catalogue is not among what a run touches. A package belongs in it once its
-// definition is on its branch, which is after the pull request carrying it merges
-// and not before, so adding it is the reconciliation's job rather than the run's:
-// 'ar2 index' lists the branches that have a definition and adds what the catalogue
-// is missing. A run that added it as it went would leave an entry behind whenever a
+// The catalogue is not among what a run touches. A package belongs in it once the
+// default branch holds its definition, which is after the pull request carrying it
+// merges and not before, so adding it is the reconciliation's job rather than the run's:
+// 'ar2 index' reads every definition and adds what the catalogue is missing. A run that added it as it went would leave an entry behind whenever a
 // pull request didn't merge, describing a package nothing can install.
 func New(gh *gogithub.Client, httpClient *http.Client, generator *generate.Generator, reg Registry, graphql GraphQL, verifier *verify.Verifier, renamer Renamer) *Controller {
 	return &Controller{
@@ -160,10 +164,9 @@ type AutoMerger interface {
 // UseAutoMerger says what turns auto-merge on, where the reading client does it otherwise.
 //
 // Which token does it decides what happens after the checks pass. The merge is a push onto
-// the package branch, and GitHub raises no workflow run for a push GITHUB_TOKEN made --
-// what waits on that push is the branch's own workflow asking for its list of versions to
-// be written. Turned on with the app that opened the pull request, the merge is that app's
-// and the branch hears about it.
+// the default branch, and GitHub raises no workflow run for a push GITHUB_TOKEN made.
+// Turned on with the app that opened the pull request, the merge is that app's and what
+// waits on the push hears about it.
 //
 // Reading stays with the repository's own token: the sweep is the heavy part of a run, and
 // its rate limit is the repository's rather than an installation's.
@@ -261,11 +264,6 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		}
 		attempted += tried
 		if err != nil {
-			if g2.ErrNoTemplate(err) {
-				// Every package would fail the same way, so the run stops instead of
-				// walking the whole registry to find that out.
-				return generated, err
-			}
 			// One package must not stop the run: a repository can be deleted or
 			// renamed at any time, and the remaining packages are still worth doing.
 			logger.Warn("failed to process a package", "package", candidate.Name, "error", err.Error())
@@ -288,7 +286,7 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 	if head, ok := c.g2.HeadBranch(candidate.Name); ok {
 		if _, inFlight := inFlight[head]; inFlight {
 			// A pull request for this package is still open. Opening a second one
-			// would target the same package branch and conflict on merge, and if the
+			// would write the same versions.json and conflict on merge, and if the
 			// first is open because its CI failed, a copy of it helps no one.
 			logger.Debug("skipping a package with an open pull request", "package", candidate.Name)
 			return workNone, nil
@@ -648,9 +646,9 @@ func writeAll(dir, pkgName string, versions []*version) error {
 	return nil
 }
 
-// write stores registry.json at the path it has on the package's branch.
+// write stores registry.json at the path it has in the package's directory.
 func write(dir, pkgName, version string, reg *generate.Registry) error {
-	// The layout mirrors aqua-registry-g2: the package branch holds
+	// The layout mirrors aqua-registry-g2: the package's directory holds
 	// versions/<version>/registry-1.json, and the package name is a directory here so
 	// that one run's output holds more than one package.
 	path := filepath.Join(dir, filepath.Join(strings.Split(pkgName, "/")...), filepath.FromSlash(aquag2.Path(version)))

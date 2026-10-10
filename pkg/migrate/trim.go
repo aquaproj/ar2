@@ -104,7 +104,7 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 //
 // aqua-registry verifies an asset against that file, signature and all. Here every entry
 // carries the digest of the asset itself, taken when the entry was generated and checked
-// again by the package branch's CI on a machine of the environment the entry is for, so
+// again by the registry's CI on a machine of the environment the entry is for, so
 // nothing ever fetches the file -- a generated entry has nowhere to say that it exists.
 // A definition saying where it is says it to nobody.
 func withoutChecksum(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {

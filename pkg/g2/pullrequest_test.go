@@ -28,10 +28,10 @@ func TestWaitingPullRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := g2.New(gh, nil, nil, "aquaproj", "aqua-registry-g2", "")
+	c := g2.New(gh, nil, "aquaproj", "aqua-registry-g2", "")
 	c.UseIdentities(g2.NewIdentities(slog.New(slog.DiscardHandler), map[string]string{
-		"pkg_1790772767": definition(t, "cli/cli"),
-	}))
+		"1790772767": definition(t, "cli/cli"),
+	}, nil))
 
 	pr, err := c.WaitingPullRequest(context.Background(), "cli/cli")
 	if err != nil {

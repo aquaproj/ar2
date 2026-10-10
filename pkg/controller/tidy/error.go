@@ -3,9 +3,8 @@ package tidy
 import "errors"
 
 var (
-	// errNoDefinition is returned for a named package whose branch holds none.
-	errNoDefinition = errors.New("the package's branch holds no definition")
-	// errNoBranch is returned when the package branch went between reading it and
-	// committing to it.
-	errNoBranch = errors.New("the package has no branch")
+	// errNoDefinition is returned for a named package that has none.
+	errNoDefinition = errors.New("the package holds no definition")
+	// errNoBranch is returned for a package the registry doesn't hold.
+	errNoBranch = errors.New("the registry holds no such package")
 )

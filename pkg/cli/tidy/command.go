@@ -70,9 +70,8 @@ run: committing would reset the branch that one is on.
 The definitions are read in one query for the whole registry rather than one per package,
 so a run that finds nothing to do costs almost nothing.
 
-Three tokens are read from the environment. GITHUB_TOKEN reads the repository,
-AR2_BRANCH_TOKEN is accepted for consistency with a run, and AR2_PR_TOKEN commits and
-opens the pull requests.`,
+Two tokens are read from the environment. GITHUB_TOKEN reads the repository, and
+AR2_PR_TOKEN commits and opens the pull requests.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, pkgNames []string) error {
 			return action(cmd.Context(), logger, args, pkgNames)
@@ -105,7 +104,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	graphql := github.NewClient(httpClient)
 
-	registry := g2.New(gh, nil, prGH, args.G2Owner, args.G2Repo, args.Version)
+	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	// The definitions come back with the table they were read out of, which is what the
 	// tidy works through.
 	_, files, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo)

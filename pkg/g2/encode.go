@@ -6,30 +6,65 @@ import (
 	"strings"
 )
 
-// BranchPrefix marks the branches holding a package's generated registry.json.
-// It keeps them out of the way of main and of any operational branch, and lets one
-// branch ruleset cover all of them with a single pattern.
-const BranchPrefix = "pkg_"
+// PackagesDir is the directory on the default branch holding every package.
+const PackagesDir = "pkgs"
 
-// IDBranchName returns the branch holding the package whose id this is.
-func IDBranchName(id string) string {
-	return BranchPrefix + id
+// DefaultBranch is the branch the registry is read from and every pull request targets.
+const DefaultBranch = "main"
+
+// PackageDir returns the directory holding the package whose id this is, such as
+// pkgs/69/1790772769.
+//
+// The packages are spread over a hundred directories rather than kept in one, because a
+// directory is a tree object that every commit under it writes again: one holding thousands
+// of packages would be rewritten whole by every version added to any of them, and GitHub
+// recommends keeping a directory under 3,000 entries.
+//
+// What spreads them is the id's last two digits. An id is the second it was minted, so its
+// leading digits are a time bucket -- every package taken over in the same few years shares
+// them -- while its trailing digits are as good as uniform. The leaf is the whole id rather
+// than what follows the shard, so an id read out of names.json is found as it is.
+func PackageDir(id string) string {
+	return PackagesDir + "/" + Shard(id) + "/" + id
 }
 
-// BranchID returns the id a package branch is named after, and false for a branch named
-// after the package itself.
+// shardWidth is how many of an id's trailing digits name its shard: a hundred directories.
+const shardWidth = 2
+
+// Shard is the directory under PackagesDir the package whose id this is sits in.
+func Shard(id string) string {
+	if len(id) < shardWidth {
+		return strings.Repeat("0", shardWidth-len(id)) + id
+	}
+	return id[len(id)-shardWidth:]
+}
+
+// IsID reports whether s is an id: a decimal number.
+func IsID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// HeadBranchID returns the id of the package a head branch is for, and false for a branch
+// that isn't one of a package's: the catalogue's, or one ar2 didn't make.
 //
-// An id is a decimal number and an encoded package name is never one: a package name holds
-// at least one slash, which the encoding writes as "_2f".
-func BranchID(branch string) (string, bool) {
-	id, ok := strings.CutPrefix(branch, BranchPrefix)
-	if !ok || id == "" {
+// Both the package's own head branch and one of its version branches name it, the second
+// followed by the version.
+func HeadBranchID(branch string) (string, bool) {
+	rest, ok := strings.CutPrefix(branch, HeadBranchPrefix)
+	if !ok {
 		return "", false
 	}
-	for i := range len(id) {
-		if id[i] < '0' || id[i] > '9' {
-			return "", false
-		}
+	id, _, _ := strings.Cut(rest, "_")
+	if !IsID(id) {
+		return "", false
 	}
 	return id, true
 }
@@ -78,8 +113,8 @@ func isSafe(c byte) bool {
 }
 
 // HeadBranchPrefix marks the branches ar2 opens pull requests from.
-// They are separate from the package branches so that a ruleset protecting the
-// latter doesn't have to make an exception for the branch a pull request comes from.
+// They are separate from the default branch so that a ruleset protecting it doesn't
+// have to make an exception for the branch a pull request comes from.
 const HeadBranchPrefix = "ar2_"
 
 // HeadBranchName returns the branch a pull request for the package with this id is opened
@@ -87,7 +122,7 @@ const HeadBranchPrefix = "ar2_"
 //
 // It carries no version: one pull request adds every version of the package that a
 // run found, which keeps the number of pull requests down and, more importantly,
-// keeps two of them from targeting the same package branch at once. Two would
+// keeps two of them from writing the same package's versions.json at once. Two would
 // conflict on merge, since the second is written against a base the first has moved.
 func HeadBranchName(id string) string {
 	return HeadBranchPrefix + id
@@ -103,7 +138,7 @@ func HeadBranchName(id string) string {
 // here and one per package everywhere else.
 //
 // Two of these don't conflict with each other or with the package's own, because a pull
-// request into the package branch moves it only when it merges, and this one doesn't until a
+// request moves the default branch only when it merges, and this one doesn't until a
 // person has been.
 func VersionHeadBranchName(id, version string) string {
 	return HeadBranchName(id) + "_" + EncodePackageName(version)

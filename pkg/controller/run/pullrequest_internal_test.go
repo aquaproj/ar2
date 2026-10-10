@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -26,14 +27,16 @@ type fakeRegistry struct {
 	commitBranch string
 	// labels are what was put on the pull requests.
 	labels []string
+	// waiting says the last commit left the list of versions alone.
+	waiting bool
 }
 
 // fakeID is the id whatever package a test is about is held under. What the tests check is
 // which branch was written to, not how the id was arrived at.
 const fakeID = "1790772767"
 
-func (f *fakeRegistry) Branch(_ string) (string, bool) {
-	return g2.IDBranchName(fakeID), true
+func (f *fakeRegistry) Dir(_ string) (string, bool) {
+	return g2.PackageDir(fakeID), true
 }
 
 func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
@@ -56,7 +59,7 @@ func (f *fakeRegistry) PackagesInFlight(_ context.Context) (map[string]struct{},
 	return map[string]struct{}{}, nil
 }
 
-func (f *fakeRegistry) EnsurePackageBranch(_ context.Context, _ string) (string, error) {
+func (f *fakeRegistry) PackageBase(_ context.Context, _ string) (string, error) {
 	return "base-sha", nil
 }
 
@@ -81,19 +84,24 @@ func (f *fakeRegistry) File(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 
-func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g2.File) error {
+func (f *fakeRegistry) CommitPackage(_ context.Context, _ *slog.Logger, _, branch, _, _ string, files []*g2.File) error {
 	f.commitBranch = branch
 	f.committed = files
 	return nil
 }
 
+func (f *fakeRegistry) CommitWaiting(ctx context.Context, pkgName, branch, parent, message string, files []*g2.File) error {
+	f.waiting = true
+	return f.CommitPackage(ctx, nil, pkgName, branch, parent, message, files)
+}
+
 // The readers of a branch that isn't a package's own are never asked here: nothing in these
 // tests regenerates what is waiting for a definition.
-func (f *fakeRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
+func (f *fakeRegistry) VersionsOnRef(_ context.Context, _ *slog.Logger, _, _ string) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
 
-func (f *fakeRegistry) ConfigOnRef(_ context.Context, _ string) (*aquag2.Config, error) {
+func (f *fakeRegistry) ConfigOnRef(_ context.Context, _, _ string) (*aquag2.Config, error) {
 	return nil, nil //nolint:nilnil
 }
 
@@ -173,7 +181,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
-	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
+	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 	})
 	if err != nil {
@@ -190,7 +198,7 @@ func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
-	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, fromBranch: true}, "cli/cli", []*version{
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
 	}); err != nil {
@@ -249,6 +257,32 @@ func TestOpenUnresolved(t *testing.T) {
 	}
 	if diff := cmp.Diff([]string{g2.NeedsDefinitionLabel}, reg.labels); diff != "" {
 		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
+	}
+	if !reg.waiting {
+		t.Error("the commit wrote the list of versions, which the package's own pull requests write too")
+	}
+}
+
+// A package the registry doesn't hold yet has its definition go with the versions waiting for
+// one: it is what says which package the pull request's id is for, so the next run doesn't
+// take the package over a second time.
+func TestOpenUnresolved_newPackage(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
+	versions := []*version{
+		{Version: "v0.9.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
+	}
+	def := &definition{config: &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{Name: "ogham/exa"}}}
+	if err := c.openUnresolved(t.Context(), discardLogger(), def, "ogham/exa", versions, nil); err != nil {
+		t.Fatal(err)
+	}
+	paths := make([]string, 0, len(reg.committed))
+	for _, f := range reg.committed {
+		paths = append(paths, f.Path)
+	}
+	if diff := cmp.Diff([]string{"versions/v0.9.0/registry-1.json", g2.ConfigFileName}, paths); diff != "" {
+		t.Errorf("committed (-want +got):\n%s", diff)
 	}
 }
 

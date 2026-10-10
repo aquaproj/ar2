@@ -82,8 +82,7 @@ generated file, so CI has nothing to check, and the definition is the one thing 
 writes.
 
 The access token is read from GITHUB_TOKEN, and the state from the container registry
-unless --state names a file. Committing needs AR2_BRANCH_TOKEN and AR2_PR_TOKEN, the
-same as a run.`,
+unless --state names a file. Committing needs AR2_PR_TOKEN, the same as a run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0])
@@ -114,10 +113,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
-	branchGH, err := token.Client(token.BranchEnv)
-	if err != nil {
-		return err //nolint:wrapcheck // the error already names the token it is for
-	}
 	prGH, err := token.Client(token.PREnv)
 	if err != nil {
 		return err //nolint:wrapcheck
@@ -129,7 +124,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 	}
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
-	registry := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version)
+	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return err //nolint:wrapcheck
 	}
