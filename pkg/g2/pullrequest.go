@@ -182,7 +182,7 @@ func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogit
 			return nil, fmt.Errorf("list open pull requests: %w", err)
 		}
 		for _, pr := range prs {
-			if IsVersionHeadBranch(pkgName, pr.GetHead().GetRef()) {
+			if c.IsVersionHeadBranch(pkgName, pr.GetHead().GetRef()) {
 				return pr, nil
 			}
 		}
