@@ -3,10 +3,6 @@ package run
 import (
 	"errors"
 	"fmt"
-	"strings"
-
-	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	"github.com/aquaproj/ar2/pkg/generate"
 )
 
 // errRepoReplaced says the repository a package's name answers with is not the one the
@@ -42,25 +38,4 @@ func (c *Controller) checkRepoID(def *definition, repo string) error {
 		return fmt.Errorf("%w: %s is %d, the definition says %d", errRepoReplaced, repo, id, def.config.RepoID)
 	}
 	return nil
-}
-
-// stampRepoID records the definition's repository id on each entry that names that
-// repository on GitHub.
-//
-// An entry names the repository it downloads from, which is nearly always the package's
-// own. One that names another repository -- or a forge instance, or none at all -- gets no
-// id: the definition's is not its.
-func stampRepoID(reg *generate.Registry, cfg *aquag2.Config) {
-	if cfg == nil || cfg.PackageInfo == nil || cfg.RepoID == 0 {
-		return
-	}
-	for _, asset := range reg.Assets {
-		if asset.Host != "" || asset.RepoOwner == "" || asset.RepoName == "" {
-			continue
-		}
-		if !strings.EqualFold(asset.RepoOwner, cfg.RepoOwner) || !strings.EqualFold(asset.RepoName, cfg.RepoName) {
-			continue
-		}
-		asset.RepoID = cfg.RepoID
-	}
 }

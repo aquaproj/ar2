@@ -53,7 +53,7 @@ func TestStampRepoID(t *testing.T) {
 		{Type: "http", URL: "https://example.com/x.tar.gz"},
 		{Type: "forgejo_release", Host: "codeberg.org", RepoOwner: "cli", RepoName: "cli"},
 	}}
-	stampRepoID(reg, repoConfig(212613049))
+	generate.StampRepoID(reg, repoConfig(212613049))
 	got := make([]int64, 0, len(reg.Assets))
 	for _, a := range reg.Assets {
 		got = append(got, a.RepoID)

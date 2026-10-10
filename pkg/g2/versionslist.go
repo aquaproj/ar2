@@ -215,3 +215,15 @@ func versionsMessage(versions int) string {
 	}
 	return fmt.Sprintf("chore: list the %d versions the registry holds", versions)
 }
+
+// RenderVersionsList renders versions.json for the files a package's versions directory
+// holds -- each version's registry.json, keyed by the version -- made from the tree whose
+// sha is source. It is what CommitPackage writes, for a caller that has every file already.
+func RenderVersionsList(logger *slog.Logger, source string, files map[string]string) (string, error) {
+	out := &aquag2.Versions{Source: source, Versions: make([]*aquag2.Version, 0, len(files))}
+	for version, content := range files {
+		out.Versions = append(out.Versions, versionEntry(logger, version, content))
+	}
+	out.Sort()
+	return marshalVersions(out)
+}

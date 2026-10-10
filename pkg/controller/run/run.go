@@ -626,7 +626,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 		sign.Render(asset, tag)
 		sign.Structure(asset, tag)
 	}
-	stampRepoID(reg, def.config)
+	generate.StampRepoID(reg, def.config)
 	v := &version{
 		Version:     tag,
 		Registry:    reg,

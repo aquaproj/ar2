@@ -4,6 +4,7 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/aquaproj/aqua/v2/pkg/g2"
 )
@@ -37,4 +38,25 @@ func Marshal(reg *Registry) ([]byte, error) {
 		return nil, fmt.Errorf("marshal registry.json: %w", err)
 	}
 	return append(b, '\n'), nil
+}
+
+// StampRepoID records the definition's repository id on each entry that names that
+// repository on GitHub.
+//
+// An entry names the repository it downloads from, which is nearly always the package's
+// own. One that names another repository -- or a forge instance, or none at all -- gets no
+// id: the definition's is not its.
+func StampRepoID(reg *Registry, cfg *g2.Config) {
+	if cfg == nil || cfg.PackageInfo == nil || cfg.RepoID == 0 {
+		return
+	}
+	for _, asset := range reg.Assets {
+		if asset.Host != "" || asset.RepoOwner == "" || asset.RepoName == "" {
+			continue
+		}
+		if !strings.EqualFold(asset.RepoOwner, cfg.RepoOwner) || !strings.EqualFold(asset.RepoName, cfg.RepoName) {
+			continue
+		}
+		asset.RepoID = cfg.RepoID
+	}
 }
