@@ -58,8 +58,7 @@ type Args struct {
 	// Packages limits the tidy to the ones named. Empty is every package the registry
 	// holds a definition of.
 	Packages []string
-	// Limit bounds how many pull requests one run opens. A pull request per package is
-	// what one branch per package makes of a change to them all.
+	// Limit bounds how many pull requests one run opens, one per package.
 	Limit int
 	// DryRun says what would change and writes nothing.
 	DryRun bool

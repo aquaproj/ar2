@@ -24,8 +24,8 @@ var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is requ
 
 // defaultLimit bounds how many pull requests one run opens.
 //
-// One branch per package makes a change to every definition a pull request per package, and
-// a run that opened eighty at once would be a day's reviewing arriving at once.
+// A change to every definition is a pull request per package, and a run that opened eighty at
+// once would be a day's reviewing arriving at once.
 const defaultLimit = 20
 
 // Args holds the command's flags.
@@ -63,7 +63,7 @@ The conversion has written definitions this way since v0.0.27, so this is for th
 written before it. Nothing generated changes, which was measured rather than assumed, so
 the pull requests merge themselves once their checks pass.
 
-A pull request per package, because there is a branch per package. --limit bounds how
+A pull request per package, so that each merges on its own checks. --limit bounds how
 many one run opens, and a package with a pull request already open is left for a later
 run: committing would reset the branch that one is on.
 

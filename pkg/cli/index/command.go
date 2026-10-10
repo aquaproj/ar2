@@ -37,13 +37,13 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "index [<package name>...]",
-		Short: "Make aqua-registry-g2's index.json say what the package branches say",
-		Long: `Make aqua-registry-g2's index.json say what the package branches say.
+		Short: "Make aqua-registry-g2's index.json say what the definitions say",
+		Long: `Make aqua-registry-g2's index.json say what the definitions say.
 
 index.json is what 'aqua g' searches: it holds the name, description, link and other
-names of every package the registry has. Everything else about a package lives on its
-own branch, but searching reads all of them at once, so the catalogue is one file on
-the default branch and has to be kept in step with the branches.
+names of every package the registry has. Everything else about a package lives in its
+own directory, but searching reads all of them at once, so the catalogue is one file
+and has to be kept in step with the definitions.
 
 'ar2 run' adds a package as it takes it over, so this command is the reconciliation
 rather than the ordinary path. It belongs on a schedule.
@@ -56,11 +56,11 @@ definition was edited after its entry was made has an entry describing it as it 
 which asking what the catalogue is missing would never find.
 
 So every definition is read and every entry is compared against what its definition
-makes now. That costs what listing the branches cost: the definitions come back with
-the branches, a hundred branches to a query.
+makes now. That costs what reading the identities costs: the definitions come back with
+them, a hundred to a query.
 
 The table beside the catalogue is rendered from the same entries in the same commit. It is
-what resolves a name to the branch holding the package -- and an old name to the name the
+what resolves a name to the id the package is kept under -- and an old name to the name the
 package has now -- so a package or an alias reaches aqua only once this has run.
 
 Named packages are read out of their definitions again and nothing else is looked at,
