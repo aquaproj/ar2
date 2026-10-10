@@ -2,7 +2,6 @@ package run
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -53,6 +52,9 @@ type Controller struct {
 	problems []*summary.Problem
 	// renamed is the repositories the sweep found aren't where the registry says.
 	renamed []*summary.Rename
+	// repoIDs is each repository's numeric id, as the sweep found it, keyed by the
+	// owner/name the registry has for it.
+	repoIDs map[string]int64
 	// renamer moves a package to the name its repository has now. Nil reports the
 	// rename and leaves it, which is what a run that can't create a branch does.
 	renamer Renamer
@@ -440,6 +442,9 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if err != nil {
 		return 0, 0, err
 	}
+	if err := c.checkRepoID(def, pkg.RepoOwner+"/"+pkg.RepoName); err != nil {
+		return 0, 0, err
+	}
 
 	versions, err := c.candidateVersions(ctx, logger, input, candidate, def, todo, swept)
 	if err != nil {
@@ -619,7 +624,9 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	// worked out at install time.
 	for _, asset := range reg.Assets {
 		sign.Render(asset, tag)
+		sign.Structure(asset, tag)
 	}
+	stampRepoID(reg, def.config)
 	v := &version{
 		Version:     tag,
 		Registry:    reg,
@@ -655,18 +662,20 @@ func write(dir, pkgName, version string, reg *generate.Registry) error {
 	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
 		return fmt.Errorf("create a directory for registry.json: %w", err)
 	}
-	f, err := os.Create(path)
+	b, err := generate.Marshal(reg)
 	if err != nil {
-		return fmt.Errorf("create registry.json: %w", err)
+		return err //nolint:wrapcheck // the error says what it couldn't marshal
 	}
-	defer f.Close()
-	if err := json.NewEncoder(f).Encode(reg); err != nil {
+	if err := os.WriteFile(path, b, filePerm); err != nil {
 		return fmt.Errorf("write registry.json: %w", err)
 	}
 	return nil
 }
 
 const dirPerm = 0o750
+
+// filePerm is the mode registry.json is written with.
+const filePerm = 0o644
 
 // partition splits the versions into the ones that can merge and the ones that have to wait
 // for a definition.

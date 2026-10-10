@@ -127,7 +127,9 @@ type repository struct {
 	// with an old name, so this differs from what was asked when the repository has
 	// been renamed or transferred since the registry recorded it.
 	NameWithOwner string `json:"nameWithOwner"`
-	Releases      *struct {
+	// DatabaseID is the repository's numeric id, which REST calls id.
+	DatabaseID int64 `json:"databaseId"`
+	Releases   *struct {
 		Nodes []struct {
 			TagName      string `json:"tagName"`
 			IsDraft      bool   `json:"isDraft"`

@@ -227,30 +227,32 @@ func assetPackage(pkgName, version string, asset *generate.Asset) *config.Packag
 	}
 }
 
-// attestation checks the artifact's attestation, and records which workflow signed
-// it when the definition doesn't say.
+// attestation checks the artifact's attestation against what the entry says, and records
+// on the entry what the attestation's certificate says about the run that built it: the
+// workflow that signed when the definition doesn't name it, the ref and the commit it
+// built from, the issuer, and whether the runner was one GitHub hosts.
 //
-// Both are one run of the GitHub CLI. Asking who signed costs about ten seconds, so
-// it is paid once for a package being taken over rather than for every version after
-// it; once the definition names the workflow, the check is made against that name.
+// Both are one run of the GitHub CLI, the one that verifies: what it prints is the
+// certificate it has just verified, so what is recorded is checked rather than read off a
+// file nobody has checked. An entry that already says these is held to them, which is how
+// the registry's own check of a generated file verifies it.
 func (v *Verifier) attestation(ctx context.Context, logger *slog.Logger, asset *generate.Asset, path string) error {
 	repo := asset.RepoOwner + "/" + asset.RepoName
-	if asset.GitHubArtifactAttestations.SignerWorkflow() != "" {
-		return v.ghattestation.Verify(ctx, logger, &ghattestation.ParamVerify{ //nolint:wrapcheck // the caller says what it was checking
-			ArtifactPath:   path,
-			Repository:     repo,
-			SignerWorkflow: asset.GitHubArtifactAttestations.SignerWorkflow(),
-			PredicateType:  asset.GitHubArtifactAttestations.PredicateType,
-		})
-	}
-
-	signer, err := v.attestationSigner(ctx, repo, path)
+	gaa := asset.GitHubArtifactAttestations
+	cert, err := v.verifyAttestation(ctx, repo, path, gaa)
 	if err != nil {
 		return err
 	}
-	logger.Debug("read which workflow signed the attestation",
-		"os", asset.OS, "arch", asset.Arch, "signer_workflow", signer)
-	asset.GitHubArtifactAttestations.SignerWorkflow2 = signer
+	if gaa.SignerWorkflow() == "" {
+		signer := signerWorkflow(cert.signer())
+		if signer == "" {
+			return errNoIdentity
+		}
+		logger.Debug("read which workflow signed the attestation",
+			"os", asset.OS, "arch", asset.Arch, "signer_workflow", signer)
+		gaa.SignerWorkflow2 = signer
+	}
+	cert.pin(gaa, repo)
 	return nil
 }
 

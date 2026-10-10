@@ -1,9 +1,7 @@
 // Package summary writes to the GitHub Actions job summary.
 //
-// registry.json is stored on one line: nothing reads it by eye, and the indentation
-// is 30% of the bytes every aqua user downloads while costing nothing in the
-// repository, where git compresses it away. The indented form is written here
-// instead, so that what a run produced can still be read when someone needs to.
+// What a run produced is written here as well as into its pull requests, so that it can be
+// read from the run when someone needs to.
 package summary
 
 import (
