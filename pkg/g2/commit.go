@@ -156,9 +156,9 @@ func (c *Client) commitTree(ctx context.Context, parent, message string, entries
 
 	// The parent's tree is the base, so the commit adds files rather than replacing
 	// everything the default branch holds.
-	tree, _, err := c.prGH.Git.CreateTree(ctx, c.owner, c.repo, parentCommit.GetTree().GetSHA(), entries)
+	tree, err := c.buildTree(ctx, parentCommit.GetTree().GetSHA(), entries)
 	if err != nil {
-		return "", fmt.Errorf("create a tree: %w", err)
+		return "", err
 	}
 
 	commit, _, err := c.prGH.Git.CreateCommit(ctx, c.owner, c.repo, gogithub.Commit{
@@ -170,6 +170,31 @@ func (c *Client) commitTree(ctx context.Context, parent, message string, entries
 		return "", fmt.Errorf("create a commit: %w", err)
 	}
 	return commit.GetSHA(), nil
+}
+
+// entriesPerTree is how many entries one request writes into a tree.
+//
+// GitHub gives up on a request that takes too long to process, and a tree of a thousand
+// entries is one: moving the packages off their branches, 1,135 entries in one request, was
+// answered first with a 502 and then with "your request timed out ... Consider building the
+// tree incrementally". A hundred is far below that, and an ordinary pull request -- one
+// package's new versions -- fits in a single request as before.
+const entriesPerTree = 100
+
+// buildTree writes the entries over the base tree, a hundred at a time, each request on top
+// of the tree the one before it made, and returns the last.
+func (c *Client) buildTree(ctx context.Context, base string, entries []*gogithub.TreeEntry) (*gogithub.Tree, error) {
+	var tree *gogithub.Tree
+	for start := 0; start < len(entries) || tree == nil; start += entriesPerTree {
+		batch := entries[start:min(start+entriesPerTree, len(entries))]
+		created, _, err := c.prGH.Git.CreateTree(ctx, c.owner, c.repo, base, batch)
+		if err != nil {
+			return nil, fmt.Errorf("create a tree: %w", err)
+		}
+		tree = created
+		base = created.GetSHA()
+	}
+	return tree, nil
 }
 
 // moveBranch points the branch at the commit, creating it when it doesn't exist.
