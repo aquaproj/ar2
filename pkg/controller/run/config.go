@@ -193,11 +193,20 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 
 // observedAttestation returns the attestation configuration the generated files
 // ended up with, once the workflow that signs has been read off one.
+//
+// Only what holds for every version goes into the definition: the workflow and what the
+// attestation is about. The ref and the commit a version was built from are that version's,
+// and a definition recording them would hold every later version to one build.
 func observedAttestation(versions []*version) *aquaregistry.GitHubArtifactAttestations {
 	for _, v := range versions {
 		for _, asset := range v.Registry.Assets {
-			if asset.GitHubArtifactAttestations.SignerWorkflow() != "" {
-				return asset.GitHubArtifactAttestations
+			gaa := asset.GitHubArtifactAttestations
+			if gaa.SignerWorkflow() != "" {
+				return &aquaregistry.GitHubArtifactAttestations{
+					Enabled:         gaa.Enabled,
+					PredicateType:   gaa.PredicateType,
+					SignerWorkflow2: gaa.SignerWorkflow(),
+				}
 			}
 		}
 	}
@@ -209,14 +218,18 @@ func observedAttestation(versions []*version) *aquaregistry.GitHubArtifactAttest
 // The newest version is asked first, because that is the one whose signer the
 // package should be held to. Every environment of a release is signed by the same
 // thing, so the first entry carrying one answers for all of them.
+//
+// An entry holds cosign as fields, and a definition as a command line, so the entry's is
+// written back as one first.
 func observedSigner(versions []*version) (*aquaregistry.Cosign, string) {
 	for _, v := range versions {
 		for _, asset := range v.Registry.Assets {
 			if asset.Cosign == nil {
 				continue
 			}
-			if identityOf(asset.Cosign.Opts) != "" {
-				return asset.Cosign, v.Version
+			cosign := sign.Unstructure(asset.Cosign, asset, v.Version)
+			if identityOf(cosign.Opts) != "" {
+				return cosign, v.Version
 			}
 		}
 	}

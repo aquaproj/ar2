@@ -96,20 +96,26 @@ func structured(c *aquaregistry.Cosign, flag, value string, asset *generate.Asse
 // downloadedFile is where a file cosign is given comes from: a release asset of the entry's
 // repository at this version, or a URL. A value that is neither -- a path on the machine,
 // say -- isn't something aqua could download, and has no field.
+// The download types a cosign file has here.
+const (
+	typeHTTP          = "http"
+	typeGitHubRelease = "github_release"
+)
+
 func downloadedFile(value string, asset *generate.Asset, version string) *aquaregistry.DownloadedFile {
 	u, err := url.Parse(value)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+	if err != nil || (u.Scheme != "https" && u.Scheme != typeHTTP) {
 		return nil
 	}
 	if name, ok := releaseAsset(u, asset, version); ok {
 		return &aquaregistry.DownloadedFile{
-			Type:      "github_release",
+			Type:      typeGitHubRelease,
 			RepoOwner: asset.RepoOwner,
 			RepoName:  asset.RepoName,
 			Asset:     &name,
 		}
 	}
-	return &aquaregistry.DownloadedFile{Type: "http", URL: &value}
+	return &aquaregistry.DownloadedFile{Type: typeHTTP, URL: &value}
 }
 
 // releaseAsset reads the asset name out of a URL of a release asset of the entry's own
@@ -151,4 +157,50 @@ func parseReleaseURL(u *url.URL) (string, string, string, string, bool) {
 		return "", "", "", "", false
 	}
 	return parts[0], parts[1], tag, name, true
+}
+
+// Unstructure is a cosign configuration written back the way Structure found it: every file
+// cosign is given but the bundle, and who the certificate must name, as flags in opts.
+//
+// It is what a definition records. A definition is the template every version is generated
+// from and has always held cosign as a command line; Structure is how one version's entry
+// says it.
+func Unstructure(c *aquaregistry.Cosign, asset *generate.Asset, version string) *aquaregistry.Cosign {
+	if c == nil {
+		return nil
+	}
+	out := &aquaregistry.Cosign{Enabled: c.Enabled, Bundle: c.Bundle}
+	out.Opts = append(out.Opts, c.Opts...)
+	for _, f := range []struct {
+		flag string
+		file *aquaregistry.DownloadedFile
+	}{
+		{"--signature", c.Signature},
+		{"--certificate", c.Certificate},
+		{"--key", c.Key},
+	} {
+		if u := fileURL(f.file, asset, version); u != "" {
+			out.Opts = append(out.Opts, f.flag, u)
+		}
+	}
+	out.Opts = append(out.Opts, c.CertificateOpts()...)
+	return out
+}
+
+// fileURL is where a file cosign is given is downloaded from.
+func fileURL(f *aquaregistry.DownloadedFile, asset *generate.Asset, version string) string {
+	switch {
+	case f == nil:
+		return ""
+	case f.Type == typeHTTP && f.URL != nil:
+		return *f.URL
+	case f.Type == typeGitHubRelease && f.Asset != nil:
+		owner, repo := f.RepoOwner, f.RepoName
+		if owner == "" {
+			owner, repo = asset.RepoOwner, asset.RepoName
+		}
+		return "https://github.com/" + owner + "/" + repo + "/releases/download/" +
+			url.PathEscape(version) + "/" + url.PathEscape(*f.Asset)
+	}
+	return ""
 }

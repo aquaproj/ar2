@@ -609,6 +609,9 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
+	// Before anything is checked or recorded on an entry: what is recorded is about this
+	// version, and the objects came from the definition every version shares.
+	generate.OwnSigning(reg)
 	filled, err := c.verifier.Complete(ctx, logger, pkgName, tag, reg, input.Verify)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)

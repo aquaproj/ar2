@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/g2"
 )
 
@@ -59,4 +60,86 @@ func StampRepoID(reg *Registry, cfg *g2.Config) {
 		}
 		asset.RepoID = cfg.RepoID
 	}
+}
+
+// OwnSigning gives every entry a copy of its signing configuration of its own.
+//
+// An entry starts out with the definition's -- the same objects for every entry of every
+// version a run generates -- and what is checked and recorded afterwards is about one
+// entry: the attestation's certificate names the commit one version was built from, and
+// cosign's command line is rendered for one asset. Written into a shared object, the first
+// version's commit is what every later version is held to, and its verification fails.
+func OwnSigning(reg *Registry) {
+	for _, asset := range reg.Assets {
+		asset.Cosign = copyCosign(asset.Cosign)
+		asset.GitHubArtifactAttestations = copyAttestations(asset.GitHubArtifactAttestations)
+		asset.Minisign = copyMinisign(asset.Minisign)
+		asset.SLSAProvenance = copySLSA(asset.SLSAProvenance)
+	}
+}
+
+func copyPtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	return &c
+}
+
+func copyCosign(c *aquaregistry.Cosign) *aquaregistry.Cosign {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	out.Enabled = copyPtr(c.Enabled)
+	if c.Opts != nil {
+		out.Opts = append([]string{}, c.Opts...)
+	}
+	out.Signature = copyFile(c.Signature)
+	out.Certificate = copyFile(c.Certificate)
+	out.Key = copyFile(c.Key)
+	out.Bundle = copyFile(c.Bundle)
+	return &out
+}
+
+func copyFile(f *aquaregistry.DownloadedFile) *aquaregistry.DownloadedFile {
+	if f == nil {
+		return nil
+	}
+	out := *f
+	out.Asset = copyPtr(f.Asset)
+	out.URL = copyPtr(f.URL)
+	return &out
+}
+
+func copyMinisign(m *aquaregistry.Minisign) *aquaregistry.Minisign {
+	if m == nil {
+		return nil
+	}
+	out := *m
+	out.Enabled = copyPtr(m.Enabled)
+	out.Asset = copyPtr(m.Asset)
+	out.URL = copyPtr(m.URL)
+	return &out
+}
+
+func copySLSA(s *aquaregistry.SLSAProvenance) *aquaregistry.SLSAProvenance {
+	if s == nil {
+		return nil
+	}
+	out := *s
+	out.Enabled = copyPtr(s.Enabled)
+	out.Asset = copyPtr(s.Asset)
+	out.URL = copyPtr(s.URL)
+	out.SourceURI = copyPtr(s.SourceURI)
+	return &out
+}
+
+func copyAttestations(a *aquaregistry.GitHubArtifactAttestations) *aquaregistry.GitHubArtifactAttestations {
+	if a == nil {
+		return nil
+	}
+	out := *a
+	out.Enabled = copyPtr(a.Enabled)
+	return &out
 }
