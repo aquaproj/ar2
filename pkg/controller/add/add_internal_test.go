@@ -97,6 +97,9 @@ func TestController_Add(t *testing.T) {
 	}
 	content := reg.committed[0].Content
 	for _, want := range []string{
+		// The branch is named after an id, so this is the only thing that says
+		// which package it holds.
+		"name: cli/cli",
 		"type: github_release",
 		"repo_owner: cli",
 		"repo_name: cli",
@@ -147,7 +150,13 @@ func TestController_Add_commandOfARepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := reg.committed[0].Content
-	for _, want := range []string{"repo_name: kubernetes", "- name: kubectl"} {
+	// The package is one command of the repository, and the definition names the
+	// package rather than the repository it comes from.
+	for _, want := range []string{
+		"name: kubernetes/kubernetes/kubectl",
+		"repo_name: kubernetes",
+		"- name: kubectl",
+	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the definition doesn't say %q:\n%s", want, content)
 		}
