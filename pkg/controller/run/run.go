@@ -591,7 +591,7 @@ func (c *Controller) repos(def *definition, base *aquaregistry.PackageInfo) genr
 	if info == nil {
 		return nil
 	}
-	return forge.New(c.httpClient, info.Host)
+	return forge.For(c.httpClient, info.Type, info.GetHost())
 }
 
 // generate builds registry.json for one package version and completes it.

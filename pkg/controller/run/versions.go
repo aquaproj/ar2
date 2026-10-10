@@ -98,7 +98,8 @@ func instanceOf(def *definition, base *aquaregistry.PackageInfo) *aquaregistry.P
 // version_source that reads tags instead is GitHub's.
 func (c *Controller) instanceVersions(ctx context.Context, info *aquaregistry.PackageInfo) ([]string, error) {
 	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
-	releases, _, err := forge.New(c.httpClient, info.Host).ListReleases(ctx, info.RepoOwner, info.RepoName, opts)
+	releases, _, err := forge.For(c.httpClient, info.Type, info.GetHost()).
+		ListReleases(ctx, info.RepoOwner, info.RepoName, opts)
 	if err != nil {
 		return nil, fmt.Errorf("list the releases of the instance: %w", err)
 	}

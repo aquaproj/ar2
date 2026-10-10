@@ -8,7 +8,7 @@ import (
 
 // An entry on a forge instance is downloaded from that instance. An instance serves a
 // release asset at the path GitHub does, so what the entry has to say is which instance.
-func TestDownloadURL(t *testing.T) {
+func TestDownloadURL(t *testing.T) { //nolint:funlen
 	t.Parallel()
 	data := []struct {
 		title string
@@ -35,6 +35,21 @@ func TestDownloadURL(t *testing.T) {
 			title: "a URL the entry names itself",
 			asset: &generate.Asset{Type: "http", URL: "https://example.com/a.tar.gz"},
 			exp:   "https://example.com/a.tar.gz",
+		},
+		{
+			// GitLab serves it at its permanent release link, which is a path of
+			// its own.
+			title: "a release on a GitLab instance",
+			asset: &generate.Asset{Type: "gitlab_release", Host: "gitlab.com", RepoOwner: "gitlab-org", RepoName: "cli", Asset: "glab_2.1.0_linux_amd64.tar.gz"},
+			exp:   "https://gitlab.com/gitlab-org/cli/-/releases/v2.1.0/downloads/glab_2.1.0_linux_amd64.tar.gz",
+		},
+		{
+			// A project in subgroups, and an asset named by the file path its
+			// release link was created with: both are read as paths, so their
+			// separators are kept and a space inside a segment is escaped.
+			title: "a GitLab project in subgroups with an asset that is a path",
+			asset: &generate.Asset{Type: "gitlab_release", Host: "gitlab.com", RepoOwner: "gitlab-org/security", RepoName: "cli", Asset: "packages/rpm/glab riscv64.rpm"},
+			exp:   "https://gitlab.com/gitlab-org/security/cli/-/releases/v2.1.0/downloads/packages/rpm/glab%20riscv64.rpm",
 		},
 		{
 			title: "nothing to download from",

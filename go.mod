@@ -3,7 +3,7 @@ module github.com/aquaproj/ar2
 go 1.27.1
 
 require (
-	github.com/aquaproj/aqua/v2 v2.63.1-0.20261010011240-82634331b4db
+	github.com/aquaproj/aqua/v2 v2.63.1-0.20261010084253-8efea6905c64
 	github.com/expr-lang/expr v1.17.8
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-cmp v0.7.0
@@ -94,7 +94,7 @@ require (
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )

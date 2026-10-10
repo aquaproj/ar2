@@ -1,4 +1,4 @@
-// Package forge reads a Forgejo or Gitea instance the way aqua gr reads GitHub.
+// Package forge reads a forge instance the way aqua gr reads GitHub.
 //
 // Both serve the API Gitea wrote and Forgejo inherited, at /api/v1, which GitHub's was
 // the model for: a release says tag_name, published_at, draft and prerelease, and an
@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
@@ -114,12 +116,18 @@ func (c *Client) path(owner, repo string) string {
 
 // get reads one answer as JSON.
 func (c *Client) get(ctx context.Context, endpoint string, out any) error {
+	return get(ctx, c.httpClient, endpoint, out)
+}
+
+// get reads one answer as JSON, which every instance here is read the same way: a GET
+// that accepts JSON, a status code to refuse on, and a body to decode.
+func get(ctx context.Context, httpClient *http.Client, endpoint string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("create a request for the instance: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send a request to the instance: %w", slogerr.With(err, "api_endpoint", endpoint))
 	}
@@ -244,4 +252,20 @@ func said(b []byte) string {
 		return string(r[:maxLen]) + "..."
 	}
 	return string(r)
+}
+
+// For is the client reading the instance a package is on, and nil for a package that is
+// on none.
+//
+// Which client is the type's: the Gitea family's API and GitLab's answer the same
+// questions in different words, and a definition says which forge it is on rather than
+// leaving it to be discovered.
+func For(httpClient *http.Client, typ, host string) genrgst.RepositoriesService {
+	switch typ {
+	case aquaregistry.PkgInfoTypeForgejoRelease, aquaregistry.PkgInfoTypeGiteaRelease:
+		return New(httpClient, host)
+	case aquaregistry.PkgInfoTypeGitLabRelease:
+		return NewGitLab(httpClient, host)
+	}
+	return nil
 }
