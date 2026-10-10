@@ -38,14 +38,13 @@ type version struct {
 // openPullRequest commits every version generated for a package and opens one pull
 // request for them.
 //
-// One pull request per package rather than per version: two into the same package
-// branch would conflict, since the second is written against a base the first has
-// moved. It also keeps the number of pull requests to something a maintainer can
-// look at.
+// One pull request per package rather than per version: two for the same package would
+// both write its versions.json, so the second would conflict once the first merged. It
+// also keeps the number of pull requests to something a maintainer can look at.
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, versions []*version) error {
-	base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
+	base, err := c.g2.PackageBase(ctx, pkgName)
 	if err != nil {
-		return fmt.Errorf("ensure the package branch: %w", err)
+		return fmt.Errorf("take the package over: %w", err)
 	}
 
 	contents, err := c.filesToCommit(logger, def, pkgName, versions)
@@ -59,7 +58,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
 	}
 	title := prTitle(pkgName, versions)
-	if err := c.g2.Commit(ctx, head, base, title, contents.files); err != nil {
+	if err := c.g2.CommitPackage(ctx, logger, pkgName, head, base, title, contents.files); err != nil {
 		return fmt.Errorf("commit registry.json: %w", err)
 	}
 
@@ -108,7 +107,7 @@ type contents struct {
 func (c *Controller) filesToCommit(logger *slog.Logger, def *definition, pkgName string, versions []*version) (*contents, error) {
 	out := &contents{files: make([]*g2.File, 0, len(versions)+1)}
 
-	// A package whose definition isn't on its branch yet is one aqua-registry-g2
+	// A package whose definition the registry doesn't hold yet is one aqua-registry-g2
 	// hasn't taken over. Converting it here means the move happens as a package is
 	// worked on rather than as a migration of its own, and it arrives for review
 	// beside the files generated from it.
@@ -286,9 +285,9 @@ func (c *Controller) openUnresolved(ctx context.Context, logger *slog.Logger, de
 		return nil
 	}
 
-	base, err := c.g2.EnsurePackageBranch(ctx, pkgName)
+	base, err := c.g2.PackageBase(ctx, pkgName)
 	if err != nil {
-		return fmt.Errorf("ensure the package branch: %w", err)
+		return fmt.Errorf("take the package over: %w", err)
 	}
 	// The versions come newest first, so the oldest is the last of them. Named after it, a
 	// later run that finds the same era finds the same branch.
@@ -297,21 +296,16 @@ func (c *Controller) openUnresolved(ctx context.Context, logger *slog.Logger, de
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
 	}
-	files := make([]*g2.File, 0, len(versions))
-	for _, v := range versions {
-		content, err := marshal(v.Registry)
-		if err != nil {
-			return err
-		}
-		files = append(files, &g2.File{Path: aquag2.Path(v.Version), Content: content})
+	files, err := unresolvedFiles(def, versions)
+	if err != nil {
+		return err
 	}
 
 	title := unresolvedTitle(pkgName, versions)
-	if err := c.g2.Commit(ctx, branch, base, title, files); err != nil {
+	if err := c.g2.CommitWaiting(ctx, pkgName, branch, base, title, files); err != nil {
 		return fmt.Errorf("commit registry.json: %w", err)
 	}
-	packageBranch, _ := c.g2.Branch(pkgName)
-	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, branch, packageBranch, title,
+	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, branch, g2.DefaultBranch, title,
 		unresolvedBody(versions, releasesOf(def.config)))
 	if err != nil {
 		return err //nolint:wrapcheck
@@ -320,6 +314,30 @@ func (c *Controller) openUnresolved(ctx context.Context, logger *slog.Logger, de
 	logger.Info("opened a pull request for the versions that need a definition",
 		"package", pkgName, "num_of_versions", len(versions), "number", pr.GetNumber())
 	return nil
+}
+
+// unresolvedFiles is what the pull request of the versions waiting for a definition commits.
+func unresolvedFiles(def *definition, versions []*version) ([]*g2.File, error) {
+	files := make([]*g2.File, 0, len(versions)+1)
+	for _, v := range versions {
+		content, err := marshal(v.Registry)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, &g2.File{Path: aquag2.Path(v.Version), Content: content})
+	}
+	if !def.held && def.config != nil {
+		// A package the registry doesn't hold yet. The definition goes with the
+		// versions, because it is what says which package the id is kept for: without
+		// it the next run would read this pull request's id as nobody's and take the
+		// package over a second time.
+		content, err := marshalConfig(def.config)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, &g2.File{Path: g2.ConfigFileName, Content: content})
+	}
+	return files, nil
 }
 
 // waiting says the package already has versions waiting for a definition, and on which

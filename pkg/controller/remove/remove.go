@@ -36,13 +36,13 @@ type Registry interface {
 	Index(ctx context.Context, ref string) (*aquag2.Index, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	VersionFiles(ctx context.Context, pkgName string) ([]string, error)
-	// Branch, HeadBranch and RemoveBranch are the branches a removal touches. A branch
-	// is named after the package's id, so they answer false for a package the registry
-	// doesn't hold -- which is a removal with nothing to do.
-	Branch(pkgName string) (string, bool)
+	// HeadBranch and RemoveBranch are the branches a removal's pull requests are opened
+	// from. They are named after the package's id, so they answer false for a package the
+	// registry doesn't hold -- which is a removal with nothing to do.
 	HeadBranch(pkgName string) (string, bool)
 	RemoveBranch(pkgName string) (string, bool)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
+	CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*g2.File) error
 	CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error)
 }
 
@@ -164,16 +164,16 @@ func (c *Controller) mainFiles(ctx context.Context, in *Input) ([]*g2.File, erro
 	return append(files, &g2.File{Path: g2.RegistryConfigFileName, Content: ignored}), nil
 }
 
-// dropVersions opens the pull request that takes what was generated off the package's
-// branch.
+// dropVersions opens the pull request that takes what was generated out of the package's
+// directory.
 func (c *Controller) dropVersions(ctx context.Context, logger *slog.Logger, in *Input, stop *gogithub.PullRequest) error {
 	paths, err := c.g2.VersionFiles(ctx, in.PkgName)
 	if err != nil {
-		return fmt.Errorf("list what the package's branch holds: %w", err)
+		return fmt.Errorf("list what the package holds: %w", err)
 	}
 	if len(paths) == 0 {
 		// Nothing was ever published, so ignoring it was the whole of it.
-		logger.Info("the package's branch holds no generated file")
+		logger.Info("the package holds no generated file")
 		return nil
 	}
 	files := make([]*g2.File, 0, len(paths))
@@ -181,20 +181,19 @@ func (c *Controller) dropVersions(ctx context.Context, logger *slog.Logger, in *
 		files = append(files, &g2.File{Path: path, Deleted: true})
 	}
 
-	branch, ok := c.g2.Branch(in.PkgName)
+	head, ok := c.g2.HeadBranch(in.PkgName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoPackageBranch, in.PkgName)
 	}
-	head, _ := c.g2.HeadBranch(in.PkgName)
-	parent, err := c.g2.BranchSHA(ctx, branch)
+	parent, err := c.g2.BranchSHA(ctx, c.baseBranch)
 	if err != nil {
-		return fmt.Errorf("get the package branch: %w", err)
+		return fmt.Errorf("get the branch to commit onto: %w", err)
 	}
 	title := fmt.Sprintf("fix(%s): drop what was generated", in.PkgName)
-	if err := c.g2.Commit(ctx, head, parent, title, files); err != nil {
+	if err := c.g2.CommitPackage(ctx, logger, in.PkgName, head, parent, title, files); err != nil {
 		return fmt.Errorf("commit the removal of the generated files: %w", err)
 	}
-	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, head, branch, title,
+	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, head, c.baseBranch, title,
 		dropBody(in, paths, stop))
 	if err != nil {
 		return fmt.Errorf("open the pull request that drops the generated files: %w", err)
@@ -211,7 +210,7 @@ func stopBody(in *Input) string {
 	b.WriteString("Why:\n\n> " + strings.ReplaceAll(strings.TrimSpace(in.Reason), "\n", "\n> ") + "\n\n")
 	b.WriteString("This is half of it. The package is added to `ignored_packages`, so no run generates " +
 		"it again, and its entry goes from `index.json` and `names.json`, so nothing searching the " +
-		"registry finds it. What it generated is still on its branch, and the pull request that takes " +
+		"registry finds it. What it generated is still in its directory, and the pull request that takes " +
 		"that away says as much.\n\n")
 	b.WriteString("Merge this one first. A package still in the order has its files generated again by " +
 		"the next run, whatever the other pull request did.\n\n")
@@ -225,7 +224,7 @@ func stopBody(in *Input) string {
 // dropBody says what the second pull request does and what it doesn't reach.
 func dropBody(in *Input, paths []string, stop *gogithub.PullRequest) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Takes the %d generated files of `%s` off its branch, so the registry stops "+
+	fmt.Fprintf(&b, "Takes the %d generated files of `%s` out of its directory, so the registry stops "+
 		"answering for the versions it published.\n\n", len(paths), in.PkgName)
 	if stop != nil {
 		fmt.Fprintf(&b, "The other half is #%d, which stops the package being generated and listed. "+
@@ -238,7 +237,7 @@ func dropBody(in *Input, paths []string, stop *gogithub.PullRequest) string {
 		"working: it carries the URL and the checksum of every file it needs, and nothing here takes " +
 		"that away. Where that matters -- malware -- saying so where people will read it is the part " +
 		"that reaches them.\n\n")
-	b.WriteString("The branch itself stays. A ruleset forbids deleting a package branch and no app " +
-		"bypasses it, so what was published stays readable in its history.\n")
+	b.WriteString("The definition stays, and what was published stays readable in the history of " +
+		"the default branch, which a ruleset forbids rewriting.\n")
 	return b.String()
 }

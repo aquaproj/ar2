@@ -42,13 +42,13 @@ func New(registry Registry, index Catalogue) *Controller {
 
 // Rename moves the package from one name to the other.
 //
-// The definition first, then the catalogue. The branch stays where it is -- it is named
+// The definition first, then the catalogue. The directory stays where it is -- it is named
 // after the package's id, which is what an id is for -- so what moves is what the
-// definition says the branch holds, and after it the entry the catalogue lists the package
-// under.
+// definition says the directory holds, and after it the entry the catalogue lists the
+// package under.
 //
 // The catalogue can go ahead of the pull request that carries the definition, because both
-// names point at the same branch: a reader resolves either one to it, and what it holds for
+// names point at the same directory: a reader resolves either one to it, and what it holds for
 // each version doesn't change. What the pull request settles is which name the registry
 // will answer for once a run asks again.
 func (c *Controller) Rename(ctx context.Context, logger *slog.Logger, from, to string) error {

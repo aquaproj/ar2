@@ -1,5 +1,4 @@
-// Package tidy takes out of the definitions on the package branches what a release can be
-// read for.
+// Package tidy takes out of the packages' definitions what a release can be read for.
 //
 // The conversion stopped writing it in, so a definition written since says only the part a
 // release can't answer. The ones written before still say the rest, and nothing else would
@@ -25,11 +24,11 @@ type Registry interface {
 	File(ctx context.Context, ref, path string) (string, error)
 	PackagesInFlight(ctx context.Context) (map[string]struct{}, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
-	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
-	// Branch and HeadBranch are the branch holding the package and the branch a pull
-	// request for it is opened from. A branch is named after the package's id, so they
+	CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*g2.File) error
+	// Dir and HeadBranch are the directory holding the package and the branch a pull
+	// request for it is opened from. Both are named after the package's id, so they
 	// answer false for a package the registry doesn't hold.
-	Branch(pkgName string) (string, bool)
+	Dir(pkgName string) (string, bool)
 	HeadBranch(pkgName string) (string, bool)
 	CreatePullRequest(ctx context.Context, logger *slog.Logger, pkgName, title, body string) (*gogithub.PullRequest, error)
 }
@@ -42,7 +41,7 @@ type AutoMerger interface {
 // Controller tidies definitions.
 type Controller struct {
 	g2 Registry
-	// defs is the definition on every package branch, which is also what the identities
+	// defs is every package's definition, keyed by id, which is also what the identities
 	// were read out of.
 	defs      map[string]string
 	automerge AutoMerger
@@ -59,8 +58,7 @@ type Args struct {
 	// Packages limits the tidy to the ones named. Empty is every package the registry
 	// holds a definition of.
 	Packages []string
-	// Limit bounds how many pull requests one run opens. A pull request per package is
-	// what one branch per package makes of a change to them all.
+	// Limit bounds how many pull requests one run opens, one per package.
 	Limit int
 	// DryRun says what would change and writes nothing.
 	DryRun bool
@@ -103,33 +101,27 @@ func (c *Controller) definitions(ctx context.Context, logger *slog.Logger, args 
 	if len(args.Packages) == 0 {
 		files := c.defs
 		out := make(map[string]string, len(files))
-		ids := g2.NewIdentities(logger, files)
-		for branch, content := range files {
-			id, ok := g2.BranchID(branch)
-			if !ok {
-				// A branch still named after the package, which nothing writes to
-				// any more.
-				continue
-			}
+		ids := g2.NewIdentities(logger, files, nil)
+		for id, content := range files {
 			pkgName, ok := ids.Package(id)
 			if !ok {
-				// Nothing on the branch says which package it holds, so there is no
+				// Nothing in the definition says which package it is, so there is no
 				// package to open a pull request for.
 				continue
 			}
 			out[pkgName] = content
 		}
-		logger.Info("read the definitions on the package branches", "num_of_definitions", len(out))
+		logger.Info("read the definitions", "num_of_definitions", len(out))
 		return out, nil
 	}
 
 	out := make(map[string]string, len(args.Packages))
 	for _, pkgName := range args.Packages {
-		branch, ok := c.g2.Branch(pkgName)
+		dir, ok := c.g2.Dir(pkgName)
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", errNoBranch, pkgName)
 		}
-		content, err := c.g2.File(ctx, branch, g2.ConfigFileName)
+		content, err := c.g2.File(ctx, g2.DefaultBranch, dir+"/"+g2.ConfigFileName)
 		if err != nil {
 			return nil, fmt.Errorf("read the definition of %s: %w", pkgName, err)
 		}
@@ -173,22 +165,18 @@ func (c *Controller) tidyPackage(ctx context.Context, logger *slog.Logger, pkgNa
 
 // openPullRequest commits the tidied definition and takes it to a pull request.
 func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, pkgName, content string, removed *tidy.Removed) error {
-	branch, ok := c.g2.Branch(pkgName)
+	head, ok := c.g2.HeadBranch(pkgName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
 	}
-	head, _ := c.g2.HeadBranch(pkgName)
-	base, err := c.g2.BranchSHA(ctx, branch)
+	base, err := c.g2.BranchSHA(ctx, g2.DefaultBranch)
 	if err != nil {
-		return fmt.Errorf("get the package branch: %w", err)
-	}
-	if base == "" {
-		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
+		return fmt.Errorf("get the default branch: %w", err)
 	}
 
 	title := fmt.Sprintf("chore(%s): %s", pkgName, what(removed))
 	files := []*g2.File{{Path: g2.ConfigFileName, Content: content}}
-	if err := c.g2.Commit(ctx, head, base, title, files); err != nil {
+	if err := c.g2.CommitPackage(ctx, logger, pkgName, head, base, title, files); err != nil {
 		return fmt.Errorf("commit the definition: %w", err)
 	}
 	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title, body(removed))

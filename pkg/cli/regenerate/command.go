@@ -59,7 +59,7 @@ Named versions are generated again; naming none does every version the registry
 holds, which for a package with a long history is a large pull request. A version the
 registry doesn't hold is refused rather than added, because adding one is a run's job.
 
-The definition comes from the package's branch and nowhere else. aqua-registry's
+The definition comes from the registry's own and nowhere else. aqua-registry's
 converted definition is what a run writes the first time it reaches a package, and
 generating from it here would produce files the registry's own definition doesn't.
 
@@ -69,10 +69,10 @@ at a whole package to find out whether anything moved.
 
 Auto-merge is never turned on. CI can say the new file describes the release it says
 it does; it can't say that replacing the old one was right. The old file stays in the
-branch's history either way.
+default branch's history either way.
 
 A package with an open pull request is refused. The commit is written against the
-package branch and the head branch is pointed at it, so an open pull request's
+default branch and the head branch is pointed at it, so an open pull request's
 commits would be discarded.
 
 --pending is the other way round, and is for the pull request a run opens when a version
@@ -86,9 +86,8 @@ $ ar2 regenerate ogham/exa --pending
 Nothing else about it changes. Only the versions whose file actually changes are committed, so
 a definition that didn't help comes to nothing and says so.
 
-Three tokens are read from the environment. GITHUB_TOKEN reads the repositories,
-AR2_BRANCH_TOKEN is unused here beyond being accepted, and AR2_PR_TOKEN commits and
-opens the pull request.`,
+Two tokens are read from the environment. GITHUB_TOKEN reads the repositories, and
+AR2_PR_TOKEN commits and opens the pull request.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0], as[1:])
@@ -155,10 +154,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 // something the registry doesn't produce. What it isn't given is the state and the
 // sweep, which are about which package to work on next and have no part in this.
 func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args) (*ctrl.Controller, error) {
-	branchGH, err := token.Client(token.BranchEnv)
-	if err != nil {
-		return nil, err //nolint:wrapcheck // the error already names the token it is for
-	}
 	prGH, err := token.Client(token.PREnv)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
@@ -167,7 +162,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, err
 	}
-	reg := g2.New(gh, branchGH, prGH, args.G2Owner, args.G2Repo, args.Version)
+	reg := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, reg, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return nil, err //nolint:wrapcheck
 	}

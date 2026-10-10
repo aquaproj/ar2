@@ -120,7 +120,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 // in it — not a wrong asset name for Linux, no Linux.
 //
 // The definition already says what the spelling means, and it says it the same way
-// whether it is aqua-registry's or the one on the package's branch.
+// whether it is aqua-registry's or the registry's own.
 func withSpellings(input *Input, base *aquaregistry.PackageInfo) *Input {
 	if base == nil || len(base.Replacements) == 0 {
 		return input

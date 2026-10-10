@@ -23,7 +23,7 @@ import (
 // be looked at before merging.
 //
 // The definition is kept alongside the file because the catalogue is built from it.
-// The branch doesn't hold it until this pull request merges, so the run that writes
+// The registry doesn't hold it until this pull request merges, so the run that writes
 // it is the first thing that can describe the package.
 type newConfig struct {
 	file        *g2.File
@@ -35,17 +35,17 @@ type newConfig struct {
 	unconverted []string
 }
 
-// packageConfig returns the package definition to commit, or nil when the branch
+// packageConfig returns the package definition to commit, or nil when the registry
 // already has one.
 //
-// aqua-registry-g2 generates registry.json from a definition kept on the package's
-// own branch. A package that doesn't have one yet still has its definition in
+// aqua-registry-g2 generates registry.json from a definition kept in the package's
+// own directory. A package that doesn't have one yet still has its definition in
 // aqua-registry, so it is converted the first time the package is worked on. The
 // conversion travels with the files generated from it, which is what makes the move
 // happen package by package instead of as a migration of its own.
 func (c *Controller) packageConfig(logger *slog.Logger, def *definition, pkgName string, versions []*version) (*newConfig, error) {
-	if def.fromBranch || def.config == nil {
-		// The branch already has one, which is every package but the first time it
+	if def.held || def.config == nil {
+		// The registry already has one, which is every package but the first time it
 		// is worked on, or aqua-registry has none to convert. Nothing to write is
 		// the ordinary outcome, not a failure.
 		return nil, nil //nolint:nilnil
@@ -70,9 +70,9 @@ func (c *Controller) packageConfig(logger *slog.Logger, def *definition, pkgName
 // couldn't read when it had to produce one.
 type definition struct {
 	config *aquag2.Config
-	// fromBranch says the definition was already on the package's branch, so there
-	// is nothing to commit and nothing was converted.
-	fromBranch  bool
+	// held says the registry already holds the definition, so there is nothing to
+	// commit and nothing was converted.
+	held        bool
 	unconverted []string
 }
 
@@ -90,7 +90,7 @@ func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger,
 		return nil, fmt.Errorf("get the package definition: %w", err)
 	}
 	if cfg != nil && !g2.IsClaim(cfg) {
-		return &definition{config: cfg, fromBranch: true}, nil
+		return &definition{config: cfg, held: true}, nil
 	}
 	// A definition that says nothing but the package's name is the claim the branch was
 	// created with, which is a package waiting to be taken over rather than one that has

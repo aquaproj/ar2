@@ -9,30 +9,30 @@ import (
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 )
 
-// errVersionsTruncated is returned when the branch holds more files under versions/ than
+// errVersionsTruncated is returned when the package holds more files under versions/ than
 // one request returns. Acting on a partial list would leave some of them behind.
 var errVersionsTruncated = errors.New("the versions directory is too large to list in one request")
 
-// VersionFiles returns every file the package's branch holds under versions/, as paths
-// from the root of the branch.
+// VersionFiles returns every file the package holds under versions/, as paths from the
+// package's directory.
 //
 // Every file rather than the registry.json of each version. What has to go when a package
 // stops being served is whatever is there, and a version directory holding something this
 // doesn't know about is exactly what would be left behind by a list built from names.
 func (c *Client) VersionFiles(ctx context.Context, pkgName string) ([]string, error) {
-	branch, ok := c.Branch(pkgName)
+	dir, ok := c.Dir(pkgName)
 	if !ok {
 		return nil, nil
 	}
 	tree, resp, err := c.gh.Git.GetTree(ctx, c.owner, c.repo,
-		branch+":"+aquag2.VersionDir, true)
+		DefaultBranch+":"+dir+"/"+aquag2.VersionDir, true)
 	if err != nil {
-		// No branch, or a branch that has never had a version generated onto it.
-		// Either way it holds nothing under versions/.
+		// A package that has never had a version generated holds nothing under
+		// versions/.
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("get the versions directory of a package branch: %w", err)
+		return nil, fmt.Errorf("get the versions directory of a package: %w", err)
 	}
 	if tree.GetTruncated() {
 		return nil, errVersionsTruncated

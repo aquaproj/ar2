@@ -39,15 +39,15 @@ func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
 		Short: "Check generated registry.json files against the releases they describe",
 		Long: `Check generated registry.json files against the releases they describe.
 
-This is the CI of a package branch. A pull request adding a version is merged without
+This is the CI of a package. A pull request adding a version is merged without
 a human reading it, so the trust in what was generated comes from here: every asset is
 downloaded, hashed against the checksum the entry carries, opened to see that the files
 it names are where it says, and checked against the signatures it claims.
 
-$ ar2 test versions/v1.5.6/registry-1.json
+$ ar2 test --definition pkgs/67/1790772767/registry.yaml pkgs/67/1790772767/versions/v1.5.6/registry-1.json
 
-The version comes from the path, which is versions/<version>/registry-1.json on a package
-branch. The package name comes from registry.yaml beside it, and --package overrides it
+The version comes from the path, which is versions/<version>/registry-1.json in the
+package's directory. The package name comes from registry.yaml beside it, and --package overrides it
 for a file checked from somewhere else.
 
 --os and --arch limit the run to the entries of one environment, which is how a job
@@ -101,7 +101,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, paths []st
 	return ctrl.New(verifier, env).Run(ctx, logger.Logger, pkgName, paths) //nolint:wrapcheck
 }
 
-// packageName reads the name out of the definition at the root of the package branch.
+// packageName reads the name out of the package's definition.
 //
 // The name is needed to verify an attestation, which names the repository that built
 // the asset, and it is what the log lines are read by.

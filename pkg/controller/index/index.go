@@ -1,10 +1,9 @@
 // Package index maintains aqua-registry-g2's catalogue of the packages it holds.
 //
-// Everything else about a package lives on its own branch, which is what keeps one
-// package's history out of another's. Searching can't work that way: it reads a name
-// and a description for every package before knowing which one is wanted. So the
-// catalogue is a single file on the default branch, and it has to be kept in step
-// with the branches by hand.
+// Everything else about a package lives in its own directory. Searching can't work that
+// way: it reads a name and a description for every package before knowing which one is
+// wanted. So the catalogue is a single file, and it has to be kept in step with the
+// definitions by hand.
 package index
 
 import (
@@ -38,12 +37,12 @@ type AutoMerger interface {
 	EnableAutoMerge(ctx context.Context, pullRequestID string) error
 }
 
-// Controller keeps the catalogue in step with the package branches.
+// Controller keeps the catalogue in step with the definitions.
 type Controller struct {
 	g2         Registry
 	automerge  AutoMerger
 	baseBranch string
-	// defs is the definition on every package branch, which is also what the identities
+	// defs is every package's definition, keyed by id, which is also what the identities
 	// were read out of. The reconciliation needs all of them: a definition edited after
 	// the entry was made from it is a difference nothing else would notice. The paths
 	// that bring one package -- a run taking a package over, a rename -- pass nil.
@@ -68,8 +67,8 @@ func New(registry Registry, automerge AutoMerger, baseBranch string, defs map[st
 // AddPackage puts one package into the catalogue.
 //
 // This is the path a run takes as it takes a package over: it has just built the
-// definition, so nothing is read back and no branches are listed. The definition is
-// passed in because the branch doesn't hold it yet — it is in the pull request that
+// definition, so nothing is read back. The definition is passed in because the default
+// branch doesn't hold it yet — it is in the pull request that
 // brings the package, which is the moment the catalogue can first describe it.
 func (c *Controller) AddPackage(ctx context.Context, logger *slog.Logger, pkgName string, cfg *aquag2.Config) error {
 	return c.addOne(ctx, logger, pkgName, cfg)
@@ -91,7 +90,7 @@ func (c *Controller) Rename(ctx context.Context, logger *slog.Logger, from, to s
 	logger.Info("listing the package under its new name", "package", from, "renamed_to", to)
 	entry := aquag2.NewIndexPackage(to, cfg)
 	// The identifier of the name it had. A rename is the same package under another
-	// name, and what the branch is named after doesn't change with the name.
+	// name, and the id the package is kept under doesn't change with the name.
 	c.identify(entry, entries[from], ids(t.index))
 	return c.write(ctx, logger, t, &change{
 		added: []*aquag2.IndexPackage{entry},
@@ -144,7 +143,7 @@ func (c *Controller) Refresh(ctx context.Context, logger *slog.Logger, pkgNames 
 	return c.write(ctx, logger, t, &change{updated: entries})
 }
 
-// Sync makes the catalogue say what the package branches say.
+// Sync makes the catalogue say what the definitions say.
 //
 // Two things it catches, and they used to need two different answers. A package whose run
 // failed after committing its definition, or whose pull request was never merged, is
@@ -153,9 +152,9 @@ func (c *Controller) Refresh(ctx context.Context, logger *slog.Logger, pkgNames 
 // finds the first and can't find the second.
 //
 // So every definition is read and every entry is compared against the one its definition
-// makes now. It costs what listing the branches cost, because the definitions come back
-// with them: sixteen queries for the whole registry, where fetching a definition for each
-// package the catalogue lacked was a request apiece.
+// makes now. It costs what reading the identities cost, because the definitions come back
+// with them: a query per hundred packages, where fetching a definition for each package
+// the catalogue lacked was a request apiece.
 //
 // Nothing is removed. An entry with no definition behind it is either a package waiting
 // for the pull request that brings its definition -- which a run has already added to the
@@ -165,7 +164,7 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 	if c.defs == nil {
 		return errNoDefinitions
 	}
-	logger.Info("read the definitions on the package branches", "num_of_definitions", len(c.defs))
+	logger.Info("read the definitions", "num_of_definitions", len(c.defs))
 
 	t, err := c.read(ctx)
 	if err != nil {
@@ -178,38 +177,28 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string) *change {
 	have := entriesByName(index)
 	ch := &change{}
-	// In branch order, so that a pull request reads the same way whatever order the
-	// branches came back in.
-	for _, branch := range slices.Sorted(maps.Keys(files)) {
-		id, ok := g2.BranchID(branch)
-		if !ok {
-			// A branch still named after the package. Reading it would list the
-			// package twice, under the same name.
-			continue
-		}
-		cfg := parseConfig(logger, branch, files[branch])
+	// In id order, so that a pull request reads the same way whatever order the
+	// definitions came back in.
+	for _, id := range slices.Sorted(maps.Keys(files)) {
+		cfg := parseConfig(logger, id, files[id])
 		if cfg == nil {
 			continue
 		}
 		if g2.IsClaim(cfg) {
-			// The claim the branch was created with. The package is waiting for the
-			// pull request that brings its definition, and there is nothing to
-			// describe it with until then.
-			logger.Debug("the branch holds no definition yet", "branch", branch)
+			// A claim, which says the package's name and nothing to describe it with.
+			logger.Debug("the package holds no definition yet", "id", id)
 			continue
 		}
 		pkgName := cfg.Name
 		if pkgName == "" {
-			// Nothing says which package the branch holds: its name is an id and its
-			// definition doesn't answer for itself.
-			logger.Warn("a package branch holds a definition that doesn't name its package",
-				"branch", branch)
+			// Nothing says which package the directory holds: its name is an id and
+			// its definition doesn't answer for itself.
+			logger.Warn("a definition doesn't name its package", "id", id)
 			continue
 		}
 		entry := aquag2.NewIndexPackage(pkgName, cfg)
-		// The branch the definition was read from is the id. Nothing is minted here:
-		// the branch exists, so what the catalogue has to say about where the package
-		// is has an answer already, and minting would give a second one.
+		// The directory the definition was read from is the id. Nothing is minted here:
+		// the package has one, and minting would give it a second.
 		entry.ID = id
 		old, ok := have[pkgName]
 		if !ok {
@@ -229,22 +218,22 @@ func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files m
 	return ch
 }
 
-// parseConfig reads one branch's definition, or nothing when the branch holds nothing
-// this can describe a package with.
+// parseConfig reads one package's definition, or nothing when it holds nothing this can
+// describe a package with.
 //
 // A definition that doesn't parse is reported and skipped rather than failing the run. It
 // is one package's file, and stopping here would leave the catalogue no closer to what
-// every other branch says.
-func parseConfig(logger *slog.Logger, branch, content string) *aquag2.Config {
+// every other definition says.
+func parseConfig(logger *slog.Logger, id, content string) *aquag2.Config {
 	cfg := &aquag2.Config{}
 	if err := yaml.Unmarshal([]byte(content), cfg); err != nil {
-		slogerr.WithError(logger, err).Warn("read a package definition as YAML", "branch", branch)
+		slogerr.WithError(logger, err).Warn("read a package definition as YAML", "id", id)
 		return nil
 	}
 	if cfg.PackageInfo == nil {
 		// A file that is YAML but not a definition. Describing the package from it
 		// would say nothing but its name, which is worse than leaving the entry alone.
-		logger.Warn("a package branch holds no definition", "branch", branch)
+		logger.Warn("a package holds no definition", "id", id)
 		return nil
 	}
 	return cfg
@@ -253,7 +242,7 @@ func parseConfig(logger *slog.Logger, branch, content string) *aquag2.Config {
 // identify gives the entry the identifier the catalogue already has for the package, and
 // mints one when it has none.
 //
-// The identifier is what the package's branch will be named after, so it outlives every
+// The identifier is what the package's directory is named after, so it outlives every
 // name the package is listed under: an entry rebuilt from a definition keeps it, and a
 // rename carries it to the new name. What it must never do is change, which is why this is
 // the only place that decides it.

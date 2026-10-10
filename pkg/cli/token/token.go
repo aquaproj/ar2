@@ -16,14 +16,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// BranchEnv holds the token that creates the package branches.
-//
-// Creating one has to get past the ruleset requiring status checks, which a brand
-// new branch can't have. The app behind it is listed as a bypass actor for that
-// ruleset and holds no pull-requests permission, so it can't open or merge a pull
-// request and the bypass can't become a way to land an unchecked change.
-const BranchEnv = "AR2_BRANCH_TOKEN"
-
 // PREnv holds the token that commits to the head branches and opens the pull
 // requests.
 //

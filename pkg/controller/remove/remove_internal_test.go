@@ -36,10 +36,6 @@ type fakeRegistry struct {
 // which branch was written to, not how the id was arrived at.
 const fakeID = "1790772767"
 
-func (f *fakeRegistry) Branch(_ string) (string, bool) {
-	return g2.IDBranchName(fakeID), true
-}
-
 func (f *fakeRegistry) HeadBranch(_ string) (string, bool) {
 	return g2.HeadBranchName(fakeID), true
 }
@@ -82,6 +78,10 @@ func (f *fakeRegistry) Commit(_ context.Context, branch, _, _ string, files []*g
 	return nil
 }
 
+func (f *fakeRegistry) CommitPackage(ctx context.Context, _ *slog.Logger, _, branch, parent, message string, files []*g2.File) error {
+	return f.Commit(ctx, branch, parent, message, files)
+}
+
 func (f *fakeRegistry) CreatePullRequestFrom(_ context.Context, _ *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error) {
 	if f.bases == nil {
 		f.bases = map[string]string{}
@@ -105,7 +105,7 @@ func index() *aquag2.Index {
 
 // Removing a package is three things at once: it stops being generated, stops being
 // listed, and stops being held. The first two are one pull request into the default
-// branch and the third is one into the package's branch.
+// branch and the third is another, from the package's head branch.
 func TestController_Remove(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{
@@ -144,7 +144,7 @@ func TestController_Remove(t *testing.T) {
 	}
 }
 
-// The package branch's half: every file it holds under versions/ goes, as deletions, in a
+// The package's half: every file it holds under versions/ goes, as deletions, in a
 // pull request that says the other one merges first.
 func TestController_Remove_dropsWhatWasGenerated(t *testing.T) {
 	t.Parallel()
@@ -169,7 +169,7 @@ func TestController_Remove_dropsWhatWasGenerated(t *testing.T) {
 			t.Errorf("%s isn't a deletion", file.Path)
 		}
 	}
-	if reg.bases[g2.HeadBranchName(fakeID)] != g2.IDBranchName(fakeID) {
+	if reg.bases[g2.HeadBranchName(fakeID)] != "main" {
 		t.Errorf("the second pull request goes into %q", reg.bases[g2.HeadBranchName(fakeID)])
 	}
 	// It has to say which one merges first, because merging them the other way round
@@ -180,7 +180,7 @@ func TestController_Remove_dropsWhatWasGenerated(t *testing.T) {
 }
 
 // A package that never had a version published is ignored and delisted, and there is
-// nothing to take off its branch.
+// nothing to take out of its directory.
 func TestController_Remove_nothingPublished(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{inFlight: map[string]struct{}{}, index: index()}
@@ -191,7 +191,7 @@ func TestController_Remove_nothingPublished(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := reg.commits[g2.HeadBranchName(fakeID)]; ok {
-		t.Error("it committed to the package branch")
+		t.Error("it committed the package's half")
 	}
 	if len(reg.bases) != 1 {
 		t.Errorf("opened %d pull requests", len(reg.bases))

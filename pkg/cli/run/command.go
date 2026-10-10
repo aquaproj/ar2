@@ -208,7 +208,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 }
 
 // definition returns the definition to generate from, which is the same one the
-// registry would use: the package branch's when it has one, and aqua-registry's
+// registry would use: the registry's own when it has one, and aqua-registry's
 // converted when it doesn't.
 //
 // Generating without it produces something the registry wouldn't. The filters are
@@ -216,7 +216,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 // release's rocm or jetpack build is kept from being taken for the ordinary one --
 // and they live in the definition rather than in the release.
 func definition(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, httpClient *http.Client, args *Args, pkgName string, base *aquaregistry.PackageInfo) (*aquag2.Config, error) {
-	g2Client := g2.New(gh, nil, nil, args.G2Owner, args.G2Repo, args.Version)
+	g2Client := g2.New(gh, nil, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, g2Client, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return nil, err //nolint:wrapcheck
 	}
