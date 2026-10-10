@@ -34,8 +34,10 @@ type fakeGit struct {
 	files map[string]string
 	// versionLists are the versions directory listings, by ref.
 	versionLists map[string][]string
-	// trees are the entries of each tree created, in order.
+	// trees are the entries of each tree created, in order, and bases the tree each was
+	// created on top of.
 	trees [][]*gogithub.TreeEntry
+	bases []string
 	// moved is the branch that was pointed at a commit, and the commit.
 	moved, movedTo string
 }
@@ -77,10 +79,12 @@ func (f *fakeGit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeGit) createTree(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Tree []*gogithub.TreeEntry `json:"tree"`
+		BaseTree string                `json:"base_tree"`
+		Tree     []*gogithub.TreeEntry `json:"tree"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	f.trees = append(f.trees, in.Tree)
+	f.bases = append(f.bases, in.BaseTree)
 	writeJSON(w, map[string]string{"sha": fmt.Sprintf("tree%d", len(f.trees))})
 }
 
@@ -264,5 +268,35 @@ func TestClient_CommitWaiting(t *testing.T) {
 	}
 	if len(git.trees) != 1 || git.trees[0][0].GetPath() != testDir+"/versions/v1.0.0/registry-1.json" {
 		t.Errorf("trees: %+v", git.trees)
+	}
+}
+
+// A tree of many entries is built a hundred at a time, each on top of the one before: GitHub
+// times out on a request writing a thousand at once.
+func TestClient_CommitEntries_incrementally(t *testing.T) {
+	t.Parallel()
+	git := &fakeGit{}
+	c := newTestClient(t, git)
+	entries := make([]*gogithub.TreeEntry, 0, 250)
+	for i := range 250 {
+		entries = append(entries, &gogithub.TreeEntry{
+			Path: new(fmt.Sprintf("pkgs/%02d/x/registry.yaml", i%100)), Mode: new("100644"), Type: new("blob"), SHA: new("abc"),
+		})
+	}
+	if err := c.CommitEntries(t.Context(), "ar2_consolidate", "parent", "feat: move", entries); err != nil {
+		t.Fatal(err)
+	}
+	sizes := make([]int, 0, len(git.trees))
+	for _, tree := range git.trees {
+		sizes = append(sizes, len(tree))
+	}
+	if diff := cmp.Diff([]int{100, 100, 50}, sizes); diff != "" {
+		t.Errorf("the trees' sizes (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"tree-of-parent", "tree1", "tree2"}, git.bases); diff != "" {
+		t.Errorf("each tree's base (-want +got):\n%s", diff)
+	}
+	if git.movedTo != "commit-of-tree3" {
+		t.Errorf("the branch was moved to %q", git.movedTo)
 	}
 }
