@@ -471,7 +471,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
 	}
 
-	if err := c.openPullRequests(ctx, logger, def, candidate.Name, generated, inFlight); err != nil {
+	if err := c.openPullRequests(ctx, logger, def, candidate.Name, generated, existing, inFlight); err != nil {
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil
@@ -482,7 +482,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 // Two of them at most: the versions that can merge go to the package's own, and the ones whose
 // entry names a file the archive doesn't hold go together to one of their own. Neither waits
 // for the other, which is the point of telling them apart.
-func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, generated []*version, inFlight map[string]struct{}) error {
+func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, generated []*version, existing map[string]struct{}, inFlight map[string]struct{}) error {
 	sound, unresolved := partition(generated)
 	if err := c.openUnresolved(ctx, logger, def, pkgName, unresolved, inFlight); err != nil {
 		return err
@@ -493,7 +493,21 @@ func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, 
 	if len(sound) == 0 {
 		return nil
 	}
-	return c.openPullRequest(ctx, logger, def, pkgName, sound)
+	return c.openPullRequest(ctx, logger, def, pkgName, sound, replacesPublished(sound, existing))
+}
+
+// replacesPublished says whether any of the versions is one the registry already serves.
+//
+// A run generates only the versions the registry is missing, so this is never true unless
+// something has gone wrong. A pull request it is true of would replace a published file, so
+// it is marked and left for a person to merge rather than set to merge itself.
+func replacesPublished(versions []*version, existing map[string]struct{}) bool {
+	for _, v := range versions {
+		if _, ok := existing[v.Version]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // reviewLostSigning leaves for review any version that can be verified with less
