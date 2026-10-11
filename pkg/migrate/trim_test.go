@@ -69,6 +69,7 @@ func TestConfig_conditionOnlyOverride(t *testing.T) {
 					{
 						GOOS:     "linux",
 						Asset:    "pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}",
+						Format:   "tar.gz",
 						Variants: []*aquaregistry.Variant{{Key: "libc", Value: "musl"}},
 					},
 				},
@@ -87,6 +88,11 @@ func TestConfig_conditionOnlyOverride(t *testing.T) {
 	// parser knows how to read, so without it the override says nothing either.
 	if got := overrides[0].Asset; got != "pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}" {
 		t.Errorf("the asset is %q, want the musl one", got)
+	}
+	// And its format: the first override that matches is the only one applied, so what
+	// is inferred for the OS elsewhere doesn't reach the asset named here.
+	if got := overrides[0].Format; got != "tar.gz" {
+		t.Errorf("the format is %q, want tar.gz", got)
 	}
 	if len(overrides[0].Variants) != 1 || overrides[0].Variants[0].Value != "musl" {
 		t.Errorf("the override matches %+v, want the musl variant", overrides[0].Variants)

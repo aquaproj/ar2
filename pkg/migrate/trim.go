@@ -213,6 +213,13 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		// against is in no asset name the parser knows how to read.
 		out.Asset = ov.Asset
 		out.URL = ov.URL
+		if ov.Asset != "" {
+			// Nor its format. aqua applies the first override that matches, so the
+			// format inferred for the OS is in another override that this one keeps
+			// from applying: UsefulSoftwareCo/executor's musl build, named with
+			// {{.Format}}, was looked for as a zip when it is a tar.gz.
+			out.Format = ov.Format
+		}
 	}
 	return out
 }
