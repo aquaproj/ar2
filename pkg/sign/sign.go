@@ -292,7 +292,7 @@ func (v *Verifier) attestation(ctx context.Context, logger *slog.Logger, asset *
 			"os", asset.OS, "arch", asset.Arch, "signer_workflow", signer)
 		gaa.SignerWorkflow2 = signer
 	}
-	cert.pin(gaa, repo)
+	cert.pin(gaa)
 	return nil
 }
 

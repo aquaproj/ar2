@@ -70,28 +70,17 @@ func (c *attestationCertificate) signer() string {
 
 // pin records on the entry what the certificate says, which aqua passes to gh attestation
 // verify: the ref and the commit the artifact was built from pin the version to that build
-// rather than only to the workflow. The repository of the workflow that signed is recorded
-// only when it isn't the artifact's own -- a reusable workflow -- since the workflow's path
-// says it otherwise.
-func (c *attestationCertificate) pin(gaa *aquaregistry.GitHubArtifactAttestations, repo string) {
+// rather than only to the workflow.
+//
+// The repository of the workflow that signed isn't recorded. The entry names the workflow,
+// whose path says the repository, a reusable workflow's included, and gh refuses
+// --signer-repo together with --signer-workflow.
+func (c *attestationCertificate) pin(gaa *aquaregistry.GitHubArtifactAttestations) {
 	gaa.SourceRef = c.SourceRepositoryRef
 	gaa.SourceDigest = c.SourceRepositoryDigest
 	gaa.CertOIDCIssuer = c.Issuer
 	gaa.DenySelfHostedRunners = c.RunnerEnvironment == "github-hosted"
 	gaa.SignerRepo = ""
-	if signer := repositoryOfWorkflow(signerWorkflow(c.signer())); signer != "" && !strings.EqualFold(signer, repo) {
-		gaa.SignerRepo = signer
-	}
-}
-
-// repositoryOfWorkflow is owner/name out of a workflow path such as
-// owner/name/.github/workflows/release.yml.
-func repositoryOfWorkflow(workflow string) string {
-	parts := strings.SplitN(workflow, "/", 3) //nolint:mnd
-	if len(parts) < 3 {                       //nolint:mnd
-		return ""
-	}
-	return parts[0] + "/" + parts[1]
 }
 
 // verifyAttestation verifies the artifact's attestation and returns the certificate it was
@@ -151,10 +140,16 @@ func attestationArgs(gaa *aquaregistry.GitHubArtifactAttestations) []string {
 	if gaa == nil {
 		return nil
 	}
+	// gh accepts only one of --signer-workflow and --signer-repo, and the workflow is the
+	// stricter of the two.
+	signerRepo := gaa.SignerRepo
+	if gaa.SignerWorkflow() != "" {
+		signerRepo = ""
+	}
 	fields := []struct{ flag, value string }{
 		{"--signer-workflow", unescape(gaa.SignerWorkflow())},
 		{"--predicate-type", gaa.PredicateType},
-		{"--signer-repo", gaa.SignerRepo},
+		{"--signer-repo", signerRepo},
 		{"--source-ref", gaa.SourceRef},
 		{"--source-digest", gaa.SourceDigest},
 		{"--cert-oidc-issuer", gaa.CertOIDCIssuer},

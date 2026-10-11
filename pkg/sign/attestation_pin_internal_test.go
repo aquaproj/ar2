@@ -21,11 +21,11 @@ func cliCertificate() *attestationCertificate {
 }
 
 // The certificate's ref, commit, issuer and runner go onto the entry, and the workflow's
-// repository only when it isn't the artifact's own.
+// repository doesn't, since the workflow names it.
 func TestAttestationCertificate_pin(t *testing.T) {
 	t.Parallel()
 	gaa := &aquaregistry.GitHubArtifactAttestations{SignerWorkflow2: "cli/cli/.github/workflows/deployment.yml"}
-	cliCertificate().pin(gaa, "cli/cli")
+	cliCertificate().pin(gaa)
 	want := &aquaregistry.GitHubArtifactAttestations{
 		SignerWorkflow2:       "cli/cli/.github/workflows/deployment.yml",
 		SourceRef:             "refs/heads/trunk",
@@ -40,9 +40,9 @@ func TestAttestationCertificate_pin(t *testing.T) {
 	reusable := cliCertificate()
 	reusable.SubjectAlternativeName = "https://github.com/taiki-e/github-actions/.github/workflows/rust-release.yml@refs/heads/main"
 	reusable.RunnerEnvironment = "self-hosted"
-	other := &aquaregistry.GitHubArtifactAttestations{}
-	reusable.pin(other, "cli/cli")
-	if other.SignerRepo != "taiki-e/github-actions" || other.DenySelfHostedRunners {
+	other := &aquaregistry.GitHubArtifactAttestations{SignerRepo: "taiki-e/github-actions"}
+	reusable.pin(other)
+	if other.SignerRepo != "" || other.DenySelfHostedRunners {
 		t.Errorf("a reusable workflow on a self-hosted runner: %+v", other)
 	}
 }
@@ -66,5 +66,11 @@ func TestAttestationArgs(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, attestationArgs(gaa)); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
+	}
+
+	// gh refuses --signer-repo with --signer-workflow, so the workflow wins.
+	gaa.SignerRepo = "cli/cli"
+	if diff := cmp.Diff(want, attestationArgs(gaa)); diff != "" {
+		t.Errorf("with signer_repo (-want +got):\n%s", diff)
 	}
 }
