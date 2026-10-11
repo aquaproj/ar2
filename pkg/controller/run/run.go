@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -637,6 +638,9 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 		Excluded:    filled.Excluded,
 	}
 	if filled.Offered == 0 {
+		if err := publishedNothing(filled); err != nil {
+			return nil, err
+		}
 		// Nothing to publish: what the file would say is that the registry holds this
 		// version for nowhere. Such a version goes to the pull request of the ones
 		// waiting for a definition, carrying what was generated for it.
@@ -644,6 +648,26 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 		v.Unresolved = filled.Unresolved
 	}
 	return v, nil
+}
+
+// errPublishedNothing is a version whose release has nothing for any environment.
+var errPublishedNothing = errors.New("the release publishes nothing for any environment")
+
+// publishedNothing says, for a version that offers no environment, whether that is because
+// the release has nothing to offer rather than because the definition can't be read
+// against what it has.
+//
+// Such a version is a release without its assets -- container-diff v0.19.0 was tagged and
+// never uploaded -- and no definition makes it installable. Going to a pull request, it
+// carried every entry without a checksum and failed every check; it is a failure to generate
+// instead, the way a release with no assets at all is, so the next run looks again in case
+// they are uploaded later. A version whose archive lacks a file the definition names is
+// different: a definition fixes that, and it still goes to the pull request waiting for one.
+func publishedNothing(filled *verify.Filled) error {
+	if len(filled.Unresolved) > 0 || len(filled.Excluded) == 0 {
+		return nil
+	}
+	return errPublishedNothing
 }
 
 // writeAll writes the generated files out instead of opening a pull request.
