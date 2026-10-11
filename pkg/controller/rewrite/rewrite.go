@@ -218,7 +218,9 @@ func body(pkgs, files int) string {
 - each versions.json is written again, since every digest changed.
 
 Nothing about a release is read again, so the checks don't download anything: `+"`ar2 rewrite --verify`"+` derives every file again from what it replaces and compares the bytes.
-`, files, pkgs)
+
+`, files, pkgs) + g2.ReplacesPublished("what the change to the form is, above: the checks already say "+
+		"that nothing else changed.")
 }
 
 // repoIDs reads the id of every package's repository.

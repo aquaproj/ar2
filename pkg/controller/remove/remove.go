@@ -238,6 +238,8 @@ func dropBody(in *Input, paths []string, stop *gogithub.PullRequest) string {
 		"that away. Where that matters -- malware -- saying so where people will read it is the part " +
 		"that reaches them.\n\n")
 	b.WriteString("The definition stays, and what was published stays readable in the history of " +
-		"the default branch, which a ruleset forbids rewriting.\n")
+		"the default branch, which a ruleset forbids rewriting.\n\n")
+	b.WriteString(g2.ReplacesPublished("the reason above, and whether it is worth breaking `aqua lock update` " +
+		"for everybody on these versions."))
 	return b.String()
 }

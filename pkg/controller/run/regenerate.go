@@ -385,7 +385,11 @@ func regenerateBody(versions []*regenerated, rel releases) string {
 	b.WriteString("\nWhat CI checks is that the new file describes the release it says it does: the assets " +
 		"download, the checksums match, the archives open and `files[].src` is inside them, and every " +
 		"signature the entry claims verifies. What it can't check is whether replacing the old file was " +
-		"right, so auto-merge is off and this needs reading. The old file is in the default branch's history.\n")
+		"right, so auto-merge is off and this needs reading. The old file is in the default branch's history.\n\n")
+	b.WriteString(g2.ReplacesPublished("the diff of each file: what changed should be what the definition " +
+		"was fixed for. An asset whose checksum changed is a release rewritten after it was published, " +
+		"which is what a lock file is there to catch, so decide whether to serve the new one rather than " +
+		"taking it because it verifies."))
 	return b.String()
 }
 
