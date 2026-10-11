@@ -62,6 +62,9 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		NoAsset: pkgInfo.NoAsset,
 		Vars:    pkgInfo.Vars,
 		Build:   pkgInfo.Build,
+		// Which environments the package is for. A release can publish an asset for one
+		// that doesn't hold the package, which its asset names don't say.
+		SupportedEnvs: pkgInfo.SupportedEnvs,
 	}
 	trimmed.VersionOverrides = make([]*aquaregistry.VersionOverride, 0, len(pkgInfo.VersionOverrides))
 	for _, vo := range pkgInfo.VersionOverrides {
@@ -95,10 +98,11 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		AppendExt:    vo.AppendExt,
 		WindowsExt:   vo.WindowsExt,
 
-		NoAsset:      vo.NoAsset,
-		ErrorMessage: vo.ErrorMessage,
-		Vars:         vo.Vars,
-		Build:        vo.Build,
+		NoAsset:       vo.NoAsset,
+		ErrorMessage:  vo.ErrorMessage,
+		Vars:          vo.Vars,
+		Build:         vo.Build,
+		SupportedEnvs: vo.SupportedEnvs,
 	}
 }
 
