@@ -181,3 +181,42 @@ func TestConfig_alwaysNamesThePackage(t *testing.T) {
 		})
 	}
 }
+
+// supported_envs is kept: a release can publish an asset for an environment that doesn't
+// hold the package, which its asset names don't say. kcp-dev/kcp's Windows archives hold
+// only its kubectl plugins.
+func TestConfig_supportedEnvs(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("kcp-dev/kcp", &aquaregistry.PackageInfo{
+		Type:          "github_release",
+		RepoOwner:     "kcp-dev",
+		RepoName:      "kcp",
+		Asset:         "kcp_{{trimV .Version}}_{{.OS}}_{{.Arch}}.{{.Format}}",
+		Format:        "tar.gz",
+		SupportedEnvs: []string{"darwin", "linux"},
+	}, nil)
+	if diff := cmp.Diff(aquaregistry.SupportedEnvs{"darwin", "linux"}, cfg.SupportedEnvs); diff != "" {
+		t.Errorf("supported_envs (-want +got):\n%s", diff)
+	}
+
+	cfg, _ = migrate.Config("kcp-dev/kcp", &aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "kcp-dev",
+		RepoName:           "kcp",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{
+				VersionConstraints: "true",
+				Asset:              "kcp_{{trimV .Version}}_{{.OS}}_{{.Arch}}.{{.Format}}",
+				Format:             "tar.gz",
+				SupportedEnvs:      []string{"linux"},
+			},
+		},
+	}, nil)
+	if len(cfg.VersionOverrides) == 0 {
+		t.Fatal("got no version_overrides")
+	}
+	if diff := cmp.Diff(aquaregistry.SupportedEnvs{"linux"}, cfg.VersionOverrides[0].SupportedEnvs); diff != "" {
+		t.Errorf("the version override's supported_envs (-want +got):\n%s", diff)
+	}
+}
