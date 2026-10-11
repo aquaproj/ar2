@@ -52,6 +52,17 @@ func TestDownloadURL(t *testing.T) { //nolint:funlen
 			exp:   "https://gitlab.com/gitlab-org/security/cli/-/releases/v2.1.0/downloads/packages/rpm/glab%20riscv64.rpm",
 		},
 		{
+			// A file of the repository isn't a release asset: it is served at the tag.
+			title: "a file of a GitHub repository",
+			asset: &generate.Asset{Type: "github_content", RepoOwner: "goss-org", RepoName: "goss", Path: "extras/kgoss/kgoss", Asset: "extras/kgoss/kgoss"},
+			exp:   "https://raw.githubusercontent.com/goss-org/goss/v2.1.0/extras/kgoss/kgoss",
+		},
+		{
+			title: "the archive of a GitHub repository",
+			asset: &generate.Asset{Type: "github_archive", RepoOwner: "cli", RepoName: "cli"},
+			exp:   "https://github.com/cli/cli/archive/refs/tags/v2.1.0.tar.gz",
+		},
+		{
 			title: "nothing to download from",
 			asset: &generate.Asset{Type: "github_release", RepoOwner: "cli"},
 			isErr: true,

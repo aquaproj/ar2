@@ -467,9 +467,15 @@ func executable(d fs.DirEntry) bool {
 // The Gitea family serves a release asset at the path GitHub does, so for those the entry
 // needs to say nothing but which instance; GitLab serves it at its permanent release
 // link, which is a path of its own.
+//
+// A file of the repository and the repository's archive aren't release assets, and are
+// downloaded from where aqua downloads them.
 func downloadURL(version string, asset *generate.Asset) (string, error) {
 	if asset.URL != "" {
 		return asset.URL, nil
+	}
+	if u, ok, err := repositoryURL(version, asset); ok {
+		return u, err
 	}
 	if asset.RepoOwner == "" || asset.RepoName == "" || asset.Asset == "" {
 		return "", errNoDownloadURL
@@ -490,6 +496,26 @@ func downloadURL(version string, asset *generate.Asset) (string, error) {
 	}
 	return fmt.Sprintf("https://%s/%s/%s/releases/download/%s/%s",
 		host, asset.RepoOwner, asset.RepoName, version, asset.Asset), nil
+}
+
+// repositoryURL returns where a file of the repository or the repository's archive is
+// downloaded from, and false for any other type.
+func repositoryURL(version string, asset *generate.Asset) (string, bool, error) {
+	switch asset.Type {
+	case aquaregistry.PkgInfoTypeGitHubContent:
+		if asset.RepoOwner == "" || asset.RepoName == "" || asset.Path == "" {
+			return "", true, errNoDownloadURL
+		}
+		return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s",
+			asset.RepoOwner, asset.RepoName, url.PathEscape(version), escapePath(asset.Path)), true, nil
+	case aquaregistry.PkgInfoTypeGitHubArchive:
+		if asset.RepoOwner == "" || asset.RepoName == "" {
+			return "", true, errNoDownloadURL
+		}
+		return fmt.Sprintf("https://github.com/%s/%s/archive/refs/tags/%s.tar.gz",
+			asset.RepoOwner, asset.RepoName, url.PathEscape(version)), true, nil
+	}
+	return "", false, nil
 }
 
 // escapePath escapes each segment of a path, keeping the separators between them.
