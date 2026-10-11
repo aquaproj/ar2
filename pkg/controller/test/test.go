@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/verify"
@@ -262,14 +263,21 @@ func downloadable(typ string) bool {
 	}
 }
 
-// versionFromPath reads the version out of versions/<version>/registry-1.json, which is
-// where a package's directory keeps it. The file doesn't hold the version: it is the
-// directory's name, so that one version is one directory and a commit touches nothing
+// versionFromPath reads the version out of versions/<escaped version>/registry-1.json,
+// which is where a package's directory keeps it. The file doesn't hold the version: it is
+// the directory's name, so that one version is one directory and a commit touches nothing
 // else.
+//
+// The name is escaped, so it is decoded: @biomejs/biome@2.5.10 is the directory
+// _40biomejs_2fbiome_402.5.10, and the tag is what the asset's URL is built from.
 func versionFromPath(path string) string {
 	dir := filepath.Dir(path)
 	if filepath.Base(filepath.Dir(dir)) != "versions" {
 		return ""
 	}
-	return filepath.Base(dir)
+	escaped := filepath.Base(dir)
+	if version, ok := aquag2.DecodeVersion(escaped); ok {
+		return version
+	}
+	return escaped
 }

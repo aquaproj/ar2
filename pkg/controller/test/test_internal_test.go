@@ -35,6 +35,13 @@ func TestVersionFromPath(t *testing.T) {
 			exp:  "cli-v1.0.0",
 		},
 		{
+			// The directory is the escaped version, and the tag is what the asset's
+			// URL is built from.
+			name: "an escaped version",
+			path: "pkgs/50/1790772750/versions/_40biomejs_2fbiome_402.5.10/registry-1.json",
+			exp:  "@biomejs/biome@2.5.10",
+		},
+		{
 			name: "not under versions",
 			path: "registry.json",
 		},

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/aquaproj/aqua/v2/pkg/checksum"
@@ -47,6 +48,9 @@ type Verifier struct {
 	slsa          *slsa.Verifier
 	minisign      *minisign.Verifier
 	ghattestation *ghattestation.Verifier
+	// dropUnattested says an attestation GitHub doesn't hold is taken off the entry
+	// rather than failing it. See DropUnattested.
+	dropUnattested bool
 
 	// installer puts the tools where the verifiers look for them, and rt is the
 	// host they are chosen for.
@@ -110,6 +114,21 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 			toolGH:       {pkg: ghattestation.Package, checksums: ghattestation.Checksums()},
 		},
 	}, nil
+}
+
+// DropUnattested makes an attestation GitHub doesn't hold come off the entry, rather than
+// fail it. It is for generating.
+//
+// A definition says a package is attested for every version unless an override says
+// otherwise, and the versions before a release started being attested don't override it.
+// Failing the entry there stopped everything checked after the signatures -- the archive's
+// files, the libc its executables need -- and the attestation came off later anyway, when
+// GitHub was asked whether it holds one: FiloSottile/age v1.2.1 lost linked_libc that way.
+//
+// The registry's own check of a generated file doesn't do this. A file saying it is attested
+// when it isn't is what that check is for.
+func (v *Verifier) DropUnattested() {
+	v.dropUnattested = true
 }
 
 // Check verifies every signature the asset's entry carries against the file at path,
@@ -241,6 +260,12 @@ func (v *Verifier) attestation(ctx context.Context, logger *slog.Logger, asset *
 	gaa := asset.GitHubArtifactAttestations
 	cert, err := v.verifyAttestation(ctx, repo, path, gaa)
 	if err != nil {
+		if v.dropUnattested && notAttested(err) {
+			logger.Warn("the release isn't attested, so the entry doesn't say it is",
+				"os", asset.OS, "arch", asset.Arch)
+			asset.GitHubArtifactAttestations = nil
+			return nil
+		}
 		return err
 	}
 	if gaa.SignerWorkflow() == "" {
@@ -337,4 +362,12 @@ func (v *Verifier) make(ctx context.Context, logger *slog.Logger, c *check, fail
 	if err := c.verify(); err != nil {
 		failed.note(c.kind, err)
 	}
+}
+
+// notAttested reports whether gh failed because GitHub holds no attestation for the
+// artifact, rather than because one didn't verify.
+func notAttested(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "no attestations found") ||
+		(strings.Contains(msg, "HTTP 404") && strings.Contains(msg, "/attestations/"))
 }

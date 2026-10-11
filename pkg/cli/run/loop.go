@@ -128,6 +128,9 @@ func verifier(ctx context.Context, logger *slogutil.Logger, httpClient *http.Cli
 	if err != nil {
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
+	// Generating: an attestation the release doesn't have comes off the entry rather
+	// than stopping its files from being checked.
+	signatures.DropUnattested()
 	return verify.New(http.DefaultClient, signatures), nil
 }
 
