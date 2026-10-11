@@ -6,18 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/show"
 	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"golang.org/x/oauth2"
 )
 
 // errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -48,7 +49,8 @@ A name the package used to have answers too, because that is often the name in h
 It reads the catalogue and nothing else, so it costs one request and says nothing about
 which versions the registry holds.
 
-The GitHub access token is read from the GITHUB_TOKEN environment variable.`,
+The GitHub access token is read from the GITHUB_TOKEN environment variable, or from
+ghtkn when it isn't set.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, queries []string) error {
 			return action(cmd.Context(), logger, args, cmd.OutOrStdout(), queries[0])
@@ -65,11 +67,15 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, out io.Wri
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	httpClient := oauth2.NewClient(ctx, ts)
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}

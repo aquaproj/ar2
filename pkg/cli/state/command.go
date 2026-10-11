@@ -54,8 +54,9 @@ has ever been walked.
 
 $ ar2 state cli/cli suzuki-shunsuke/ghalint
 
-It only reads, so unlike everything else here it runs from a laptop: GITHUB_TOKEN with
-access to the container registry is enough. --state reads a local file instead.`,
+It only reads, so unlike everything else here it runs from a laptop: a token with
+access to the container registry is enough, from GITHUB_TOKEN or, when it isn't set,
+from ghtkn. --state reads a local file instead.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, names []string) error {
 			return action(cmd.Context(), logger, args, cmd.OutOrStdout(), names)

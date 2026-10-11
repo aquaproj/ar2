@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aquaproj/ar2/pkg/cli/token"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 )
@@ -38,7 +39,11 @@ func Read(ctx context.Context, logger *slogutil.Logger, flags *state.Flags, path
 	}
 	logger.Info("pulling the state from the container registry",
 		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
-	s, err := state.Fetch(ctx, reg, os.Getenv("GITHUB_TOKEN"))
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the error already says what failed
+	}
+	s, err := state.Fetch(ctx, reg, ts)
 	if err == nil {
 		return s, nil
 	}
@@ -64,7 +69,11 @@ func Write(ctx context.Context, logger *slogutil.Logger, flags *state.Flags, pat
 	}
 	logger.Info("pushing the state to the container registry",
 		"registry", reg.Registry, "repository", reg.Repository, "tag", state.Tag)
-	if err := state.Store(ctx, reg, os.Getenv("GITHUB_TOKEN"), s); err != nil {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if err := state.Store(ctx, reg, ts, s); err != nil {
 		return fmt.Errorf("push the state: %w", err)
 	}
 	return nil

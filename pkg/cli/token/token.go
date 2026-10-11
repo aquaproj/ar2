@@ -1,6 +1,7 @@
-// Package token builds the GitHub clients ar2 uses beside the ordinary one.
+// Package token finds the token of the ordinary GitHub client and builds the clients
+// ar2 uses beside it.
 //
-// Both are GitHub App installation tokens, and both exist because of something the
+// The ones beside it are GitHub App installation tokens, and both exist because of something the
 // repository's own GITHUB_TOKEN can't do. Neither is required: without them the
 // ordinary client is used, which is what a local run does and what works in a
 // repository with no rulesets.
@@ -9,12 +10,38 @@ package token
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 
 	gogithub "github.com/google/go-github/v92/github"
+	"github.com/suzuki-shunsuke/ghtkn-go-sdk/ghtkn"
 	"golang.org/x/oauth2"
 )
+
+// GitHub returns the token source the ordinary client uses, or nil when there is none.
+//
+// GITHUB_TOKEN wins. Without it the token comes from ghtkn when ghtkn is set up, so
+// a local run needs no token in the environment. ghtkn is only asked for a token when
+// a request needs one, and it never starts the device flow: a token that has to be
+// authenticated again is an error naming 'ghtkn auth'.
+func GitHub(logger *slog.Logger) (oauth2.TokenSource, error) {
+	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: t}), nil
+	}
+	enabled, err := ghtkn.Enabled(nil)
+	if err != nil {
+		return nil, fmt.Errorf("check if ghtkn is enabled: %w", err)
+	}
+	if !enabled {
+		return nil, nil //nolint:nilnil // no token is what the caller decides about
+	}
+	client, err := ghtkn.New()
+	if err != nil {
+		return nil, fmt.Errorf("create a ghtkn client: %w", err)
+	}
+	return client.TokenSource(logger, &ghtkn.InputGet{}), nil
+}
 
 // PREnv holds the token that commits to the head branches and opens the pull
 // requests.

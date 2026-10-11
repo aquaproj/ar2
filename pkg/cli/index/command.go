@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/identities"
@@ -20,7 +19,7 @@ import (
 )
 
 // errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -75,7 +74,8 @@ catalogue, or an orphan -- and that is somebody's decision rather than this comm
 The update goes into one pull request, and a run finding one already open adds to it
 rather than opening another.
 
-The GitHub access token is read from the GITHUB_TOKEN environment variable.`,
+The GitHub access token is read from the GITHUB_TOKEN environment variable, or from
+ghtkn when it isn't set.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, pkgNames []string) error {
 			return action(cmd.Context(), logger, args, pkgNames)
@@ -92,11 +92,15 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	httpClient := oauth2.NewClient(ctx, ts)
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
@@ -108,7 +112,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 
 	// Auto-merge is turned on with the ordinary token: it needs the pull request the
 	// app just opened, not the app.
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	graphql := github.NewClient(httpClient)
 
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)

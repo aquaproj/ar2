@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/token"
@@ -14,10 +13,11 @@ import (
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
+	"golang.org/x/oauth2"
 )
 
 // errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -46,8 +46,8 @@ Each package's registry.yaml, versions.json and versions/ are copied as the obje
 branch already holds, by their sha: nothing is uploaded, and what every version serves
 is the same bytes it served from the branch. Running it again writes the same tree.
 
-Two tokens are read from the environment. GITHUB_TOKEN reads the repository, and
-AR2_PR_TOKEN commits and opens the pull request.`,
+Two tokens are used. GITHUB_TOKEN reads the repository, or ghtkn when GITHUB_TOKEN
+isn't set, and AR2_PR_TOKEN commits and opens the pull request.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return action(cmd.Context(), logger, args)
@@ -64,11 +64,15 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	httpClient := oauth2.NewClient(ctx, ts)
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}

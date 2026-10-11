@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/oauth2"
 	"oras.land/oras-go/v2/errdef"
 )
 
@@ -48,8 +49,8 @@ func (f *Flags) Resolve() (*Registry, error) {
 var ErrNotFound = errors.New("the container registry holds no state")
 
 // Store writes the state to the container registry.
-func Store(ctx context.Context, reg *Registry, token string, s *State) error {
-	repo, err := NewRepository(reg, token)
+func Store(ctx context.Context, reg *Registry, ts oauth2.TokenSource, s *State) error {
+	repo, err := NewRepository(reg, ts)
 	if err != nil {
 		return err
 	}
@@ -67,8 +68,8 @@ func Store(ctx context.Context, reg *Registry, token string, s *State) error {
 
 // Fetch pulls the state from the container registry and reads it.
 // It returns ErrNotFound when there is none.
-func Fetch(ctx context.Context, reg *Registry, token string) (*State, error) {
-	repo, err := NewRepository(reg, token)
+func Fetch(ctx context.Context, reg *Registry, ts oauth2.TokenSource) (*State, error) {
+	repo, err := NewRepository(reg, ts)
 	if err != nil {
 		return nil, err
 	}

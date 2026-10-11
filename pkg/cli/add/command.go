@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/identities"
@@ -21,7 +20,7 @@ import (
 )
 
 // errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -81,8 +80,8 @@ The pull request carrying the definition is never set to auto-merge. It carries 
 generated file, so CI has nothing to check, and the definition is the one thing a person
 writes.
 
-The access token is read from GITHUB_TOKEN, and the state from the container registry
-unless --state names a file. Committing needs AR2_PR_TOKEN, the same as a run.`,
+The access token is read from GITHUB_TOKEN, or from ghtkn when it isn't set, and the
+state from the container registry unless --state names a file. Committing needs AR2_PR_TOKEN, the same as a run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0])
@@ -105,11 +104,15 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	httpClient := oauth2.NewClient(ctx, ts)
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
@@ -123,7 +126,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 		return err //nolint:wrapcheck
 	}
 
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return err //nolint:wrapcheck

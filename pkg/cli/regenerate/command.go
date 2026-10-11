@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
@@ -26,7 +25,7 @@ import (
 )
 
 // errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -86,8 +85,8 @@ $ ar2 regenerate ogham/exa --pending
 Nothing else about it changes. Only the versions whose file actually changes are committed, so
 a definition that didn't help comes to nothing and says so.
 
-Two tokens are read from the environment. GITHUB_TOKEN reads the repositories, and
-AR2_PR_TOKEN commits and opens the pull request.`,
+Two tokens are used. GITHUB_TOKEN reads the repositories, or ghtkn when GITHUB_TOKEN
+isn't set, and AR2_PR_TOKEN commits and opens the pull request.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0], as[1:])
@@ -112,15 +111,18 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	httpClient := oauth2.NewClient(ctx, ts)
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 
 	c, err := controller(ctx, logger, gh, httpClient, args)
 	if err != nil {

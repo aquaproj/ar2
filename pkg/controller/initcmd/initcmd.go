@@ -18,6 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/state"
 	gogithub "github.com/google/go-github/v92/github"
+	"golang.org/x/oauth2"
 )
 
 // Controller runs 'ar2 init'.
@@ -43,8 +44,8 @@ func New(gh *gogithub.Client, graphql *github.Client) *Controller {
 type Input struct {
 	// RegistryRef is the aqua-registry ref the package list is read from.
 	RegistryRef string
-	// GitHubToken authenticates the push to the container registry.
-	GitHubToken string
+	// TokenSource authenticates the push to the container registry.
+	TokenSource oauth2.TokenSource
 	// Registry describes where the state artifact is pushed.
 	Registry *state.Registry
 	// Output writes the state to this path instead of pushing it. For debugging.
@@ -146,7 +147,7 @@ func (c *Controller) push(ctx context.Context, logger *slog.Logger, input *Input
 		return fmt.Errorf("write the state: %w", err)
 	}
 
-	repo, err := state.NewRepository(input.Registry, input.GitHubToken)
+	repo, err := state.NewRepository(input.Registry, input.TokenSource)
 	if err != nil {
 		return fmt.Errorf("create a client for the container registry: %w", err)
 	}
