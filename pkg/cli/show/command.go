@@ -3,7 +3,6 @@ package show
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 
@@ -16,9 +15,6 @@ import (
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"golang.org/x/oauth2"
 )
-
-// errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -50,7 +46,8 @@ It reads the catalogue and nothing else, so it costs one request and says nothin
 which versions the registry holds.
 
 The GitHub access token is read from the GITHUB_TOKEN environment variable, or from
-ghtkn when it isn't set.`,
+ghtkn when it isn't set. Neither is required: the catalogue is a file of a public
+repository, which GitHub serves without one, at a lower rate limit.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, queries []string) error {
 			return action(cmd.Context(), logger, args, cmd.OutOrStdout(), queries[0])
@@ -71,11 +68,11 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, out io.Wri
 	if err != nil {
 		return err //nolint:wrapcheck // the error already says what failed
 	}
-	if ts == nil {
-		return errTokenRequired
+	var opts []gogithub.ClientOptionsFunc
+	if ts != nil {
+		opts = append(opts, gogithub.WithHTTPClient(oauth2.NewClient(ctx, ts)))
 	}
-	httpClient := oauth2.NewClient(ctx, ts)
-	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
+	gh, err := gogithub.NewClient(opts...)
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
