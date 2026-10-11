@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/token"
@@ -19,7 +18,7 @@ import (
 )
 
 var (
-	errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+	errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 	errRefsRequired  = errors.New("--verify needs --base and --head")
 )
 
@@ -55,7 +54,8 @@ again rather than by downloading every asset:
 
 $ ar2 rewrite --verify --base <base sha> --head <head sha>
 
-GITHUB_TOKEN reads the repository, and AR2_PR_TOKEN commits and opens the pull request.`,
+GITHUB_TOKEN reads the repository, or ghtkn when GITHUB_TOKEN isn't set, and
+AR2_PR_TOKEN commits and opens the pull request.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return action(cmd.Context(), logger, args)
@@ -75,11 +75,14 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
+	httpClient := oauth2.NewClient(ctx, ts)
 	graphql := github.NewClient(httpClient)
 	repo := graphql.Repository(args.G2Owner, args.G2Repo)
 	if args.Verify {
@@ -88,7 +91,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		}
 		return ctrl.New(repo, graphql, nil).Verify(ctx, logger.Logger, args.Base, args.Head) //nolint:wrapcheck
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}

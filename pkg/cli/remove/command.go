@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/identities"
@@ -19,7 +18,7 @@ import (
 )
 
 // errTokenRequired is returned when no access token is available.
-var errTokenRequired = errors.New("the environment variable GITHUB_TOKEN is required")
+var errTokenRequired = errors.New("a GitHub access token is required: set GITHUB_TOKEN or set up ghtkn")
 
 // Args holds the command's flags.
 type Args struct {
@@ -60,8 +59,8 @@ What this cannot reach is a lock file. One that already holds the package carrie
 and the checksum of every file it needs, and nothing here takes that away. Where that
 matters, saying so where people will read it is the part that reaches them.
 
-Two tokens are read from the environment: GITHUB_TOKEN reads the repository, and
-AR2_PR_TOKEN commits and opens the pull requests.`,
+Two tokens are used: GITHUB_TOKEN reads the repository, or ghtkn when GITHUB_TOKEN
+isn't set, and AR2_PR_TOKEN commits and opens the pull requests.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, as []string) error {
 			return action(cmd.Context(), logger, args, as[0])
@@ -79,11 +78,15 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ghToken := os.Getenv("GITHUB_TOKEN")
-	if ghToken == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(ghToken))
+	httpClient := oauth2.NewClient(ctx, ts)
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
@@ -94,7 +97,6 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgName st
 
 	// No branch token: a package being removed is one the registry holds, so every
 	// branch this touches is already there.
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken}))
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if _, _, err := identities.Read(ctx, logger.Logger, registry, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return err //nolint:wrapcheck

@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/expr"
+	"github.com/aquaproj/ar2/pkg/cli/token"
 	"github.com/aquaproj/ar2/pkg/migrate"
 	"github.com/expr-lang/expr/vm"
 	gogithub "github.com/google/go-github/v92/github"
+	"golang.org/x/oauth2"
 )
 
 // releasesRead is how far back the comparison goes. A package that resolved the same
@@ -34,11 +35,19 @@ func realTags(w io.Writer, root string, packages []string) error {
 	for _, p := range packages {
 		wanted[p] = struct{}{}
 	}
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(os.Getenv("GITHUB_TOKEN")))
+	ctx := context.Background()
+	ts, err := token.GitHub(slog.Default())
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	var opts []gogithub.ClientOptionsFunc
+	if ts != nil {
+		opts = append(opts, gogithub.WithHTTPClient(oauth2.NewClient(ctx, ts)))
+	}
+	gh, err := gogithub.NewClient(opts...)
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
-	ctx := context.Background()
 	differ := 0
 
 	if err := walkPackages(root, func(src *aquaregistry.PackageInfo) {

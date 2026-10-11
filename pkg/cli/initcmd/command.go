@@ -4,9 +4,9 @@ package initcmd
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/aquaproj/ar2/pkg/cli/flag"
+	"github.com/aquaproj/ar2/pkg/cli/token"
 	"github.com/aquaproj/ar2/pkg/controller/initcmd"
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
@@ -51,7 +51,8 @@ of each package's GitHub repository, and pushes the result to the container regi
 The star count decides the order in which packages are processed, because the whole
 registry can't be generated in one run.
 
-The GitHub access token is read from the GITHUB_TOKEN environment variable.
+The GitHub access token is read from the GITHUB_TOKEN environment variable, or from
+ghtkn when it isn't set.
 The container registry repository defaults to the GITHUB_REPOSITORY environment
 variable, which GitHub Actions sets.
 
@@ -76,10 +77,14 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return fmt.Errorf("set log level: %w", err)
 	}
 
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
+	ts, err := token.GitHub(logger.Logger)
+	if err != nil {
+		return err //nolint:wrapcheck // the error already says what failed
+	}
+	if ts == nil {
 		return errTokenRequired
 	}
+	httpClient := oauth2.NewClient(ctx, ts)
 
 	// The destination is resolved even with --output so that a misconfiguration is
 	// reported the same way either way.
@@ -88,15 +93,14 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 		return fmt.Errorf("resolve the container registry: %w", err)
 	}
 
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
-	gh, err := gogithub.NewClient(gogithub.WithAuthToken(token))
+	gh, err := gogithub.NewClient(gogithub.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("create a GitHub client: %w", err)
 	}
 	ctrl := initcmd.New(gh, github.NewClient(httpClient))
 	return ctrl.Init(ctx, logger.Logger, &initcmd.Input{ //nolint:wrapcheck
 		RegistryRef: args.RegistryRef,
-		GitHubToken: token,
+		TokenSource: ts,
 		Registry:    reg,
 		Output:      args.Output,
 	})

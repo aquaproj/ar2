@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/oauth2"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"
@@ -28,18 +29,36 @@ const (
 )
 
 // NewRepository creates a client for the remote OCI repository.
-func NewRepository(reg *Registry, token string) (*remote.Repository, error) {
+//
+// The token is taken from ts only when the registry asks for credentials. ts may be
+// nil, which sends no password.
+func NewRepository(reg *Registry, ts oauth2.TokenSource) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(reg.Registry + "/" + reg.Repository)
 	if err != nil {
 		return nil, fmt.Errorf("create a client for a remote repository: %w", err)
 	}
+	if ts != nil {
+		ts = oauth2.ReuseTokenSource(nil, ts)
+	}
 	repo.Client = &auth.Client{
 		Client: retry.DefaultClient,
 		Cache:  auth.DefaultCache,
-		Credential: auth.StaticCredential(reg.Registry, auth.Credential{
-			Username: reg.Username,
-			Password: token,
-		}),
+		Credential: func(_ context.Context, hostport string) (auth.Credential, error) {
+			if hostport != reg.Registry {
+				return auth.EmptyCredential, nil
+			}
+			if ts == nil {
+				return auth.Credential{Username: reg.Username}, nil
+			}
+			t, err := ts.Token()
+			if err != nil {
+				return auth.EmptyCredential, fmt.Errorf("get a GitHub access token: %w", err)
+			}
+			return auth.Credential{
+				Username: reg.Username,
+				Password: t.AccessToken,
+			}, nil
+		},
 	}
 	return repo, nil
 }
