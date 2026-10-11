@@ -146,6 +146,32 @@ func assetFileName(url string, asset *generate.Asset) string {
 	return filepath.Base(url)
 }
 
+// VerifySignatures downloads the asset and checks the signatures its entry claims, without
+// extracting it, and returns the asset's checksum. It is for an asset this machine can't
+// open.
+func (v *Verifier) VerifySignatures(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (string, error) {
+	url, err := downloadURL(version, asset)
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp("", "ar2-signatures")
+	if err != nil {
+		return "", fmt.Errorf("create a temporary directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, assetFileName(url, asset))
+	logger.Debug("downloading an asset to check its signatures", "url", url)
+	checksum, err := v.download(ctx, url, path)
+	if err != nil {
+		return "", err
+	}
+	if err := v.signatures.Check(ctx, logger, pkgName, version, asset, path); err != nil {
+		return "", err //nolint:wrapcheck // it already names the signature and why
+	}
+	return checksum, nil
+}
+
 // Verify downloads the asset, extracts it, and resolves its files against the
 // archive's actual contents.
 func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset) (*Result, error) {
