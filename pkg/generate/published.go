@@ -41,12 +41,29 @@ func dropUnpublished(logger *slog.Logger, reg *Registry, assetNames map[string]s
 				"asset", asset.Asset, "signature", *m.Asset)
 			asset.Minisign = nil
 		}
+		if !packslipPublished(assetNames, asset) {
+			logger.Warn("the release doesn't carry the packslip bundle the definition says it does",
+				"asset", asset.Asset)
+			asset.Packslip = nil
+		}
 		if c := asset.Cosign; c != nil && !cosignPublished(assetNames, c) {
 			logger.Warn("the release doesn't carry the file the definition's Cosign configuration names",
 				"asset", asset.Asset)
 			asset.Cosign = nil
 		}
 	}
+}
+
+// packslipPublished reports whether the release carries the packslip bundle the entry is
+// verified with. A bundle at a URL of its own is somewhere this asset list says nothing
+// about.
+func packslipPublished(assetNames map[string]struct{}, asset *Asset) bool {
+	p := asset.Packslip
+	if p == nil || p.URL != nil || !enabled(p.Enabled) || asset.Type != aquaregistry.PkgInfoTypeGitHubRelease {
+		return true
+	}
+	_, ok := assetNames[aquaregistry.BundleAssetPackslip]
+	return ok
 }
 
 // cosignPublished reports whether the release carries every file the Cosign configuration

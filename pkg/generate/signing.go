@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -51,7 +52,91 @@ func (g *Generator) inferSigning(ctx context.Context, logger *slog.Logger, input
 		}
 		asset.Cosign = g.heldToTheSigner(ctx, logger, owner, name, input.Version, cosign)
 	}
+	g.inferPackslip(ctx, logger, owner, name, input.Version, reg, assetNames)
 	return nil
+}
+
+// inferPackslip records, on each entry the release's packslip bundle covers, who signed the
+// bundle.
+//
+// packslip publishes one signed bundle for the whole release, packslip.sigstore.json, which
+// records the digests of its artifacts. aqua gr pins the signer to a workflow of the
+// package's own repository, as an identity prefix. The bundle is a few kilobytes and says
+// who signed it, so the signer is read rather than assumed: the identity, ref included, and
+// the issuer that vouched for it. Every entry of the release shares the one bundle, so it is
+// read once.
+//
+// A definition saying whom to trust wins, as it does for cosign. A bundle that can't be read
+// leaves aqua gr's prefix, for the verification that follows to decide. A bundle signed with
+// a key has no identity, and nothing in the release says which key, so an entry pinned to
+// nothing would be no check: it gets no packslip unless the definition names the key.
+func (g *Generator) inferPackslip(ctx context.Context, logger *slog.Logger, owner, name, version string, reg *Registry, assetNames map[string]struct{}) {
+	if _, ok := assetNames[aquaregistry.BundleAssetPackslip]; !ok {
+		return
+	}
+	url := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
+		owner, name, pathEscape(version), aquaregistry.BundleAssetPackslip)
+	signer, err := readSigner(ctx, g.httpClient, url)
+	if err != nil {
+		logger.Warn("failed to read who signed the packslip bundle", "bundle", url, "error", err.Error())
+		signer = nil
+	}
+	for _, asset := range reg.Assets {
+		if !inRelease(asset, owner, name) {
+			continue
+		}
+		ps := asset.Packslip
+		if ps == nil {
+			ps = &aquaregistry.Packslip{}
+		}
+		if !enabled(ps.Enabled) {
+			continue
+		}
+		asset.Packslip = heldToPackslip(logger, ps, signer, owner, name)
+	}
+}
+
+// heldToPackslip is the entry's packslip configuration, held to the bundle's signer when the
+// definition doesn't say whom to trust.
+func heldToPackslip(logger *slog.Logger, ps *aquaregistry.Packslip, s *signer, owner, name string) *aquaregistry.Packslip {
+	if ps.Identity != "" || ps.PublicKey != "" || ps.Pin != "" {
+		return ps
+	}
+	switch {
+	case s == nil:
+		if ps.IdentityPrefix == "" {
+			ps.IdentityPrefix = fmt.Sprintf("https://github.com/%s/%s/", owner, name)
+		}
+		if ps.Issuer == "" {
+			ps.Issuer = issuerOrGitHub("")
+		}
+		return ps
+	case s.Identity == "":
+		if ps.IdentityPrefix != "" {
+			return ps
+		}
+		logger.Warn("the release signs its packslip bundle with a key rather than with an identity, which only a definition can name")
+		return nil
+	}
+	ps.Identity = s.Identity
+	ps.IdentityPrefix = ""
+	ps.Issuer = issuerOrGitHub(s.Issuer)
+	return ps
+}
+
+// inRelease reports whether the entry downloads an asset of the package's own release on
+// GitHub, which is the release whose packslip bundle covers it.
+func inRelease(asset *Asset, owner, name string) bool {
+	if asset.Type != aquaregistry.PkgInfoTypeGitHubRelease || asset.Host != "" || asset.Asset == "" {
+		return false
+	}
+	return (asset.RepoOwner == "" || strings.EqualFold(asset.RepoOwner, owner)) &&
+		(asset.RepoName == "" || strings.EqualFold(asset.RepoName, name))
+}
+
+// pathEscape escapes a tag for a release download URL's path.
+func pathEscape(tag string) string {
+	return url.PathEscape(tag)
 }
 
 // heldToTheSigner replaces what the inference assumed about the signer with what the

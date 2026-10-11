@@ -51,6 +51,7 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		Cosign:                     pkgInfo.Cosign,
 		SLSAProvenance:             pkgInfo.SLSAProvenance,
 		Minisign:                   pkgInfo.Minisign,
+		Packslip:                   pkgInfo.Packslip,
 		GitHubArtifactAttestations: Attestations(pkgInfo.GitHubArtifactAttestations),
 
 		Format:       correctedFormat(pkgInfo.Asset, pkgInfo.Format),
@@ -86,6 +87,7 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		Cosign:                     vo.Cosign,
 		SLSAProvenance:             vo.SLSAProvenance,
 		Minisign:                   vo.Minisign,
+		Packslip:                   vo.Packslip,
 		GitHubArtifactAttestations: Attestations(vo.GitHubArtifactAttestations),
 
 		Format:       correctedFormat(asset, vo.Format),
@@ -175,7 +177,7 @@ func keepOverrides(overrides []*aquaregistry.Override, parentAsset string) []*aq
 // saying what it matches.
 func saysSomething(ov *aquaregistry.Override) bool {
 	if len(ov.Files) != 0 || ov.Cosign != nil || ov.SLSAProvenance != nil ||
-		ov.Minisign != nil || ov.GitHubArtifactAttestations != nil {
+		ov.Minisign != nil || ov.Packslip != nil || ov.GitHubArtifactAttestations != nil {
 		return true
 	}
 	// A variant's asset, which the release's asset list can't be read for.
@@ -197,6 +199,7 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		Cosign:                     ov.Cosign,
 		SLSAProvenance:             ov.SLSAProvenance,
 		Minisign:                   ov.Minisign,
+		Packslip:                   ov.Packslip,
 		GitHubArtifactAttestations: Attestations(ov.GitHubArtifactAttestations),
 
 		Format:       correctedFormat(asset, ov.Format),

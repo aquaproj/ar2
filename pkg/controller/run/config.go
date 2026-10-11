@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -182,6 +183,13 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 			cfg.Cosign = cosign
 		}
 	}
+	if cfg.Packslip == nil {
+		if ps := observedPackslip(versions); ps != nil {
+			logger.Info("recording who signs the package's packslip bundle", "package", pkgName,
+				"identity_prefix", ps.IdentityPrefix)
+			cfg.Packslip = ps
+		}
+	}
 	if cfg.GitHubArtifactAttestations.SignerWorkflow() == "" {
 		if attested := observedAttestation(versions); attested != nil {
 			logger.Info("recording which workflow attests the package", "package", pkgName,
@@ -211,6 +219,53 @@ func observedAttestation(versions []*version) *aquaregistry.GitHubArtifactAttest
 		}
 	}
 	return nil
+}
+
+// observedPackslip returns the packslip configuration every version is held to, from what
+// the generated files ended up with.
+//
+// An entry names the signer's identity with the ref of the release it was read off, which
+// is that version's. The definition names the repository the signer's workflow is in, as
+// aqua gr does: every release is signed from it, under its own ref. A key or a fingerprint
+// is the same for every release and is recorded as it is.
+func observedPackslip(versions []*version) *aquaregistry.Packslip {
+	for _, v := range versions {
+		for _, asset := range v.Registry.Assets {
+			ps := asset.Packslip
+			if !ps.GetEnabled() {
+				continue
+			}
+			out := &aquaregistry.Packslip{PublicKey: ps.PublicKey, Pin: ps.Pin, Issuer: ps.Issuer}
+			if prefix := identityRepository(ps.Identity); prefix != "" {
+				out.IdentityPrefix = prefix
+			} else {
+				out.IdentityPrefix = ps.IdentityPrefix
+			}
+			if out.PublicKey == "" && out.Pin == "" && out.IdentityPrefix == "" {
+				continue
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+// identityRepository is the repository part of a workflow identity, as the prefix every
+// release's identity starts with:
+//
+//	https://github.com/jdx/hk/.github/workflows/release.yml@refs/tags/v2.5.0
+//	https://github.com/jdx/hk/
+func identityRepository(identity string) string {
+	const prefix = "https://github.com/"
+	rest, ok := strings.CutPrefix(identity, prefix)
+	if !ok {
+		return ""
+	}
+	parts := strings.SplitN(rest, "/", 3) //nolint:mnd
+	if len(parts) < 3 {                   //nolint:mnd
+		return ""
+	}
+	return prefix + parts[0] + "/" + parts[1] + "/"
 }
 
 // observedSigner returns the cosign configuration the generated files ended up with.
