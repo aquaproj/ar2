@@ -116,6 +116,9 @@ func (v *Verifier) fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 		// complete apart from its files having gone unchecked.
 		logger.Warn("can't open this format here, so its files go unchecked",
 			"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
+		if keep, done := v.signedOnly(ctx, logger, pkgName, version, asset, filled); done {
+			return keep, nil
+		}
 	} else if extract {
 		if keep, done := v.extracted(ctx, logger, pkgName, version, asset, filled); done {
 			return keep, nil
@@ -172,6 +175,38 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 	default:
 		filled.NeedsReview = filled.NeedsReview || review
 		// Extracting recorded the checksum, so there is nothing else for this entry.
+		return true, true
+	}
+}
+
+// signedOnly checks the signatures an entry claims when its asset can't be opened here, and
+// says whether the file keeps the entry and whether anything is left to do for it.
+//
+// Opening the asset is what this machine can't do, not reading it: a signature is over the
+// bytes, so it is checked the same way. Skipping it with the files left the entry saying it
+// is attested without what the attestation's certificate records -- lxc/incus's darwin/amd64
+// .pkg was generated on Linux that way. The errors are treated the way extracted treats them.
+func (v *Verifier) signedOnly(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, filled *Filled) (bool, bool) {
+	if v.signatures == nil {
+		return false, false
+	}
+	checksum, err := v.VerifySignatures(ctx, logger, pkgName, version, asset)
+	if err == nil {
+		err = setChecksum(asset, checksum)
+	}
+	switch {
+	case err != nil && Refused(err):
+		logger.Warn("the release has nothing for this environment, so the file won't offer it",
+			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
+		filled.exclude(asset, err.Error())
+		return false, true
+	case err != nil:
+		logger.Warn("failed to check the signatures of an asset that can't be opened here",
+			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
+		filled.NeedsReview = true
+		return true, false
+	default:
+		// The download recorded the checksum, so there is nothing else for this entry.
 		return true, true
 	}
 }
