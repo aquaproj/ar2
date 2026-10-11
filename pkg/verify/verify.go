@@ -211,7 +211,7 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 	}
 
 	result := &Result{Checksum: checksum}
-	result.Files, result.NeedsReview, result.Unresolved, result.Holds = resolveFiles(logger, dest, asset.OS, asset.Files)
+	result.Files, result.NeedsReview, result.Unresolved, result.Holds = resolveFiles(logger, dest, asset.OS, windowsExtOf(asset), asset.Files)
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.
 	if asset.OS == "linux" {
@@ -228,7 +228,9 @@ type resolver struct {
 	logger *slog.Logger
 	dir    string
 	goos   string
-	index  map[string][]*found
+	// ext is the extension aqua gives the package's executables on Windows.
+	ext   string
+	index map[string][]*found
 }
 
 // found is one file of a name in the extracted archive.
@@ -260,7 +262,7 @@ func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
 	// install time renames the extracted file to match. The archive holds the name
 	// without it, and that is what the entry has to say: nothing has renamed anything
 	// by the time the next reader looks for it.
-	if bare, ok := withoutWindowsExt(r.goos, src); ok && exists(r.dir, bare) {
+	if bare, ok := withoutWindowsExt(r.goos, r.ext, src); ok && exists(r.dir, bare) {
 		return &generate.File{Name: file.Name, Src: bare}, false
 	}
 	found, others, ok := r.byName(file.Name)
@@ -330,9 +332,9 @@ func executables(paths []*found) []*found {
 // candidates is the names to look for, in the order the environment makes likely.
 func (r *resolver) candidates(name string) []string {
 	if r.goos == "windows" {
-		return []string{name + windowsExt, name}
+		return []string{name + r.ext, name}
 	}
-	return []string{name, name + windowsExt}
+	return []string{name, name + r.ext}
 }
 
 // resolveFiles checks each files[].src against the extracted archive and relocates
@@ -342,12 +344,12 @@ func (r *resolver) candidates(name string) []string {
 // extracted files is a command. The name comes from registry.yaml and doesn't change
 // when an upstream reorganizes its archive, so looking for it is a far narrower
 // guess than picking a binary out of the tree.
-func resolveFiles(logger *slog.Logger, dir, goos string, files []*generate.File) ([]*generate.File, bool, []string, []string) {
+func resolveFiles(logger *slog.Logger, dir, goos, ext string, files []*generate.File) ([]*generate.File, bool, []string, []string) {
 	var (
 		needsReview bool
 		unresolved  []string
 	)
-	r := &resolver{logger: logger, dir: dir, goos: goos}
+	r := &resolver{logger: logger, dir: dir, goos: goos, ext: ext}
 	out := make([]*generate.File, 0, len(files))
 	for _, file := range files {
 		resolved, relocated := r.resolve(file)
@@ -391,14 +393,28 @@ func holds(index map[string][]*found) []string {
 // windowsExt is the extension aqua gives an executable on Windows.
 const windowsExt = ".exe"
 
-// withoutWindowsExt returns src with the Windows executable extension removed, and
-// whether it had one. Only .exe is considered: a definition can name another
-// extension with windows_ext, but the entry generated here carries no trace of it.
-func withoutWindowsExt(goos, src string) (string, bool) {
+// scriptExt is the extension aqua gives a file of a repository on Windows, which is a
+// script rather than a build.
+const scriptExt = ".sh"
+
+// windowsExtOf is the extension aqua completes files[].src with on Windows for the asset:
+// .sh for a file of the repository or its archive, and .exe for the rest. A definition can
+// name another with windows_ext, but the entry generated here carries no trace of it.
+func windowsExtOf(asset *generate.Asset) string {
+	switch asset.Type {
+	case aquaregistry.PkgInfoTypeGitHubContent, aquaregistry.PkgInfoTypeGitHubArchive:
+		return scriptExt
+	}
+	return windowsExt
+}
+
+// withoutWindowsExt returns src with the Windows extension ext removed, and whether it had
+// it.
+func withoutWindowsExt(goos, ext, src string) (string, bool) {
 	if goos != "windows" {
 		return src, false
 	}
-	bare := strings.TrimSuffix(src, windowsExt)
+	bare := strings.TrimSuffix(src, ext)
 	return bare, bare != src
 }
 

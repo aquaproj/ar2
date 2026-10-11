@@ -44,6 +44,8 @@ func discardLogger() *slog.Logger {
 // resolveCase is one extracted archive, and what resolving the definition's files against it
 // should make of them.
 type resolveCase struct {
+	// ext is the extension aqua completes files[].src with on Windows; .exe when empty.
+	ext         string
 	name        string
 	goos        string
 	archive     []string
@@ -57,7 +59,23 @@ type resolveCase struct {
 }
 
 func resolveCases() []resolveCase {
-	return append(resolvedCases(), guessedCases()...)
+	return append(append(resolvedCases(), scriptCases()...), guessedCases()...)
+}
+
+// scriptCases are files of a repository, which aqua completes with .sh on Windows.
+func scriptCases() []resolveCase {
+	return []resolveCase{
+		{
+			// A file of a repository is completed with .sh on Windows, and the file
+			// downloaded is named without it: johanhaleby/kubetail.
+			name:    "a file of a repository on windows",
+			goos:    "windows",
+			ext:     scriptExt,
+			archive: []string{"kubetail"},
+			files:   []*generate.File{{Name: "kubetail", Src: "kubetail.sh"}},
+			want:    []*generate.File{{Name: "kubetail", Src: "kubetail"}},
+		},
+	}
 }
 
 // resolvedCases are the archives that answer for themselves: the definition's files are
@@ -180,7 +198,11 @@ func TestResolveFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			dir := newArchive(t, tt.archive, tt.executables...)
-			files, needsReview, unresolved, holds := resolveFiles(discardLogger(), dir, tt.goos, tt.files)
+			ext := tt.ext
+			if ext == "" {
+				ext = windowsExt
+			}
+			files, needsReview, unresolved, holds := resolveFiles(discardLogger(), dir, tt.goos, ext, tt.files)
 			if diff := cmp.Diff(tt.want, files); diff != "" {
 				t.Errorf("files are wrong (-want +got):\n%s", diff)
 			}
