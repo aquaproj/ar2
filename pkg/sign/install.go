@@ -17,6 +17,7 @@ const (
 	toolCosign   = "cosign"
 	toolSLSA     = "slsa"
 	toolMinisign = "minisign"
+	toolPackslip = "packslip"
 	toolGH       = "gh"
 )
 

@@ -20,6 +20,7 @@ var signingKinds = []struct { //nolint:gochecknoglobals
 	{"cosign", func(a *generate.Asset) bool { return a.Cosign.GetEnabled() }},
 	{"github_artifact_attestations", func(a *generate.Asset) bool { return a.GitHubArtifactAttestations.GetEnabled() }},
 	{"minisign", func(a *generate.Asset) bool { return a.Minisign.GetEnabled() }},
+	{"packslip", func(a *generate.Asset) bool { return a.Packslip.GetEnabled() }},
 	{"slsa_provenance", func(a *generate.Asset) bool { return a.SLSAProvenance.GetEnabled() }},
 }
 

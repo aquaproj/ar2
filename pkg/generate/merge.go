@@ -55,6 +55,9 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	if base.Minisign != nil {
 		p.Minisign = base.Minisign
 	}
+	if base.Packslip != nil {
+		p.Packslip = base.Packslip
+	}
 	// SLSA provenance is the one aqua gr does infer, from an asset ending in
 	// .intoto.jsonl. What it can't read is whether slsa-verifier will accept the
 	// provenance in it: containerd's is built by its own release workflow, which is not
@@ -110,6 +113,9 @@ func overrideSigning(reg *Registry, base *aquaregistry.PackageInfo) {
 		if ov.Minisign != nil {
 			asset.Minisign = ov.Minisign
 		}
+		if ov.Packslip != nil {
+			asset.Packslip = ov.Packslip
+		}
 	}
 }
 
@@ -125,7 +131,7 @@ func signingOverride(overrides []*aquaregistry.Override, asset *Asset) *aquaregi
 		if len(ov.Variants) != 0 || !ov.MatchPlatform(rt) {
 			continue
 		}
-		if ov.Cosign != nil || ov.GitHubArtifactAttestations != nil || ov.Minisign != nil {
+		if ov.Cosign != nil || ov.GitHubArtifactAttestations != nil || ov.Minisign != nil || ov.Packslip != nil {
 			return ov
 		}
 	}

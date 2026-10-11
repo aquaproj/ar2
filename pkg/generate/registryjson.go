@@ -74,6 +74,7 @@ func OwnSigning(reg *Registry) {
 		asset.Cosign = copyCosign(asset.Cosign)
 		asset.GitHubArtifactAttestations = copyAttestations(asset.GitHubArtifactAttestations)
 		asset.Minisign = copyMinisign(asset.Minisign)
+		asset.Packslip = copyPackslip(asset.Packslip)
 		asset.SLSAProvenance = copySLSA(asset.SLSAProvenance)
 	}
 }
@@ -120,6 +121,16 @@ func copyMinisign(m *aquaregistry.Minisign) *aquaregistry.Minisign {
 	out.Enabled = copyPtr(m.Enabled)
 	out.Asset = copyPtr(m.Asset)
 	out.URL = copyPtr(m.URL)
+	return &out
+}
+
+func copyPackslip(p *aquaregistry.Packslip) *aquaregistry.Packslip {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.Enabled = copyPtr(p.Enabled)
+	out.URL = copyPtr(p.URL)
 	return &out
 }
 

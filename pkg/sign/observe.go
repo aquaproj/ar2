@@ -209,6 +209,9 @@ func Render(asset *generate.Asset, version string) {
 		asset.Minisign.Asset = renderPtr(asset.Minisign.Asset, version, asset)
 		asset.Minisign.URL = renderPtr(asset.Minisign.URL, version, asset)
 	}
+	if asset.Packslip != nil {
+		asset.Packslip.URL = renderPtr(asset.Packslip.URL, version, asset)
+	}
 }
 
 func renderFile(f *aquaregistry.DownloadedFile, version string, asset *generate.Asset) {

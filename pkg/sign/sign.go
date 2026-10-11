@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/lockfile"
 	"github.com/aquaproj/aqua/v2/pkg/minisign"
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
+	"github.com/aquaproj/aqua/v2/pkg/packslip"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
 	"github.com/aquaproj/aqua/v2/pkg/slsa"
 	aquatemplate "github.com/aquaproj/aqua/v2/pkg/template"
@@ -47,6 +49,7 @@ type Verifier struct {
 	cosign        *cosign.Verifier
 	slsa          *slsa.Verifier
 	minisign      *minisign.Verifier
+	packslip      *packslip.Verifier
 	ghattestation *ghattestation.Verifier
 	// dropUnattested says an attestation GitHub doesn't hold is taken off the entry
 	// rather than failing it. See DropUnattested.
@@ -81,6 +84,10 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	if err != nil {
 		return nil, fmt.Errorf("prepare minisign: %w", err)
 	}
+	packslipExe, err := packslip.NewExecutor(logger, exe, param)
+	if err != nil {
+		return nil, fmt.Errorf("prepare packslip: %w", err)
+	}
 	attestExe, err := ghattestation.NewExecutor(exe, param)
 	if err != nil {
 		return nil, fmt.Errorf("prepare gh: %w", err)
@@ -88,6 +95,7 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	cosignVerifier := cosign.NewVerifier(exe, dl, param)
 	slsaVerifier := slsa.New(dl, slsa.NewExecutor(exe, param))
 	minisignVerifier := minisign.New(dl, minisignExe)
+	packslipVerifier := packslip.New(dl, packslipExe)
 	attestVerifier := ghattestation.New(attestExe)
 
 	rt := runtime.NewR(ctx)
@@ -97,12 +105,13 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 		cosign:        cosignVerifier,
 		slsa:          slsaVerifier,
 		minisign:      minisignVerifier,
+		packslip:      packslipVerifier,
 		ghattestation: attestVerifier,
 		rt:            rt,
 		installer: installpackage.New(param, dl, rt, link.New(),
 			download.NewChecksumDownloader(gh, rt, httpDL), checksum.NewCalculator(),
 			unarchive.New(exe),
-			cosignVerifier, slsaVerifier, minisignVerifier, attestVerifier,
+			cosignVerifier, slsaVerifier, minisignVerifier, packslipVerifier, attestVerifier,
 			installpackage.NewGoInstallInstallerImpl(exe),
 			installpackage.NewGoBuildInstallerImpl(exe),
 			installpackage.NewCargoPackageInstallerImpl(exe),
@@ -111,6 +120,7 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 			toolCosign:   {pkg: cosign.Package, checksums: cosign.Checksums()},
 			toolSLSA:     {pkg: slsa.Package, checksums: slsa.Checksums()},
 			toolMinisign: {pkg: minisign.Package, checksums: minisign.Checksums()},
+			toolPackslip: {pkg: packslip.Package, checksums: packslip.Checksums()},
 			toolGH:       {pkg: ghattestation.Package, checksums: ghattestation.Checksums()},
 		},
 	}, nil
@@ -157,9 +167,13 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 	rt := &runtime.Runtime{GOOS: asset.OS, GOARCH: asset.Arch}
 	pkg := assetPackage(pkgName, version, asset)
 	art := pkg.TemplateArtifact(rt, asset.Asset)
+	// The file the signatures are about. Its type is the package's: packslip's bundle is
+	// downloaded from the same kind of release as the asset when no URL says otherwise.
 	file := &download.File{
+		Type:      asset.Type,
 		RepoOwner: asset.RepoOwner,
 		RepoName:  asset.RepoName,
+		Host:      asset.Host,
 		Version:   version,
 	}
 
@@ -238,6 +252,7 @@ func assetPackage(pkgName, version string, asset *generate.Asset) *config.Packag
 		Cosign:                     asset.Cosign,
 		GitHubArtifactAttestations: asset.GitHubArtifactAttestations,
 		Minisign:                   asset.Minisign,
+		Packslip:                   asset.Packslip,
 		SLSAProvenance:             asset.SLSAProvenance,
 	}
 	return &config.Package{
@@ -299,6 +314,18 @@ func (v *Verifier) minisignUnrunnable() string {
 	return "minisign isn't built for " + v.rt.Env()
 }
 
+// packslipUnrunnable says packslip can't run on this machine, and nothing when it can.
+//
+// Like minisign, it runs on the host and isn't built for every host: packslip ships for
+// linux, darwin/arm64 and windows, and aqua skips the check elsewhere with a warning.
+func (v *Verifier) packslipUnrunnable() string {
+	supported, err := packslip.Package().PackageInfo.CheckSupported(v.rt, v.rt.Env())
+	if err != nil || supported {
+		return ""
+	}
+	return "packslip isn't built for " + v.rt.Env()
+}
+
 // check is one way an asset can be verified, and what it takes to make it.
 type check struct {
 	kind string
@@ -332,6 +359,11 @@ func (v *Verifier) checks(ctx context.Context, logger *slog.Logger, rt *runtime.
 				ArtifactPath: path,
 				PublicKey:    asset.Minisign.PublicKey,
 			})
+		}},
+		{kind: "packslip", tool: toolPackslip, enabled: asset.Packslip.GetEnabled(), asset: asset, unrunnable: v.packslipUnrunnable, verify: func() error {
+			// packslip looks the artifact up in its signed document by the name it is
+			// published under, which is the name it was downloaded as.
+			return v.packslip.Verify(ctx, logger, rt, asset.Packslip, art, file, path, filepath.Base(path))
 		}},
 		{kind: "github_artifact_attestations", tool: toolGH, enabled: asset.GitHubArtifactAttestations.GetEnabled(), asset: asset, verify: func() error {
 			return v.attestation(ctx, logger, asset, path)
