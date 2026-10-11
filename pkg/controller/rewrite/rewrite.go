@@ -37,6 +37,7 @@ type Writer interface {
 	CommitTree(ctx context.Context, parent, message string, entries []*gogithub.TreeEntry) (string, error)
 	MoveBranch(ctx context.Context, branch, commit string) error
 	CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error)
+	Label(ctx context.Context, logger *slog.Logger, number int, name string)
 }
 
 // Controller rewrites and verifies.
@@ -174,6 +175,9 @@ func (c *Controller) commit(ctx context.Context, logger *slog.Logger, pkgs map[s
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
+	// It replaces every published file, so it is marked for whoever reads it, and it
+	// isn't set to merge itself.
+	c.writer.Label(ctx, logger, pr.GetNumber(), g2.ReplacesPublishedLabel)
 	logger.Info("opened the pull request", "number", pr.GetNumber())
 	return nil
 }

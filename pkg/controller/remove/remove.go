@@ -43,7 +43,13 @@ type Registry interface {
 	RemoveBranch(pkgName string) (string, bool)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*g2.File) error
+	PullRequests
+}
+
+// PullRequests is how a removal's pull requests are opened and marked.
+type PullRequests interface {
 	CreatePullRequestFrom(ctx context.Context, logger *slog.Logger, head, base, title, body string) (*gogithub.PullRequest, error)
+	Label(ctx context.Context, logger *slog.Logger, number int, name string)
 }
 
 // Controller removes packages.
@@ -198,6 +204,9 @@ func (c *Controller) dropVersions(ctx context.Context, logger *slog.Logger, in *
 	if err != nil {
 		return fmt.Errorf("open the pull request that drops the generated files: %w", err)
 	}
+	// It takes away what the registry serves, so it is marked for whoever reads it, and
+	// it isn't set to merge itself.
+	c.g2.Label(ctx, logger, pr.GetNumber(), g2.ReplacesPublishedLabel)
 	logger.Info("opened the pull request that drops what was generated",
 		"number", pr.GetNumber(), "num_of_files", len(paths))
 	return nil

@@ -1,19 +1,17 @@
 package g2
 
-// ReplacesPublishedLabel is the label a person puts on a pull request that changes or removes
-// a file the registry already serves. The checks fail without it, and count it only when a
-// person put it on: a label the pull request's author can put on itself would decide nothing.
+// ReplacesPublishedLabel marks a pull request that changes or removes a file the registry
+// already serves. ar2 puts it on such a pull request when opening it and doesn't set it to
+// merge itself, and the checks fail one that is set to: what lets it merge is a person
+// merging it, and the label is there to say so to whoever reads the list.
 const ReplacesPublishedLabel = "replaces-published"
 
-// ReplacesPublished is the part of a pull request's description saying that it waits for the
-// label and what to have read before putting it on.
-//
-// The checks enforce the label, but a pull request that only fails says nothing about why or
-// what the label means. The description is where whoever opens it reads that.
+// ReplacesPublished is the part of a pull request's description saying that it is left for
+// a person to merge and what to have read before merging it.
 func ReplacesPublished(read string) string {
 	return "## Merging this\n\n" +
 		"This changes files the registry already serves, which a lock file may hold the checksums of. " +
-		"The checks fail until a person labels it `" + ReplacesPublishedLabel + "`, and putting the label " +
-		"on runs them again. A label a bot puts on doesn't count.\n\n" +
-		"The label says that the change was read and is meant. Before putting it on, read " + read + "\n"
+		"It is labelled `" + ReplacesPublishedLabel + "` and never merges itself: the checks fail it while " +
+		"auto-merge is on. Merging it is what says the change was read and is meant.\n\n" +
+		"Before merging, read " + read + "\n"
 }

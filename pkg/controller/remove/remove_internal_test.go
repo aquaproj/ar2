@@ -30,6 +30,11 @@ type fakeRegistry struct {
 	bases  map[string]string
 	titles []string
 	bodies []string
+	labels []string
+}
+
+func (f *fakeRegistry) Label(_ context.Context, _ *slog.Logger, _ int, name string) {
+	f.labels = append(f.labels, name)
 }
 
 // fakeID is the id whatever package a test is about is held under. What the tests check is

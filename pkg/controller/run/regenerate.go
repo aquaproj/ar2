@@ -330,6 +330,9 @@ func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger,
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
+	// It replaces what the registry serves, so it is marked for whoever reads it, and it
+	// isn't set to merge itself.
+	c.g2.Label(ctx, logger, pr.GetNumber(), g2.ReplacesPublishedLabel)
 	if err := c.addToSummary(pkgName, generatedVersions(versions)); err != nil {
 		logger.Warn("failed to write the job summary", "error", err.Error())
 	}

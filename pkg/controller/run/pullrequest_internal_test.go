@@ -183,7 +183,7 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
 	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("a pull request that can't auto-merge is still a pull request: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestOpenPullRequest_paths(t *testing.T) {
 	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", []*version{
 		{Version: "v2.1.0", Registry: &generate.Registry{}},
 		{Version: "v2.2.0", Registry: &generate.Registry{}},
-	}); err != nil {
+	}, false); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"versions/v2.1.0/registry-1.json", "versions/v2.2.0/registry-1.json"}
@@ -373,5 +373,31 @@ func TestController_autoMergerFallsBack(t *testing.T) {
 	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	if _, ok := c.autoMerger().(failingAutoMerger); !ok {
 		t.Errorf("what turns auto-merge on is %T", c.autoMerger())
+	}
+}
+
+// A pull request with a version the registry already serves is labelled and left for a
+// person to merge rather than set to merge itself.
+func TestOpenPullRequest_replacesPublished(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	merger := &countingAutoMerger{}
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
+	c.UseAutoMerger(merger)
+	versions := []*version{{Version: "v2.1.0", Registry: &generate.Registry{}}}
+	if !replacesPublished(versions, map[string]struct{}{"v2.1.0": {}}) {
+		t.Fatal("a published version wasn't seen")
+	}
+	if replacesPublished(versions, map[string]struct{}{"v2.0.0": {}}) {
+		t.Fatal("a version the registry is missing was seen as published")
+	}
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", versions, true); err != nil {
+		t.Fatal(err)
+	}
+	if merger.calls != 0 {
+		t.Errorf("auto-merge was enabled %d times", merger.calls)
+	}
+	if diff := cmp.Diff([]string{g2.ReplacesPublishedLabel}, reg.labels); diff != "" {
+		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
 	}
 }

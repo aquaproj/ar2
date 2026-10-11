@@ -40,7 +40,7 @@ type version struct {
 // One pull request per package rather than per version: two for the same package would
 // both write its versions.json, so the second would conflict once the first merged. It
 // also keeps the number of pull requests to something a maintainer can look at.
-func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, versions []*version) error {
+func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, versions []*version, replaces bool) error {
 	base, err := c.g2.PackageBase(ctx, pkgName)
 	if err != nil {
 		return fmt.Errorf("take the package over: %w", err)
@@ -72,6 +72,12 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 	logger.Info("opened a pull request",
 		"package", pkgName, "number", pr.GetNumber(), "needs_review", needsReview)
 
+	if replaces {
+		logger.Warn("the pull request replaces a published file, so it is left for a person to merge",
+			"number", pr.GetNumber())
+		c.g2.Label(ctx, logger, pr.GetNumber(), g2.ReplacesPublishedLabel)
+		return nil
+	}
 	if needsReview {
 		// A relocated files[].src is a guess. Merging it without anyone looking is
 		// exactly what the archive check exists to prevent.
