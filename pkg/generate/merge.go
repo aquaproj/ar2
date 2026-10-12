@@ -50,6 +50,13 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		p.Overrides = append(overrides, p.Overrides...)
 	}
 
+	// The extension aqua gives files[].src on Windows. The release's asset names say
+	// nothing about what is inside the archive: sass/dart-sass's Windows build runs from
+	// dart-sass/sass.bat, and without it the entry looks for dart-sass/sass.exe.
+	if base.WindowsExt != "" {
+		p.WindowsExt = base.WindowsExt
+	}
+
 	// Signing configuration. None of it can be read off the release.
 	if base.Cosign != nil {
 		p.Cosign = base.Cosign

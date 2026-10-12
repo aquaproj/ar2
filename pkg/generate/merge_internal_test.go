@@ -135,3 +135,12 @@ func TestMerge_formatWithFiles(t *testing.T) {
 		t.Error("the inferred definition was modified")
 	}
 }
+
+// sass/dart-sass's Windows build runs from a .bat, which no asset name says.
+func TestMerge_windowsExt(t *testing.T) {
+	t.Parallel()
+	got := merge(&aquaregistry.PackageInfo{}, &aquaregistry.PackageInfo{WindowsExt: ".bat"})
+	if got.WindowsExt != ".bat" {
+		t.Errorf("windows_ext is %q, want .bat", got.WindowsExt)
+	}
+}
