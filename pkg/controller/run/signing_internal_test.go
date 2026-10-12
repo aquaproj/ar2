@@ -196,7 +196,7 @@ func TestPinSigner(t *testing.T) {
 	}
 	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
 	pinSigner(discardLogger(), "cli/cli", cfg, []*version{
-		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{OS: "linux", Arch: "amd64", Cosign: observed})},
+		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{OS: "linux", Arch: "amd64", Asset: "gh_2.0.0_linux_amd64.tar.gz", Cosign: observed})},
 	})
 
 	// The definition applies to every version, so the one that was looked at goes
@@ -246,6 +246,130 @@ func TestPinSigner_noIdentity(t *testing.T) {
 	})
 	if cfg.Cosign != nil {
 		t.Errorf("a pattern was recorded as a signer: %+v", cfg.Cosign)
+	}
+}
+
+// A bundle fetched from a URL has the version and the architecture written into it, and
+// nothing says which part is which: cri-o/cri-o's is on storage.googleapis.com.
+func TestPinSigner_httpBundle(t *testing.T) {
+	t.Parallel()
+	url := "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.v1.37.2.tar.gz.bundle"
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "cri-o/cri-o", cfg, []*version{
+		{Version: "v1.37.2", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64",
+			Cosign: &aquaregistry.Cosign{
+				Bundle: &aquaregistry.DownloadedFile{Type: "http", URL: &url},
+				Opts: []string{
+					"--certificate-identity", "https://github.com/cri-o/packaging/.github/workflows/obs.yml@refs/heads/main",
+					"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
+				},
+			},
+		})},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("a bundle fetched from a URL was written as a template: %+v", cfg.Cosign.Bundle)
+	}
+}
+
+// A release can name its bundles otherwise than .sigstore.json, and the definition
+// keeps what it appends to the asset's name.
+func TestPinSigner_bundleSuffix(t *testing.T) {
+	t.Parallel()
+	bundle := "tool_1.0.0_linux_amd64.tar.gz.bundle"
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64", Asset: "tool_1.0.0_linux_amd64.tar.gz",
+			Cosign: &aquaregistry.Cosign{
+				Bundle: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &bundle},
+				Opts:   []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		})},
+	})
+	if cfg.Cosign == nil {
+		t.Fatal("the signer wasn't recorded")
+	}
+	if got := *cfg.Cosign.Bundle.Asset; got != "{{.Asset}}.bundle" {
+		t.Errorf("the bundle is %q, want {{.Asset}}.bundle", got)
+	}
+}
+
+// A signature is one environment's file, wherever it comes from, so a definition holding
+// it as written would hold every environment to it.
+func TestPinSigner_signatureFile(t *testing.T) {
+	t.Parallel()
+	url := "https://example.com/tool_1.0.0_linux_amd64.tar.gz.sig"
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64", Asset: "tool_1.0.0_linux_amd64.tar.gz",
+			Cosign: &aquaregistry.Cosign{
+				Signature: &aquaregistry.DownloadedFile{Type: "http", URL: &url},
+				Opts:      []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		})},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("one environment's signature was written for every environment: %+v", cfg.Cosign.Opts)
+	}
+}
+
+// A signature named after the environment rather than the asset is one environment's all
+// the same, which the version's other entries say by naming another.
+func TestPinSigner_signaturePerEnvironment(t *testing.T) {
+	t.Parallel()
+	entry := func(arch string) *generate.Asset {
+		sig := "tool_linux_" + arch + ".sig"
+		return &generate.Asset{
+			OS: "linux", Arch: arch, Asset: "tool_linux_" + arch + ".tar.gz",
+			Cosign: &aquaregistry.Cosign{
+				Signature: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &sig},
+				Opts:      []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		}
+	}
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(entry("amd64"), entry("arm64"))},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("one environment's signature was written for every environment: %+v", cfg.Cosign.Opts)
+	}
+}
+
+// goreleaser signs the checksums under a name carrying the version without its v, which
+// putting the tag back as a template leaves as it is.
+func TestPinSigner_versionInFileName(t *testing.T) {
+	t.Parallel()
+	sig := "tool_1.0.0_checksums.txt.sig"
+	entry := func(arch string) *generate.Asset {
+		return &generate.Asset{
+			OS: "linux", Arch: arch, Asset: "tool_1.0.0_linux_" + arch + ".tar.gz", RepoOwner: "o", RepoName: "tool",
+			Cosign: &aquaregistry.Cosign{
+				Signature: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &sig},
+				Opts:      []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		}
+	}
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(entry("amd64"), entry("arm64"))},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("a signature only v1.0.0 has was written for every version: %+v", cfg.Cosign.Opts)
+	}
+}
+
+// A tag with a prefix is escaped in a release URL, so what is looked for is the version
+// after the prefix.
+func TestStillPinned_prefixedTag(t *testing.T) {
+	t.Parallel()
+	cosign := &aquaregistry.Cosign{Opts: []string{
+		"--signature", "https://github.com/o/r/releases/download/tool%2Fv1.0.0/tool_1.0.0_checksums.txt.sig",
+	}}
+	if !stillPinned(cosign, "tool/v1.0.0") {
+		t.Error("a signature naming 1.0.0 was taken for one every release has")
 	}
 }
 
