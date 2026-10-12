@@ -49,6 +49,7 @@ func TestAmbiguousArm(t *testing.T) {
 		"tool_linux_amd64.tar.gz":          false,
 		"kubectx_v0.9.4_windows_armhf.zip": true,
 		"Xray-windows-arm64-v8a.zip":       false,
+		"tool-linux-armv8l.tar.gz":         true,
 	} {
 		if got := ambiguousArm(name); got != want {
 			t.Errorf("ambiguousArm(%q) = %v, want %v", name, got, want)
