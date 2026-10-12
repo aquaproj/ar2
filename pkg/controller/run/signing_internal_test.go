@@ -361,6 +361,18 @@ func TestPinSigner_versionInFileName(t *testing.T) {
 	}
 }
 
+// A tag with a prefix is escaped in a release URL, so what is looked for is the version
+// after the prefix.
+func TestStillPinned_prefixedTag(t *testing.T) {
+	t.Parallel()
+	cosign := &aquaregistry.Cosign{Opts: []string{
+		"--signature", "https://github.com/o/r/releases/download/tool%2Fv1.0.0/tool_1.0.0_checksums.txt.sig",
+	}}
+	if !stillPinned(cosign, "tool/v1.0.0") {
+		t.Error("a signature naming 1.0.0 was taken for one every release has")
+	}
+}
+
 // An environment the version before it covered and this one doesn't is what an asset
 // renamed to a spelling the parser doesn't know looks like: no entry at all, rather than
 // a wrong one.

@@ -177,7 +177,7 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 		return
 	}
 	if !cfg.Cosign.GetEnabled() {
-		if cosign := everyReleaseSigner(versions); cosign != nil {
+		if cosign := everyReleaseSigner(logger, pkgName, versions); cosign != nil {
 			logger.Info("recording who signs the package", "package", pkgName,
 				"identity", identityOf(cosign.Opts))
 			cfg.Cosign = cosign
@@ -400,13 +400,23 @@ func namedForEnvironment(f *aquaregistry.DownloadedFile, asset string) bool {
 
 // everyReleaseSigner is what the generated files were signed with, written as what every
 // release is expected to be signed with, or nil when it can't be written that way.
-func everyReleaseSigner(versions []*version) *aquaregistry.Cosign {
+//
+// What can't be is said, because a definition without cosign is otherwise silent about
+// whether the release was signed at all.
+func everyReleaseSigner(logger *slog.Logger, pkgName string, versions []*version) *aquaregistry.Cosign {
 	signer := observedSigner(versions)
-	if signer == nil || !templatable(signer) {
+	if signer == nil {
+		return nil
+	}
+	if !templatable(signer) {
+		logger.Info("the signer isn't recorded: the files it is checked with differ by environment or come from a URL",
+			"package", pkgName, "version", signer.version)
 		return nil
 	}
 	cosign := templateSigner(signer)
 	if stillPinned(cosign, signer.version) {
+		logger.Info("the signer isn't recorded: a file it is checked with names the version it was read off",
+			"package", pkgName, "version", signer.version)
 		return nil
 	}
 	return cosign
@@ -420,7 +430,9 @@ func everyReleaseSigner(versions []*version) *aquaregistry.Cosign {
 // 1.0.0 in its path. Such a definition holds only for the release that was looked at, so it
 // is left to say it.
 func stillPinned(cosign *aquaregistry.Cosign, version string) bool {
-	bare := strings.TrimPrefix(version, "v")
+	// A tag with a prefix, tool/v1.0.0, is written into a release URL escaped, so it is
+	// the part after the prefix that can be found there.
+	bare := strings.TrimPrefix(version[strings.LastIndex(version, "/")+1:], "v")
 	if bare == "" {
 		return false
 	}
