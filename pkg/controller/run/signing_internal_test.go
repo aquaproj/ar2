@@ -196,7 +196,7 @@ func TestPinSigner(t *testing.T) {
 	}
 	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
 	pinSigner(discardLogger(), "cli/cli", cfg, []*version{
-		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{OS: "linux", Arch: "amd64", Cosign: observed})},
+		{Version: "v2.0.0", Registry: registryOf(&generate.Asset{OS: "linux", Arch: "amd64", Asset: "gh_2.0.0_linux_amd64.tar.gz", Cosign: observed})},
 	})
 
 	// The definition applies to every version, so the one that was looked at goes
@@ -269,6 +269,49 @@ func TestPinSigner_httpBundle(t *testing.T) {
 	})
 	if cfg.Cosign != nil {
 		t.Errorf("a bundle fetched from a URL was written as a template: %+v", cfg.Cosign.Bundle)
+	}
+}
+
+// A release can name its bundles otherwise than .sigstore.json, and the definition
+// keeps what it appends to the asset's name.
+func TestPinSigner_bundleSuffix(t *testing.T) {
+	t.Parallel()
+	bundle := "tool_1.0.0_linux_amd64.tar.gz.bundle"
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64", Asset: "tool_1.0.0_linux_amd64.tar.gz",
+			Cosign: &aquaregistry.Cosign{
+				Bundle: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &bundle},
+				Opts:   []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		})},
+	})
+	if cfg.Cosign == nil {
+		t.Fatal("the signer wasn't recorded")
+	}
+	if got := *cfg.Cosign.Bundle.Asset; got != "{{.Asset}}.bundle" {
+		t.Errorf("the bundle is %q, want {{.Asset}}.bundle", got)
+	}
+}
+
+// A signature is one environment's file, wherever it comes from, so a definition holding
+// it as written would hold every environment to it.
+func TestPinSigner_signatureFile(t *testing.T) {
+	t.Parallel()
+	url := "https://example.com/tool_1.0.0_linux_amd64.tar.gz.sig"
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64", Asset: "tool_1.0.0_linux_amd64.tar.gz",
+			Cosign: &aquaregistry.Cosign{
+				Signature: &aquaregistry.DownloadedFile{Type: "http", URL: &url},
+				Opts:      []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		})},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("one environment's signature was written for every environment: %+v", cfg.Cosign.Opts)
 	}
 }
 

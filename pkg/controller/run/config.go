@@ -176,8 +176,8 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 		return
 	}
 	if !cfg.Cosign.GetEnabled() {
-		if signer, version := observedSigner(versions); signer != nil && templatable(signer) {
-			cosign := templateSigner(signer, version)
+		if signer := observedSigner(versions); signer != nil && templatable(signer) {
+			cosign := templateSigner(signer)
 			logger.Info("recording who signs the package", "package", pkgName,
 				"identity", identityOf(cosign.Opts))
 			cfg.Cosign = cosign
@@ -268,6 +268,17 @@ func identityRepository(identity string) string {
 	return prefix + parts[0] + "/" + parts[1] + "/"
 }
 
+// observed is what one generated entry was signed with: the entry's cosign written back
+// as a command line, and what it was written from.
+type observed struct {
+	cosign *aquaregistry.Cosign
+	// raw is the entry's cosign as it was, which still says where each file comes from.
+	raw *aquaregistry.Cosign
+	// asset is the entry's asset name, which a bundle on the release is named after.
+	asset   string
+	version string
+}
+
 // observedSigner returns the cosign configuration the generated files ended up with.
 //
 // The newest version is asked first, because that is the one whose signer the
@@ -276,7 +287,7 @@ func identityRepository(identity string) string {
 //
 // An entry holds cosign as fields, and a definition as a command line, so the entry's is
 // written back as one first.
-func observedSigner(versions []*version) (*aquaregistry.Cosign, string) {
+func observedSigner(versions []*version) *observed {
 	for _, v := range versions {
 		for _, asset := range v.Registry.Assets {
 			if asset.Cosign == nil {
@@ -284,11 +295,11 @@ func observedSigner(versions []*version) (*aquaregistry.Cosign, string) {
 			}
 			cosign := sign.Unstructure(asset.Cosign, asset, v.Version)
 			if identityOf(cosign.Opts) != "" {
-				return cosign, v.Version
+				return &observed{cosign: cosign, raw: asset.Cosign, asset: asset.Asset, version: v.Version}
 			}
 		}
 	}
-	return nil, ""
+	return nil
 }
 
 // templateSigner turns what one release was signed by into what every release is
@@ -298,17 +309,18 @@ func observedSigner(versions []*version) (*aquaregistry.Cosign, string) {
 // release that was looked at. The generated files record that as it stands, because
 // each describes one version; the definition applies to all of them and puts the
 // version back as a template.
-func templateSigner(cosign *aquaregistry.Cosign, version string) *aquaregistry.Cosign {
-	out := *cosign
-	out.Opts = make([]string, len(cosign.Opts))
-	for i, opt := range cosign.Opts {
-		out.Opts[i] = sign.TemplateVersion(opt, version)
+func templateSigner(o *observed) *aquaregistry.Cosign {
+	out := *o.cosign
+	out.Opts = make([]string, len(o.cosign.Opts))
+	for i, opt := range o.cosign.Opts {
+		out.Opts[i] = sign.TemplateVersion(opt, o.version)
 	}
 	// The bundle is named after the asset, which differs per environment, so the
-	// definition refers to it the way a registry does.
+	// definition refers to it the way a registry does, keeping whatever the release
+	// appends to the asset's name: .sigstore.json, .bundle, .cosign.bundle.
 	if out.Bundle != nil {
 		bundle := *out.Bundle
-		asset := "{{.Asset}}.sigstore.json"
+		asset := "{{.Asset}}" + strings.TrimPrefix(*bundle.Asset, o.asset)
 		bundle.Asset = &asset
 		bundle.URL = nil
 		out.Bundle = &bundle
@@ -319,13 +331,39 @@ func templateSigner(cosign *aquaregistry.Cosign, version string) *aquaregistry.C
 // templatable says whether what one release was signed with can be written as what every
 // release is signed with.
 //
-// A bundle on the release is named after the asset, which templateSigner writes as
-// {{.Asset}}.sigstore.json. A bundle fetched from a URL has the version and the
-// architecture written into the URL -- cri-o/cri-o's is
-// https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.v1.37.2.tar.gz.bundle --
-// and nothing says which part of it is which, so the definition is left to say it.
-func templatable(cosign *aquaregistry.Cosign) bool {
-	return cosign.Bundle == nil || cosign.Bundle.Type == "" || cosign.Bundle.Type == aquaregistry.PkgInfoTypeGitHubRelease
+// What can be is a bundle on the release named after the asset, which templateSigner
+// writes as {{.Asset}} and the rest of its name, and a key, which is the same file for
+// every environment. A bundle fetched from a URL has the version and the architecture
+// written into the URL -- cri-o/cri-o's is
+// https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.v1.37.2.tar.gz.bundle -- and
+// a signature or a certificate named after the asset is one environment's file. Nothing
+// says which part of their names is which, so the definition is left to say it.
+func templatable(o *observed) bool {
+	if perEnvironment(o.raw.Signature, o.asset) || perEnvironment(o.raw.Certificate, o.asset) {
+		return false
+	}
+	b := o.raw.Bundle
+	if b == nil {
+		return true
+	}
+	if b.Type != "" && b.Type != aquaregistry.PkgInfoTypeGitHubRelease {
+		return false
+	}
+	return b.Asset != nil && o.asset != "" && strings.HasPrefix(*b.Asset, o.asset)
+}
+
+// perEnvironment says whether a file cosign is given differs by environment: one fetched
+// from a URL, which names it as it stands, or one on the release named after the asset. A
+// file every asset is checked against, such as a signature of the checksums, is the same
+// for every environment.
+func perEnvironment(f *aquaregistry.DownloadedFile, asset string) bool {
+	if f == nil {
+		return false
+	}
+	if f.Type != "" && f.Type != aquaregistry.PkgInfoTypeGitHubRelease {
+		return true
+	}
+	return f.Asset != nil && asset != "" && strings.HasPrefix(*f.Asset, asset)
 }
 
 // identityOf returns the signer a cosign configuration names, or an empty string
