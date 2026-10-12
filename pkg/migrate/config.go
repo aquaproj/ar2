@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"log/slog"
 	"reflect"
 	"strings"
 
@@ -124,8 +125,8 @@ func Config(pkgName string, base *aquaregistry.PackageInfo, scaffold *genrgst.Ra
 		// One bare constraint is the same file with one case in it.
 		overrides = nil
 	}
-	pkgInfo.VersionOverrides = collapseTrailingEmpty(
-		withFallback(topLevelFirst(base.VersionConstraints, overrides), pkgInfo.VersionOverrides))
+	pkgInfo.VersionOverrides = collapseTrailingEmpty(dropRedundant(slog.New(slog.DiscardHandler), pkgInfo,
+		withFallback(topLevelFirst(base.VersionConstraints, overrides), pkgInfo.VersionOverrides)))
 
 	cfg := &g2.Config{PackageInfo: pkgInfo}
 	applyScaffold(cfg, scaffold)
