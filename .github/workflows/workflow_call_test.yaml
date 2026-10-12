@@ -8,7 +8,7 @@ on:
 permissions: {}
 jobs:
   test:
-    uses: suzuki-shunsuke/go-test-workflow/.github/workflows/test.yaml@da03362365c429417c3af65c7b224b06cb25ece4 # v3.2.1
+    uses: suzuki-shunsuke/go-test-workflow/.github/workflows/test.yaml@68d304b26d7e96ce8e7b25211dc5704a54f76326 # test-parallel-download
     with:
       aqua_version: v2.64.0
       golangci-lint-timeout: 120s
