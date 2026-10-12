@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -277,6 +278,9 @@ type observed struct {
 	// asset is the entry's asset name, which a bundle on the release is named after.
 	asset   string
 	version string
+	// siblings are the version's other entries, which say whether a file differs by
+	// environment by naming another.
+	siblings []*aquag2.Asset
 }
 
 // observedSigner returns the cosign configuration the generated files ended up with.
@@ -295,7 +299,10 @@ func observedSigner(versions []*version) *observed {
 			}
 			cosign := sign.Unstructure(asset.Cosign, asset, v.Version)
 			if identityOf(cosign.Opts) != "" {
-				return &observed{cosign: cosign, raw: asset.Cosign, asset: asset.Asset, version: v.Version}
+				return &observed{
+					cosign: cosign, raw: asset.Cosign, asset: asset.Asset, version: v.Version,
+					siblings: v.Registry.Assets,
+				}
 			}
 		}
 	}
@@ -339,7 +346,8 @@ func templateSigner(o *observed) *aquaregistry.Cosign {
 // a signature or a certificate named after the asset is one environment's file. Nothing
 // says which part of their names is which, so the definition is left to say it.
 func templatable(o *observed) bool {
-	if perEnvironment(o.raw.Signature, o.asset) || perEnvironment(o.raw.Certificate, o.asset) {
+	if o.perEnvironment(func(c *aquaregistry.Cosign) *aquaregistry.DownloadedFile { return c.Signature }) ||
+		o.perEnvironment(func(c *aquaregistry.Cosign) *aquaregistry.DownloadedFile { return c.Certificate }) {
 		return false
 	}
 	b := o.raw.Bundle
@@ -352,18 +360,43 @@ func templatable(o *observed) bool {
 	return b.Asset != nil && o.asset != "" && strings.HasPrefix(*b.Asset, o.asset)
 }
 
-// perEnvironment says whether a file cosign is given differs by environment: one fetched
-// from a URL, which names it as it stands, or one on the release named after the asset. A
-// file every asset is checked against, such as a signature of the checksums, is the same
-// for every environment.
-func perEnvironment(f *aquaregistry.DownloadedFile, asset string) bool {
+// perEnvironment says whether a file cosign is given differs by environment.
+//
+// The version's other entries answer it: a file one of them names otherwise is that
+// environment's. tool_linux_amd64.sig beside tool_linux_amd64.tar.gz isn't named after the
+// asset, and is one environment's all the same. A file every entry names alike, such as a
+// signature of the checksums, is the same for every environment.
+//
+// With no other entry to compare with, the name answers: a file fetched from a URL, or one
+// on the release named after the asset, is taken as one environment's, and so is any file
+// of an entry without an asset name to compare it with.
+func (o *observed) perEnvironment(file func(*aquaregistry.Cosign) *aquaregistry.DownloadedFile) bool {
+	f := file(o.raw)
 	if f == nil {
 		return false
 	}
+	compared := false
+	for _, sibling := range o.siblings {
+		if sibling.Cosign == nil || sibling.Asset == o.asset {
+			continue
+		}
+		compared = true
+		if !reflect.DeepEqual(file(sibling.Cosign), f) {
+			return true
+		}
+	}
+	if compared {
+		return false
+	}
+	return namedForEnvironment(f, o.asset)
+}
+
+// namedForEnvironment is perEnvironment's answer from the name alone.
+func namedForEnvironment(f *aquaregistry.DownloadedFile, asset string) bool {
 	if f.Type != "" && f.Type != aquaregistry.PkgInfoTypeGitHubRelease {
 		return true
 	}
-	return f.Asset != nil && asset != "" && strings.HasPrefix(*f.Asset, asset)
+	return asset == "" || f.Asset != nil && strings.HasPrefix(*f.Asset, asset)
 }
 
 // identityOf returns the signer a cosign configuration names, or an empty string

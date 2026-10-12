@@ -315,6 +315,29 @@ func TestPinSigner_signatureFile(t *testing.T) {
 	}
 }
 
+// A signature named after the environment rather than the asset is one environment's all
+// the same, which the version's other entries say by naming another.
+func TestPinSigner_signaturePerEnvironment(t *testing.T) {
+	t.Parallel()
+	entry := func(arch string) *generate.Asset {
+		sig := "tool_linux_" + arch + ".sig"
+		return &generate.Asset{
+			OS: "linux", Arch: arch, Asset: "tool_linux_" + arch + ".tar.gz",
+			Cosign: &aquaregistry.Cosign{
+				Signature: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &sig},
+				Opts:      []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		}
+	}
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(entry("amd64"), entry("arm64"))},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("one environment's signature was written for every environment: %+v", cfg.Cosign.Opts)
+	}
+}
+
 // An environment the version before it covered and this one doesn't is what an asset
 // renamed to a spelling the parser doesn't know looks like: no entry at all, rather than
 // a wrong one.

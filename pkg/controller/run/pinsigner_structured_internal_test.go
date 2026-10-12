@@ -15,6 +15,7 @@ func TestPinSigner_structured(t *testing.T) {
 	t.Parallel()
 	asset := &generate.Asset{
 		OS: "linux", Arch: "amd64", Type: "github_release", RepoOwner: "cli", RepoName: "cli",
+		Asset: "gh_2.0.0_linux_amd64.tar.gz",
 		Cosign: &aquaregistry.Cosign{Opts: []string{
 			"--certificate-identity", "https://github.com/cli/cli/.github/workflows/deployment.yml@refs/tags/v2.0.0",
 			"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
