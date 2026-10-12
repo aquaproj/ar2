@@ -21,7 +21,7 @@ func TestConfig_assetsFilterFromTemplate(t *testing.T) {
 			{GOOS: "windows", Format: "zip"},
 		},
 	}, nil)
-	if got, want := cfg.AllAssetsFilter, `Asset matches "^sqlite3def_.+_.+[.].+$"`; got != want {
+	if got, want := cfg.AllAssetsFilter, `Asset matches "^sqlite3def_.+_.+[.].+([.].+)?$"`; got != want {
 		t.Errorf("all_assets_filter is %q, want %q", got, want)
 	}
 }
@@ -39,7 +39,7 @@ func TestConfig_assetsFilterFromTemplates(t *testing.T) {
 			{GOOS: "windows", Asset: "access-matrix-amd64-windows.zip"},
 		},
 	}, nil)
-	want := `Asset matches "^access-matrix-.+-.+[.]tar[.]gz$" or Asset matches "^access-matrix-amd64-windows[.]zip$"`
+	want := `Asset matches "^access-matrix-.+-.+[.]tar[.]gz([.].+)?$" or Asset matches "^access-matrix-amd64-windows[.]zip([.].+)?$"`
 	if got := cfg.AllAssetsFilter; got != want {
 		t.Errorf("all_assets_filter is %q, want %q", got, want)
 	}
@@ -57,5 +57,22 @@ func TestConfig_noAssetsFilterForTheRepository(t *testing.T) {
 	}, nil)
 	if cfg.AllAssetsFilter != "" {
 		t.Errorf("all_assets_filter is %q, want none", cfg.AllAssetsFilter)
+	}
+}
+
+// The filter keeps what to read signing from, even a file named after no command:
+// google/go-containerregistry's provenance is multiple.intoto.jsonl.
+func TestConfig_assetsFilterKeepsSigning(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("google/go-containerregistry/crane", &aquaregistry.PackageInfo{
+		Type:           "github_release",
+		RepoOwner:      "google",
+		RepoName:       "go-containerregistry",
+		Asset:          "go-containerregistry_{{.OS}}_{{.Arch}}.tar.gz",
+		SLSAProvenance: &aquaregistry.SLSAProvenance{Type: "github_release", Asset: new("multiple.intoto.jsonl")},
+	}, nil)
+	want := `Asset matches "^go-containerregistry_.+_.+[.]tar[.]gz([.].+)?$" or Asset matches "^multiple[.]intoto[.]jsonl([.].+)?$"`
+	if got := cfg.AllAssetsFilter; got != want {
+		t.Errorf("all_assets_filter is %q, want %q", got, want)
 	}
 }

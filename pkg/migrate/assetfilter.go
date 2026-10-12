@@ -53,28 +53,69 @@ func assetsFilterFromTemplates(pkgName string, pkgInfo *aquaregistry.PackageInfo
 }
 
 // assetTemplates returns every asset name the definition gives, in the order it gives
-// them: the package's, its overrides', and each version's.
+// them: the package's, its overrides', and each version's, each followed by the assets
+// it is signed with.
+//
+// The signing files go in because the filter is a list of what to keep, and the
+// inference reads signing from the release's assets: a provenance file named
+// multiple.intoto.jsonl carries no command's name and would otherwise be dropped. A
+// checksum file is left out. The generated entry carries the asset's digest, so nothing
+// reads it.
 func assetTemplates(pkgInfo *aquaregistry.PackageInfo) []string {
 	var out []string
-	add := func(asset string, overrides []*aquaregistry.Override) {
+	add := func(asset string, signing ...*string) {
 		if asset != "" {
 			out = append(out, asset)
 		}
-		for _, ov := range overrides {
-			if ov.Asset != "" {
-				out = append(out, ov.Asset)
+		for _, s := range signing {
+			if s != nil && *s != "" {
+				out = append(out, *s)
 			}
 		}
 	}
-	add(pkgInfo.Asset, pkgInfo.Overrides)
+	add(pkgInfo.Asset, signingAssets(pkgInfo.Cosign, pkgInfo.Minisign, pkgInfo.SLSAProvenance)...)
+	for _, ov := range pkgInfo.Overrides {
+		add(ov.Asset, signingAssets(ov.Cosign, ov.Minisign, ov.SLSAProvenance)...)
+	}
 	for _, vo := range pkgInfo.VersionOverrides {
-		add(vo.Asset, vo.Overrides)
+		add(vo.Asset, signingAssets(vo.Cosign, vo.Minisign, vo.SLSAProvenance)...)
+		for _, ov := range vo.Overrides {
+			add(ov.Asset, signingAssets(ov.Cosign, ov.Minisign, ov.SLSAProvenance)...)
+		}
+	}
+	return out
+}
+
+// signingAssets returns the release assets a definition's signing is read from. A file
+// fetched from a URL is no asset of the release and isn't one the filter could drop.
+func signingAssets(cosign *aquaregistry.Cosign, minisign *aquaregistry.Minisign, slsa *aquaregistry.SLSAProvenance) []*string {
+	var out []*string
+	fromRelease := func(typ string) bool {
+		return typ == "" || typ == aquaregistry.PkgInfoTypeGitHubRelease
+	}
+	if cosign != nil {
+		for _, f := range []*aquaregistry.DownloadedFile{cosign.Signature, cosign.Certificate, cosign.Key, cosign.Bundle} {
+			if f != nil && fromRelease(f.Type) {
+				out = append(out, f.Asset)
+			}
+		}
+	}
+	if minisign != nil && fromRelease(minisign.Type) {
+		out = append(out, minisign.Asset)
+	}
+	if slsa != nil && fromRelease(slsa.Type) {
+		out = append(out, slsa.Asset)
 	}
 	return out
 }
 
 // templatePattern turns an asset template into an anchored regular expression in which
-// every {{...}} stands for one or more characters.
+// every {{...}} stands for one or more characters. That assumes an action never comes
+// out empty, which holds for every asset name aqua-registry writes: none of them uses
+// {{if}}.
+//
+// The pattern ends in an optional extension, so that a file named after the asset --
+// access-matrix-amd64-linux.tar.gz.sha256, a .sig -- is kept with it.
 //
 // The characters a regular expression gives a meaning to are written as a class of one,
 // [.], so that nothing needs a backslash inside the expression's string literal.
@@ -108,6 +149,6 @@ func templatePattern(template string) (string, bool) {
 		b.WriteString(".+")
 		rest = rest[start+end+2:]
 	}
-	b.WriteString("$")
+	b.WriteString("([.].+)?$")
 	return b.String(), true
 }
