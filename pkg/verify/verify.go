@@ -212,6 +212,9 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 
 	result := &Result{Checksum: checksum}
 	result.Files, result.NeedsReview, result.Unresolved, result.Holds = resolveFiles(logger, dest, asset.OS, windowsExtOf(asset), asset.Files)
+	if err := checkArm64(dest, asset, result.Files); err != nil {
+		return nil, err
+	}
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.
 	if asset.OS == "linux" {
