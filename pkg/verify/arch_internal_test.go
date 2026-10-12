@@ -43,7 +43,7 @@ func TestAmbiguousArm(t *testing.T) {
 	for name, want := range map[string]bool{
 		"mkcert-v1.4.1-linux-arm":          true,
 		"volta-2.0.2-linux-arm.tar.gz":     true,
-		"ghost-linux-armv5-2.11.3.gz":       true,
+		"ghost-linux-armv5-2.11.3.gz":      true,
 		"bob-linux-arm64.zip":              false,
 		"tool_linux_aarch64.tar.gz":        false,
 		"tool_linux_amd64.tar.gz":          false,

@@ -20,13 +20,14 @@ var errNotArm64 = errors.New("the executables are built for 32-bit ARM, not arm6
 // write it that way: volta-cli/volta's linux-arm, psf/black's windows-arm.exe and
 // MordechaiHadad/bob's bob-linux-arm are all 64-bit. Others mean 32-bit ARM by it --
 // FiloSottile/mkcert's linux-arm, Go's GOARCH=arm -- and an arm64 machine can't run
-// those. The name can't tell the two apart, so the executables are asked.
+// those. The name can't tell the two apart, so the executables are asked. armv8 is
+// left to them too: uname's armv8l is AArch32.
 func ambiguousArm(name string) bool {
 	s := strings.ToLower(name)
 	if !strings.Contains(s, "arm") {
 		return false
 	}
-	for _, sixtyFour := range []string{"arm64", "aarch64", "armv8", "arm-64", "arm_64"} {
+	for _, sixtyFour := range []string{"arm64", "aarch64", "arm-64", "arm_64"} {
 		if strings.Contains(s, sixtyFour) {
 			return false
 		}
