@@ -177,8 +177,7 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 		return
 	}
 	if !cfg.Cosign.GetEnabled() {
-		if signer := observedSigner(versions); signer != nil && templatable(signer) {
-			cosign := templateSigner(signer)
+		if cosign := everyReleaseSigner(versions); cosign != nil {
 			logger.Info("recording who signs the package", "package", pkgName,
 				"identity", identityOf(cosign.Opts))
 			cfg.Cosign = cosign
@@ -397,6 +396,43 @@ func namedForEnvironment(f *aquaregistry.DownloadedFile, asset string) bool {
 		return true
 	}
 	return asset == "" || f.Asset != nil && strings.HasPrefix(*f.Asset, asset)
+}
+
+// everyReleaseSigner is what the generated files were signed with, written as what every
+// release is expected to be signed with, or nil when it can't be written that way.
+func everyReleaseSigner(versions []*version) *aquaregistry.Cosign {
+	signer := observedSigner(versions)
+	if signer == nil || !templatable(signer) {
+		return nil
+	}
+	cosign := templateSigner(signer)
+	if stillPinned(cosign, signer.version) {
+		return nil
+	}
+	return cosign
+}
+
+// stillPinned says whether a file cosign is given still names the version it was read
+// off once the version is put back as a template.
+//
+// TemplateVersion replaces the tag as it is written, and a file can carry the version
+// written otherwise: goreleaser's tool_1.0.0_checksums.txt.sig at v1.0.0, or a URL with
+// 1.0.0 in its path. Such a definition holds only for the release that was looked at, so it
+// is left to say it.
+func stillPinned(cosign *aquaregistry.Cosign, version string) bool {
+	bare := strings.TrimPrefix(version, "v")
+	if bare == "" {
+		return false
+	}
+	for i, opt := range cosign.Opts {
+		switch opt {
+		case "--signature", "--certificate", "--key":
+			if i+1 < len(cosign.Opts) && strings.Contains(cosign.Opts[i+1], bare) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // identityOf returns the signer a cosign configuration names, or an empty string

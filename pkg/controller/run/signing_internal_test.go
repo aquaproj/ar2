@@ -338,6 +338,29 @@ func TestPinSigner_signaturePerEnvironment(t *testing.T) {
 	}
 }
 
+// goreleaser signs the checksums under a name carrying the version without its v, which
+// putting the tag back as a template leaves as it is.
+func TestPinSigner_versionInFileName(t *testing.T) {
+	t.Parallel()
+	sig := "tool_1.0.0_checksums.txt.sig"
+	entry := func(arch string) *generate.Asset {
+		return &generate.Asset{
+			OS: "linux", Arch: arch, Asset: "tool_1.0.0_linux_" + arch + ".tar.gz", RepoOwner: "o", RepoName: "tool",
+			Cosign: &aquaregistry.Cosign{
+				Signature: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &sig},
+				Opts:      []string{"--certificate-identity", "https://github.com/o/tool/.github/workflows/release.yml@refs/tags/v1.0.0"},
+			},
+		}
+	}
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "o/tool", cfg, []*version{
+		{Version: "v1.0.0", Registry: registryOf(entry("amd64"), entry("arm64"))},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("a signature only v1.0.0 has was written for every version: %+v", cfg.Cosign.Opts)
+	}
+}
+
 // An environment the version before it covered and this one doesn't is what an asset
 // renamed to a spelling the parser doesn't know looks like: no entry at all, rather than
 // a wrong one.
