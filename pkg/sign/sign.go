@@ -19,6 +19,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/checksum"
 	"github.com/aquaproj/aqua/v2/pkg/config"
 	"github.com/aquaproj/aqua/v2/pkg/config/aqua"
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/cosign"
 	"github.com/aquaproj/aqua/v2/pkg/download"
 	"github.com/aquaproj/aqua/v2/pkg/ghattestation"
@@ -350,7 +351,7 @@ func (v *Verifier) checks(ctx context.Context, logger *slog.Logger, rt *runtime.
 		{kind: "slsa_provenance", tool: toolSLSA, enabled: asset.SLSAProvenance.GetEnabled(), asset: asset, verify: func() error {
 			return v.slsa.Verify(ctx, logger, rt, asset.SLSAProvenance, art, file, &slsa.ParamVerify{
 				SourceURI:    pkg.PackageInfo.SLSASourceURI(),
-				SourceTag:    version,
+				SourceTag:    slsaSourceTag(asset.SLSAProvenance, version),
 				ArtifactPath: path,
 			})
 		}},
@@ -402,4 +403,15 @@ func notAttested(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "no attestations found") ||
 		(strings.Contains(msg, "HTTP 404") && strings.Contains(msg, "/attestations/"))
+}
+
+// slsaSourceTag is the tag slsa-verifier is asked to check the provenance against, the way
+// aqua asks at install time: the entry's source_tag when it says one, and the version
+// otherwise. "-" asks for no tag at all -- jreleaser/jreleaser's provenance is built by a
+// run with no tag ref, and checking it against the version fails what aqua passes.
+func slsaSourceTag(s *aquaregistry.SLSAProvenance, version string) string {
+	if s != nil && s.SourceTag != "" {
+		return s.SourceTag
+	}
+	return version
 }
