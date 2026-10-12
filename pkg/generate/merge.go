@@ -1,6 +1,8 @@
 package generate
 
 import (
+	"slices"
+
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
 )
@@ -41,8 +43,18 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	// release doesn't express, such as musl vs glibc. They go first because the
 	// first matching override wins, and a variant override must beat the generic
 	// one for the platform.
-	if variants := variantOverrides(base.Overrides); len(variants) > 0 {
-		p.Overrides = append(variants, p.Overrides...)
+	//
+	// An override saying the format of the archive it names the executables of comes
+	// next, for the same reason: see formatOverrides.
+	if overrides := slices.Concat(variantOverrides(base.Overrides), formatOverrides(base.Overrides, p.Overrides)); len(overrides) > 0 {
+		p.Overrides = append(overrides, p.Overrides...)
+	}
+
+	// The extension aqua gives files[].src on Windows. The release's asset names say
+	// nothing about what is inside the archive: sass/dart-sass's Windows build runs from
+	// dart-sass/sass.bat, and without it the entry looks for dart-sass/sass.exe.
+	if base.WindowsExt != "" {
+		p.WindowsExt = base.WindowsExt
 	}
 
 	// Signing configuration. None of it can be read off the release.
@@ -82,6 +94,53 @@ func variantOverrides(overrides []*aquaregistry.Override) []*aquaregistry.Overri
 		out = append(out, ov)
 	}
 	return out
+}
+
+// formatOverrides returns an override for each one in the definition that says which
+// format holds the executables it names, taking the rest from the inferred override for
+// the same platform.
+//
+// The inference picks one format per platform from the asset names, and a release can
+// publish the same build in two: tamasfe/taplo's Windows build is both a .gz holding
+// taplo-windows-x86_64 and a .zip holding taplo.exe. Whichever the inference picks, the
+// definition's files describe one of them, and an override giving both the format and the
+// files is saying which. Taking the files without the format looks for taplo.exe in the
+// .gz.
+//
+// An override without files is left to the inference: a format alone says nothing the
+// asset names can't, and the definition's may only be out of date.
+func formatOverrides(base, inferred []*aquaregistry.Override) []*aquaregistry.Override {
+	var out []*aquaregistry.Override
+	for _, ov := range base {
+		if ov.Format == "" || len(ov.Files) == 0 || len(ov.Variants) != 0 || len(ov.Envs) != 0 {
+			continue
+		}
+		o := &aquaregistry.Override{}
+		if matched := inferredFor(inferred, ov); matched != nil {
+			copied := *matched
+			o = &copied
+		}
+		o.GOOS = ov.GOOS
+		o.GOArch = ov.GOArch
+		o.Envs = nil
+		o.Format = ov.Format
+		out = append(out, o)
+	}
+	return out
+}
+
+// inferredFor returns the inferred override aqua would apply on the platform the
+// definition's override is for, or nil when there is none.
+func inferredFor(inferred []*aquaregistry.Override, ov *aquaregistry.Override) *aquaregistry.Override {
+	for _, o := range inferred {
+		if len(o.Envs) != 0 || len(o.Variants) != 0 {
+			continue
+		}
+		if (o.GOOS == "" || o.GOOS == ov.GOOS) && (o.GOArch == "" || o.GOArch == ov.GOArch) {
+			return o
+		}
+	}
+	return nil
 }
 
 // overrideSigning applies the signing an override names for one environment.

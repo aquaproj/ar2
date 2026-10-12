@@ -206,7 +206,7 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		Packslip:                   ov.Packslip,
 		GitHubArtifactAttestations: Attestations(ov.GitHubArtifactAttestations),
 
-		Format:       correctedFormat(asset, ov.Format),
+		Format:       overrideFormat(asset, ov),
 		Replacements: unguessableSpellings(ov.Replacements),
 		WindowsExt:   ov.WindowsExt,
 		AppendExt:    ov.AppendExt,
@@ -226,6 +226,19 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		}
 	}
 	return out
+}
+
+// overrideFormat is the format an override keeps.
+//
+// An override naming the executables inside the archive describes one archive, and the
+// format says which when a release publishes the build in two: tamasfe/taplo's Windows
+// build is a .gz holding taplo-windows-x86_64 and a .zip holding taplo.exe. The asset
+// name being built from {{.Format}} says nothing then, since both are.
+func overrideFormat(asset string, ov *aquaregistry.Override) string {
+	if len(ov.Files) != 0 {
+		return ov.Format
+	}
+	return correctedFormat(asset, ov.Format)
 }
 
 // Attestations writes the signing workflow under the name aqua reads first.
