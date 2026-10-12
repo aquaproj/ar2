@@ -100,3 +100,38 @@ func TestMerge_slsaProvenance(t *testing.T) {
 		t.Error("the inferred definition was modified")
 	}
 }
+
+// tamasfe/taplo publishes its Windows build as a .gz and as a .zip, and the definition's
+// files describe the .zip. The format goes with them, over what was inferred for Windows.
+func TestMerge_formatWithFiles(t *testing.T) {
+	t.Parallel()
+	inferred := &aquaregistry.PackageInfo{
+		Asset:  "taplo-{{.OS}}-{{.Arch}}.{{.Format}}",
+		Format: "gz",
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Replacements: map[string]string{"amd64": "x86_64"}},
+		},
+	}
+	got := merge(inferred, &aquaregistry.PackageInfo{
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Format: "zip", Files: []*aquaregistry.File{{Name: "taplo", Src: "taplo.exe"}}},
+			{GOOS: "darwin", Format: "tar.gz"},
+		},
+	})
+	if len(got.Overrides) != 2 {
+		t.Fatalf("got %d overrides, want the definition's format in front of the inferred one:\n%+v", len(got.Overrides), got.Overrides)
+	}
+	first := got.Overrides[0]
+	if first.GOOS != "windows" || first.Format != "zip" {
+		t.Errorf("the first override is %+v, want windows with zip", first)
+	}
+	if first.Replacements["amd64"] != "x86_64" {
+		t.Errorf("the inferred override's replacements were lost: %+v", first.Replacements)
+	}
+	if len(first.Files) != 0 {
+		t.Errorf("the files went into the override, which takes them from the definition: %+v", first.Files)
+	}
+	if inferred.Overrides[0].Format != "" {
+		t.Error("the inferred definition was modified")
+	}
+}

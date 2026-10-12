@@ -220,3 +220,31 @@ func TestConfig_supportedEnvs(t *testing.T) {
 		t.Errorf("the version override's supported_envs (-want +got):\n%s", diff)
 	}
 }
+
+// An override naming the executables keeps its format, because a release can publish the
+// build in two: tamasfe/taplo's Windows build is a .gz and a .zip, and only the .zip holds
+// taplo.exe. Without them the format is read off the asset names.
+func TestConfig_overrideFormatWithFiles(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("tamasfe/taplo", &aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "tamasfe",
+		RepoName:  "taplo",
+		Asset:     "taplo-{{.OS}}-{{.Arch}}.{{.Format}}",
+		Format:    "gz",
+		Files:     []*aquaregistry.File{{Name: "taplo", Src: "taplo-{{.OS}}-{{.Arch}}"}},
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Format: "zip", Files: []*aquaregistry.File{{Name: "taplo", Src: "taplo.exe"}}},
+		},
+	}, nil)
+
+	if cfg.Format != "" {
+		t.Errorf("the package's format is %q, want it read off the asset names", cfg.Format)
+	}
+	if len(cfg.Overrides) != 1 {
+		t.Fatalf("got %d overrides, want 1", len(cfg.Overrides))
+	}
+	if got := cfg.Overrides[0].Format; got != "zip" {
+		t.Errorf("the Windows override's format is %q, want zip", got)
+	}
+}
