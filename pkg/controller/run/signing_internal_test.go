@@ -249,6 +249,29 @@ func TestPinSigner_noIdentity(t *testing.T) {
 	}
 }
 
+// A bundle fetched from a URL has the version and the architecture written into it, and
+// nothing says which part is which: cri-o/cri-o's is on storage.googleapis.com.
+func TestPinSigner_httpBundle(t *testing.T) {
+	t.Parallel()
+	url := "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.v1.37.2.tar.gz.bundle"
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{}}
+	pinSigner(discardLogger(), "cri-o/cri-o", cfg, []*version{
+		{Version: "v1.37.2", Registry: registryOf(&generate.Asset{
+			OS: "linux", Arch: "amd64",
+			Cosign: &aquaregistry.Cosign{
+				Bundle: &aquaregistry.DownloadedFile{Type: "http", URL: &url},
+				Opts: []string{
+					"--certificate-identity", "https://github.com/cri-o/packaging/.github/workflows/obs.yml@refs/heads/main",
+					"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
+				},
+			},
+		})},
+	})
+	if cfg.Cosign != nil {
+		t.Errorf("a bundle fetched from a URL was written as a template: %+v", cfg.Cosign.Bundle)
+	}
+}
+
 // An environment the version before it covered and this one doesn't is what an asset
 // renamed to a spelling the parser doesn't know looks like: no entry at all, rather than
 // a wrong one.

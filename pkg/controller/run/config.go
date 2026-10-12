@@ -176,7 +176,7 @@ func pinSigner(logger *slog.Logger, pkgName string, cfg *aquag2.Config, versions
 		return
 	}
 	if !cfg.Cosign.GetEnabled() {
-		if signer, version := observedSigner(versions); signer != nil {
+		if signer, version := observedSigner(versions); signer != nil && templatable(signer) {
 			cosign := templateSigner(signer, version)
 			logger.Info("recording who signs the package", "package", pkgName,
 				"identity", identityOf(cosign.Opts))
@@ -314,6 +314,18 @@ func templateSigner(cosign *aquaregistry.Cosign, version string) *aquaregistry.C
 		out.Bundle = &bundle
 	}
 	return &out
+}
+
+// templatable says whether what one release was signed with can be written as what every
+// release is signed with.
+//
+// A bundle on the release is named after the asset, which templateSigner writes as
+// {{.Asset}}.sigstore.json. A bundle fetched from a URL has the version and the
+// architecture written into the URL -- cri-o/cri-o's is
+// https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.v1.37.2.tar.gz.bundle --
+// and nothing says which part of it is which, so the definition is left to say it.
+func templatable(cosign *aquaregistry.Cosign) bool {
+	return cosign.Bundle == nil || cosign.Bundle.Type == "" || cosign.Bundle.Type == aquaregistry.PkgInfoTypeGitHubRelease
 }
 
 // identityOf returns the signer a cosign configuration names, or an empty string
