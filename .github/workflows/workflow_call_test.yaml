@@ -8,7 +8,7 @@ on:
 permissions: {}
 jobs:
   test:
-    uses: suzuki-shunsuke/go-test-workflow/.github/workflows/test.yaml@da03362365c429417c3af65c7b224b06cb25ece4 # v3.2.1
+    uses: suzuki-shunsuke/go-test-workflow/.github/workflows/test.yaml@0e5b3cfbad74f2713fa80ae9bef2f731d89d8c42 # split-lint-and-test
     with:
       aqua_version: v2.64.0
       golangci-lint-timeout: 120s
