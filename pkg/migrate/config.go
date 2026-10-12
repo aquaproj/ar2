@@ -130,6 +130,11 @@ func Config(pkgName string, base *aquaregistry.PackageInfo, scaffold *genrgst.Ra
 
 	cfg := &g2.Config{PackageInfo: pkgInfo}
 	applyScaffold(cfg, scaffold)
+	if cfg.AllAssetsFilter == "" {
+		// From the definition as aqua-registry has it: the trim has taken the asset
+		// names out of pkgInfo.
+		cfg.AllAssetsFilter = assetsFilterFromTemplates(pkgName, base)
+	}
 	return cfg, unconverted
 }
 
