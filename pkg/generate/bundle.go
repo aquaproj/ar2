@@ -80,7 +80,14 @@ func readSmallAsset(ctx context.Context, httpClient *http.Client, url string) ([
 }
 
 // rawBundle is the part of the Sigstore bundle format that says who signed.
+//
+// Cert is where the older format cosign's sign-blob --bundle writes keeps the
+// certificate: as base64 of its PEM, beside the signature and the transparency log
+// entry, rather than as verification material. cosign verifies that format too, and
+// some releases still publish it.
 type rawBundle struct {
+	Cert string `json:"cert"`
+
 	VerificationMaterial struct {
 		Certificate *struct {
 			RawBytes []byte `json:"rawBytes"`
@@ -112,6 +119,8 @@ func parseSigner(b []byte) (*signer, error) {
 	case material.PublicKey != nil:
 		// Signed with a key. There is nothing here to constrain but the key.
 		return &signer{}, nil
+	case raw.Cert != "":
+		return parseCertificateSigner([]byte(raw.Cert))
 	default:
 		return nil, errBundleMaterial
 	}

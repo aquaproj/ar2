@@ -1,7 +1,9 @@
 package generate
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"testing"
 )
@@ -67,5 +69,34 @@ func TestParseCertificateSigner_notACertificate(t *testing.T) {
 	_, err := parseCertificateSigner([]byte("<html>"))
 	if !errors.Is(err, errCertificateEncoding) {
 		t.Fatalf("the error is %v", err)
+	}
+}
+
+// cosign's sign-blob --bundle used to write the certificate as base64 of its PEM, beside
+// the signature: ouch-org/ouch's 0.8.3 bundles.
+func TestParseSigner_legacyBundle(t *testing.T) {
+	t.Parallel()
+	raw := &rawBundle{}
+	if err := json.Unmarshal(keylessBundle(t, identity, issuer), raw); err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: raw.VerificationMaterial.Certificate.RawBytes})
+	b, err := json.Marshal(map[string]string{
+		"base64Signature": "c2lnbmF0dXJl",
+		"cert":            base64.StdEncoding.EncodeToString(certPEM),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signer, err := parseSigner(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Identity != identity {
+		t.Errorf("the identity is %q", signer.Identity)
+	}
+	if signer.Issuer != issuer {
+		t.Errorf("the issuer is %q", signer.Issuer)
 	}
 }
