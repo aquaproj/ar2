@@ -45,10 +45,13 @@ func assetsFilterFromTemplates(pkgName string, pkgInfo *aquaregistry.PackageInfo
 	if len(patterns) == 0 {
 		return ""
 	}
-	conds := make([]string, len(patterns))
-	for i, p := range patterns {
-		conds[i] = `Asset matches "` + p + `"`
+	conds := make([]string, 0, len(patterns)+1)
+	for _, p := range patterns {
+		conds = append(conds, `Asset matches "`+p+`"`)
 	}
+	// aqua gr reads SLSA provenance off any asset ending in .intoto.jsonl, so a release
+	// that publishes one after aqua-registry's definition was written is still read.
+	conds = append(conds, `Asset endsWith ".intoto.jsonl"`)
 	return strings.Join(conds, " or ")
 }
 

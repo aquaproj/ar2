@@ -21,7 +21,7 @@ func TestConfig_assetsFilterFromTemplate(t *testing.T) {
 			{GOOS: "windows", Format: "zip"},
 		},
 	}, nil)
-	if got, want := cfg.AllAssetsFilter, `Asset matches "^sqlite3def_.+_.+[.].+([.].+)?$"`; got != want {
+	if got, want := cfg.AllAssetsFilter, `Asset matches "^sqlite3def_.+_.+[.].+([.].+)?$" or Asset endsWith ".intoto.jsonl"`; got != want {
 		t.Errorf("all_assets_filter is %q, want %q", got, want)
 	}
 }
@@ -39,7 +39,7 @@ func TestConfig_assetsFilterFromTemplates(t *testing.T) {
 			{GOOS: "windows", Asset: "access-matrix-amd64-windows.zip"},
 		},
 	}, nil)
-	want := `Asset matches "^access-matrix-.+-.+[.]tar[.]gz([.].+)?$" or Asset matches "^access-matrix-amd64-windows[.]zip([.].+)?$"`
+	want := `Asset matches "^access-matrix-.+-.+[.]tar[.]gz([.].+)?$" or Asset matches "^access-matrix-amd64-windows[.]zip([.].+)?$" or Asset endsWith ".intoto.jsonl"`
 	if got := cfg.AllAssetsFilter; got != want {
 		t.Errorf("all_assets_filter is %q, want %q", got, want)
 	}
@@ -71,7 +71,7 @@ func TestConfig_assetsFilterKeepsSigning(t *testing.T) {
 		Asset:          "go-containerregistry_{{.OS}}_{{.Arch}}.tar.gz",
 		SLSAProvenance: &aquaregistry.SLSAProvenance{Type: "github_release", Asset: new("multiple.intoto.jsonl")},
 	}, nil)
-	want := `Asset matches "^go-containerregistry_.+_.+[.]tar[.]gz([.].+)?$" or Asset matches "^multiple[.]intoto[.]jsonl([.].+)?$"`
+	want := `Asset matches "^go-containerregistry_.+_.+[.]tar[.]gz([.].+)?$" or Asset matches "^multiple[.]intoto[.]jsonl([.].+)?$" or Asset endsWith ".intoto.jsonl"`
 	if got := cfg.AllAssetsFilter; got != want {
 		t.Errorf("all_assets_filter is %q, want %q", got, want)
 	}
