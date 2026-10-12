@@ -3,7 +3,7 @@ module github.com/aquaproj/ar2
 go 1.27.2
 
 require (
-	github.com/aquaproj/aqua/v2 v2.64.1-0.20261012135024-bfdd5f8874d2
+	github.com/aquaproj/aqua/v2 v2.64.1-0.20261012144749-6dcd25806f00
 	github.com/expr-lang/expr v1.17.8
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-cmp v0.7.0
