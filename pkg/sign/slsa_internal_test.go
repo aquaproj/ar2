@@ -6,8 +6,6 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 )
 
-// jreleaser/jreleaser's provenance is built by a run with no tag ref, and its entry says
-// source_tag "-" so that slsa-verifier isn't asked for one, as aqua does at install time.
 func TestSLSASourceTag(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
