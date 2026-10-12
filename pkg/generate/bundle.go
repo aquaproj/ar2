@@ -81,10 +81,10 @@ func readSmallAsset(ctx context.Context, httpClient *http.Client, url string) ([
 
 // rawBundle is the part of the Sigstore bundle format that says who signed.
 //
-// Cert is the older format cosign's sign-blob --bundle writes, which carries the
-// certificate as base64 of its PEM beside the signature and the transparency log entry
-// rather than as verification material. ouch-org/ouch publishes it from 0.8.3, and cosign
-// verifies it the same way.
+// Cert is where the older format cosign's sign-blob --bundle writes keeps the
+// certificate: as base64 of its PEM, beside the signature and the transparency log
+// entry, rather than as verification material. cosign verifies that format too, and
+// some releases still publish it.
 type rawBundle struct {
 	Cert string `json:"cert"`
 
