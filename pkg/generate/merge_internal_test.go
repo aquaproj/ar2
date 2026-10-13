@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"strings"
 	"testing"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -168,5 +169,93 @@ func TestMerge_unnamedOSAsset(t *testing.T) {
 	}
 	if len(inferred.Overrides) != 0 || len(inferred.SupportedEnvs) != 2 {
 		t.Error("the inferred definition was modified")
+	}
+}
+
+func TestAddUnnamedOSAssets(t *testing.T) {
+	t.Parallel()
+	windows := &aquaregistry.Override{GOOS: "windows", Asset: "tool-{{.Version}}.zip"}
+	for _, tt := range []struct {
+		name      string
+		inferred  aquaregistry.SupportedEnvs
+		base      *aquaregistry.PackageInfo
+		supported []string
+		missing   []string
+		format    string
+	}{
+		{
+			// The asset says no architecture, so it is taken for amd64 only.
+			name:      "no architecture is amd64",
+			inferred:  aquaregistry.SupportedEnvs{"linux", "darwin"},
+			base:      &aquaregistry.PackageInfo{Format: "zip", Overrides: []*aquaregistry.Override{windows}},
+			supported: []string{"windows/amd64"},
+			missing:   []string{"windows/arm64"},
+			format:    "zip",
+		},
+		{
+			// The inference read the arm64 build's name and not the amd64 one's.
+			name:      "one architecture inferred",
+			inferred:  aquaregistry.SupportedEnvs{"linux", "darwin", "windows/arm64"},
+			base:      &aquaregistry.PackageInfo{Overrides: []*aquaregistry.Override{windows}},
+			supported: []string{"windows/amd64", "windows/arm64"},
+		},
+		{
+			// An asset naming its OS is the inference's to read.
+			name:     "the name says the OS",
+			inferred: aquaregistry.SupportedEnvs{"linux"},
+			base: &aquaregistry.PackageInfo{Overrides: []*aquaregistry.Override{
+				{GOOS: "darwin", Asset: "tool-{{.Version}}-macos.tar.gz"},
+			}},
+			missing: []string{"darwin/amd64"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := &aquaregistry.PackageInfo{Format: "tar.gz", SupportedEnvs: tt.inferred}
+			addUnnamedOSAssets(p, tt.base)
+			for _, env := range tt.supported {
+				goos, goarch, _ := strings.Cut(env, "/")
+				if !p.CheckSupportedEnvs(goos, goarch, env) {
+					t.Errorf("%s isn't supported: %v", env, p.SupportedEnvs)
+				}
+			}
+			for _, env := range tt.missing {
+				goos, goarch, _ := strings.Cut(env, "/")
+				if p.CheckSupportedEnvs(goos, goarch, env) {
+					t.Errorf("%s is supported: %v", env, p.SupportedEnvs)
+				}
+			}
+			if tt.format != "" && (len(p.Overrides) == 0 || p.Overrides[0].Format != tt.format) {
+				t.Errorf("the overrides are %+v, want format %s from the definition", p.Overrides, tt.format)
+			}
+		})
+	}
+}
+
+// When the inference covers every platform, nothing is added.
+func TestAddUnnamedOSAssets_everyPlatform(t *testing.T) {
+	t.Parallel()
+	p := &aquaregistry.PackageInfo{}
+	addUnnamedOSAssets(p, &aquaregistry.PackageInfo{Overrides: []*aquaregistry.Override{
+		{GOOS: "windows", Asset: "tool-{{.Version}}.zip"},
+	}})
+	if len(p.Overrides) != 0 || p.SupportedEnvs != nil {
+		t.Errorf("got %+v", p)
+	}
+}
+
+// The override added for a platform goes after a variant override for it, which aqua
+// applies first.
+func TestMerge_unnamedOSAssetAfterVariants(t *testing.T) {
+	t.Parallel()
+	musl := &aquaregistry.Override{GOOS: "linux", Asset: "tool-musl-{{.Version}}.tar.gz", Variants: []*aquaregistry.Variant{{Key: "libc", Value: "musl"}}}
+	got := merge(&aquaregistry.PackageInfo{SupportedEnvs: aquaregistry.SupportedEnvs{"darwin"}}, &aquaregistry.PackageInfo{
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "linux", Asset: "tool-{{.Version}}.tar.gz"},
+			musl,
+		},
+	})
+	if len(got.Overrides) != 2 || got.Overrides[0] != musl || got.Overrides[1].Asset != "tool-{{.Version}}.tar.gz" {
+		t.Errorf("the overrides are %+v", got.Overrides)
 	}
 }

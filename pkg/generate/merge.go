@@ -5,6 +5,7 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
+	"github.com/aquaproj/ar2/pkg/migrate"
 )
 
 // merge applies the parts of aqua-registry's definition that can't be inferred from
@@ -51,8 +52,9 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	}
 
 	// An asset whose name says no OS is one the inference can't give to any, and the
-	// definition can: see unnamedOSAssets.
-	addUnnamedOSAssets(p, base.Overrides)
+	// definition can: see addUnnamedOSAssets. After the variant and format overrides, so
+	// that a variant for the same platform still applies first.
+	addUnnamedOSAssets(p, base)
 
 	// The extension aqua gives files[].src on Windows. The release's asset names say
 	// nothing about what is inside the archive: sass/dart-sass's Windows build runs from
@@ -142,45 +144,39 @@ func formatOverrides(base, inferred []*aquaregistry.Override) []*aquaregistry.Ov
 // inferred. An override in the definition naming the asset for the platform is what puts
 // it back. It is used only where the inference has nothing, so a release that starts
 // naming its assets is read off the release again.
-func addUnnamedOSAssets(p *aquaregistry.PackageInfo, base []*aquaregistry.Override) {
+//
+// An override naming no architecture is taken for amd64. A name saying neither OS nor
+// architecture is the one build the release has for the OS, and that is amd64 far more
+// often than not; an arm64 machine that can run it is the emulation's to say.
+func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 	if p.SupportedEnvs == nil {
 		// The inference covers every platform.
 		return
 	}
-	for _, ov := range base {
-		if ov.Asset == "" || ov.GOOS == "" || len(ov.Variants) != 0 || len(ov.Envs) != 0 {
+	for _, ov := range base.Overrides {
+		if ov.GOOS == "" || len(ov.Envs) != 0 || len(ov.Variants) != 0 || !migrate.UnnamedOS(ov.Asset) {
 			continue
 		}
-		if inferredSupports(p, ov.GOOS, ov.GOArch) {
+		goarch := ov.GOArch
+		if goarch == "" {
+			goarch = "amd64"
+		}
+		env := ov.GOOS + "/" + goarch
+		if p.CheckSupportedEnvs(ov.GOOS, goarch, env) {
 			continue
 		}
-		p.Overrides = append([]*aquaregistry.Override{{
+		format := ov.Format
+		if format == "" {
+			format = base.Format
+		}
+		p.Overrides = append(p.Overrides, &aquaregistry.Override{
 			GOOS:   ov.GOOS,
-			GOArch: ov.GOArch,
+			GOArch: goarch,
 			Asset:  ov.Asset,
-			Format: ov.Format,
-		}}, p.Overrides...)
-		env := ov.GOOS
-		if ov.GOArch != "" {
-			env += "/" + ov.GOArch
-		}
+			Format: format,
+		})
 		p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
 	}
-}
-
-// inferredSupports says whether the inference gives the platform an asset: either
-// architecture of the OS when the override names none.
-func inferredSupports(p *aquaregistry.PackageInfo, goos, goarch string) bool {
-	archs := []string{"amd64", "arm64"}
-	if goarch != "" {
-		archs = []string{goarch}
-	}
-	for _, arch := range archs {
-		if p.CheckSupportedEnvs(goos, arch, goos+"/"+arch) {
-			return true
-		}
-	}
-	return false
 }
 
 // inferredFor returns the inferred override aqua would apply on the platform the

@@ -271,3 +271,23 @@ func TestConfig_unnamedOSAsset(t *testing.T) {
 		t.Errorf("the override is %+v", got)
 	}
 }
+
+// Only what generating reads is kept: an override for one OS, selecting on nothing else,
+// whose asset's name says no OS in any form.
+func TestConfig_unnamedOSAssetNotRead(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("o/tool", &aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "o",
+		RepoName:  "tool",
+		Asset:     "tool-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		Overrides: []*aquaregistry.Override{
+			{GOArch: "arm64", Asset: "tool-{{.Version}}-arm64.tar.gz"},
+			{Envs: []string{"windows/amd64"}, Asset: "tool.zip"},
+			{GOOS: "darwin", Asset: "tool-{{.Version}}-{{title .OS}}.zip"},
+		},
+	}, nil)
+	if len(cfg.Overrides) != 0 {
+		t.Errorf("got overrides nothing reads: %+v", cfg.Overrides)
+	}
+}

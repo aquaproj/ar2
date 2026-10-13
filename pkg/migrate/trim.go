@@ -186,7 +186,7 @@ func saysSomething(ov *aquaregistry.Override) bool {
 	}
 	// A variant's asset, or an asset whose name says no OS: the release's asset list
 	// can't be read for either.
-	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "") || unnamedOS(ov.Asset)
+	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "") || unnamedOSOverride(ov)
 }
 
 func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquaregistry.Override {
@@ -213,7 +213,7 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		AppendExt:    ov.AppendExt,
 		Vars:         ov.Vars,
 	}
-	if unnamedOS(ov.Asset) {
+	if unnamedOSOverride(ov) {
 		// An asset whose name says no OS: the release can't be read for which
 		// platform it is, so the definition says it. See addUnnamedOSAssets.
 		out.Asset = ov.Asset
@@ -299,12 +299,19 @@ func unguessableSpellings(replacements aquaregistry.Replacements) aquaregistry.R
 	return out
 }
 
-// unnamedOS says whether an override's asset name says no OS, so that the inference can't
-// tell which platform it is for: koalaman/shellcheck's shellcheck-{{.Version}}.{{.Format}}
-// for Windows.
-func unnamedOS(asset string) bool {
-	if asset == "" || strings.Contains(asset, "{{.OS}}") {
+// UnnamedOS says whether an asset's name says no OS, so that the inference can't tell
+// which platform it is for: koalaman/shellcheck's shellcheck-{{.Version}}.{{.Format}} for
+// Windows. A name built from the OS in any form ({{.OS}}, {{title .OS}}) says one.
+func UnnamedOS(asset string) bool {
+	if asset == "" || strings.Contains(asset, ".OS") {
 		return false
 	}
 	return aquaasset.ParseAssetName(asset, "").OS == ""
+}
+
+// unnamedOSOverride says whether an override names, for one OS, an asset whose name says
+// no OS: what generating falls back on when the inference finds nothing for the OS. An
+// override for no OS, or one selecting on envs or variants, isn't read that way.
+func unnamedOSOverride(ov *aquaregistry.Override) bool {
+	return ov.GOOS != "" && len(ov.Envs) == 0 && len(ov.Variants) == 0 && UnnamedOS(ov.Asset)
 }
