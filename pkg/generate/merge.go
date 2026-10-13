@@ -50,6 +50,10 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		p.Overrides = append(overrides, p.Overrides...)
 	}
 
+	// An asset whose name says no OS is one the inference can't give to any, and the
+	// definition can: see unnamedOSAssets.
+	addUnnamedOSAssets(p, base.Overrides)
+
 	// The extension aqua gives files[].src on Windows. The release's asset names say
 	// nothing about what is inside the archive: sass/dart-sass's Windows build runs from
 	// dart-sass/sass.bat, and without it the entry looks for dart-sass/sass.exe.
@@ -127,6 +131,56 @@ func formatOverrides(base, inferred []*aquaregistry.Override) []*aquaregistry.Ov
 		out = append(out, o)
 	}
 	return out
+}
+
+// addUnnamedOSAssets gives a platform the asset the definition names for it, when the
+// inference found none there.
+//
+// The inference reads which platform an asset is for off its name, and a name can say
+// none: koalaman/shellcheck's Windows build is shellcheck-v0.11.0.zip, and ip7z/7zip's
+// console binaries are in 7z2604-extra.7z. Such a platform is simply left out of what is
+// inferred. An override in the definition naming the asset for the platform is what puts
+// it back. It is used only where the inference has nothing, so a release that starts
+// naming its assets is read off the release again.
+func addUnnamedOSAssets(p *aquaregistry.PackageInfo, base []*aquaregistry.Override) {
+	if p.SupportedEnvs == nil {
+		// The inference covers every platform.
+		return
+	}
+	for _, ov := range base {
+		if ov.Asset == "" || ov.GOOS == "" || len(ov.Variants) != 0 || len(ov.Envs) != 0 {
+			continue
+		}
+		if inferredSupports(p, ov.GOOS, ov.GOArch) {
+			continue
+		}
+		p.Overrides = append([]*aquaregistry.Override{{
+			GOOS:   ov.GOOS,
+			GOArch: ov.GOArch,
+			Asset:  ov.Asset,
+			Format: ov.Format,
+		}}, p.Overrides...)
+		env := ov.GOOS
+		if ov.GOArch != "" {
+			env += "/" + ov.GOArch
+		}
+		p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
+	}
+}
+
+// inferredSupports says whether the inference gives the platform an asset: either
+// architecture of the OS when the override names none.
+func inferredSupports(p *aquaregistry.PackageInfo, goos, goarch string) bool {
+	archs := []string{"amd64", "arm64"}
+	if goarch != "" {
+		archs = []string{goarch}
+	}
+	for _, arch := range archs {
+		if p.CheckSupportedEnvs(goos, arch, goos+"/"+arch) {
+			return true
+		}
+	}
+	return false
 }
 
 // inferredFor returns the inferred override aqua would apply on the platform the

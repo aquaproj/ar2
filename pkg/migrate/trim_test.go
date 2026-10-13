@@ -248,3 +248,26 @@ func TestConfig_overrideFormatWithFiles(t *testing.T) {
 		t.Errorf("the Windows override's format is %q, want zip", got)
 	}
 }
+
+// koalaman/shellcheck's Windows build is shellcheck-<version>.zip, whose name says no OS,
+// so the override naming it is kept for the inference to fall back on.
+func TestConfig_unnamedOSAsset(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("koalaman/shellcheck", &aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "koalaman",
+		RepoName:  "shellcheck",
+		Asset:     "shellcheck-{{.Version}}.{{.OS}}.{{.Arch}}.{{.Format}}",
+		Format:    "tar.xz",
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Asset: "shellcheck-{{.Version}}.{{.Format}}", Format: "zip"},
+			{GOOS: "darwin", Asset: "shellcheck-{{.Version}}.{{.OS}}.aarch64.{{.Format}}"},
+		},
+	}, nil)
+	if len(cfg.Overrides) != 1 {
+		t.Fatalf("got %d overrides, want the Windows one: %+v", len(cfg.Overrides), cfg.Overrides)
+	}
+	if got := cfg.Overrides[0]; got.GOOS != "windows" || got.Asset != "shellcheck-{{.Version}}.{{.Format}}" || got.Format != "zip" {
+		t.Errorf("the override is %+v", got)
+	}
+}

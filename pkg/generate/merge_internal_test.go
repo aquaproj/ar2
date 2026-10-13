@@ -144,3 +144,29 @@ func TestMerge_windowsExt(t *testing.T) {
 		t.Errorf("windows_ext is %q, want .bat", got.WindowsExt)
 	}
 }
+
+// A platform the inference found no asset for gets the one the definition names, and a
+// platform it did find one for keeps the inferred one.
+func TestMerge_unnamedOSAsset(t *testing.T) {
+	t.Parallel()
+	inferred := &aquaregistry.PackageInfo{
+		Asset:         "shellcheck-{{.Version}}.{{.OS}}.{{.Arch}}.{{.Format}}",
+		Format:        "tar.xz",
+		SupportedEnvs: aquaregistry.SupportedEnvs{"linux", "darwin"},
+	}
+	got := merge(inferred, &aquaregistry.PackageInfo{
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Asset: "shellcheck-{{.Version}}.{{.Format}}", Format: "zip"},
+			{GOOS: "linux", Asset: "shellcheck-{{.Version}}.zip", Format: "zip"},
+		},
+	})
+	if len(got.Overrides) != 1 || got.Overrides[0].GOOS != "windows" || got.Overrides[0].Asset != "shellcheck-{{.Version}}.{{.Format}}" {
+		t.Errorf("the overrides are %+v, want the Windows one only", got.Overrides)
+	}
+	if !got.CheckSupportedEnvs("windows", "amd64", "windows/amd64") {
+		t.Errorf("windows isn't supported: %v", got.SupportedEnvs)
+	}
+	if len(inferred.Overrides) != 0 || len(inferred.SupportedEnvs) != 2 {
+		t.Error("the inferred definition was modified")
+	}
+}

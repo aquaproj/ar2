@@ -184,8 +184,9 @@ func saysSomething(ov *aquaregistry.Override) bool {
 		ov.Minisign != nil || ov.Packslip != nil || ov.GitHubArtifactAttestations != nil {
 		return true
 	}
-	// A variant's asset, which the release's asset list can't be read for.
-	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "")
+	// A variant's asset, or an asset whose name says no OS: the release's asset list
+	// can't be read for either.
+	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "") || unnamedOS(ov.Asset)
 }
 
 func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquaregistry.Override {
@@ -211,6 +212,12 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		WindowsExt:   ov.WindowsExt,
 		AppendExt:    ov.AppendExt,
 		Vars:         ov.Vars,
+	}
+	if unnamedOS(ov.Asset) {
+		// An asset whose name says no OS: the release can't be read for which
+		// platform it is, so the definition says it. See addUnnamedOSAssets.
+		out.Asset = ov.Asset
+		out.Format = ov.Format
 	}
 	if len(ov.Variants) != 0 {
 		// The one asset the release can't be read for: which libc a build was made
@@ -290,4 +297,14 @@ func unguessableSpellings(replacements aquaregistry.Replacements) aquaregistry.R
 		return nil
 	}
 	return out
+}
+
+// unnamedOS says whether an override's asset name says no OS, so that the inference can't
+// tell which platform it is for: koalaman/shellcheck's shellcheck-{{.Version}}.{{.Format}}
+// for Windows.
+func unnamedOS(asset string) bool {
+	if asset == "" || strings.Contains(asset, "{{.OS}}") {
+		return false
+	}
+	return aquaasset.ParseAssetName(asset, "").OS == ""
 }
