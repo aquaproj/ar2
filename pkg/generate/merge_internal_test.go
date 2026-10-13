@@ -308,10 +308,10 @@ func TestUnnamedOSAsset_shellcheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a := assetFor(reg, "windows", "arm64"); a != nil {
+	if a := assetFor(reg, "windows/arm64"); a != nil {
 		t.Errorf("windows/arm64 got the amd64 build without emulation: %+v", a)
 	}
-	windows := assetFor(reg, "windows", "amd64")
+	windows := assetFor(reg, "windows/amd64")
 	if windows == nil {
 		t.Fatal("no windows/amd64 entry")
 	}
@@ -323,9 +323,9 @@ func TestUnnamedOSAsset_shellcheck(t *testing.T) {
 	}
 }
 
-func assetFor(reg *Registry, goos, goarch string) *Asset {
+func assetFor(reg *Registry, env string) *Asset {
 	for _, a := range reg.Assets {
-		if a.OS == goos && a.Arch == goarch {
+		if a.OS+"/"+a.Arch == env {
 			return a
 		}
 	}
@@ -377,8 +377,51 @@ func TestUnnamedOSAsset_replacements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	windows := assetFor(reg, "windows", "amd64")
+	windows := assetFor(reg, "windows/amd64")
 	if windows == nil || windows.Asset != "tool-v1.0.0-x64.zip" {
 		t.Errorf("windows/amd64 is %+v, want tool-v1.0.0-x64.zip", windows)
+	}
+}
+
+// The added override's format comes from the asset's name when nothing else gives one,
+// and its spellings are the definition's alone.
+func TestUnnamedOSAsset_formatAndSpellings(t *testing.T) {
+	t.Parallel()
+	base := &aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "o",
+		RepoName:  "tool",
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", GOArch: "amd64", Asset: "tool-{{.Version}}-{{.Arch}}.zip"},
+		},
+	}
+	inferred := &aquaregistry.PackageInfo{
+		Type:          "github_release",
+		RepoOwner:     "o",
+		RepoName:      "tool",
+		Asset:         "tool-{{.Version}}-{{.OS}}-{{.Arch}}.{{.Format}}",
+		Format:        "tar.gz",
+		Replacements:  map[string]string{"amd64": "x86_64"},
+		SupportedEnvs: aquaregistry.SupportedEnvs{"linux"},
+	}
+	reg, err := resolve(discardLogger(), "o/tool", merge(inferred, base), base, "v1.0.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	windows := assetFor(reg, "windows/amd64")
+	if windows == nil || windows.Asset != "tool-v1.0.0-amd64.zip" || windows.Format != "zip" {
+		t.Errorf("windows/amd64 is %+v, want tool-v1.0.0-amd64.zip (zip)", windows)
+	}
+}
+
+// Once the inference finds an asset for the OS, the format of the asset the definition
+// names isn't forced on it.
+func TestFormatOverrides_unnamedOS(t *testing.T) {
+	t.Parallel()
+	got := formatOverrides([]*aquaregistry.Override{
+		{GOOS: "windows", Asset: "tool-{{.Version}}.zip", Format: "zip", Files: []*aquaregistry.File{{Name: "tool"}}},
+	}, nil)
+	if len(got) != 0 {
+		t.Errorf("got %+v, want no format override", got)
 	}
 }

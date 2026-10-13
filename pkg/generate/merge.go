@@ -1,9 +1,11 @@
 package generate
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
+	aquaasset "github.com/aquaproj/aqua/v2/pkg/asset"
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
 	"github.com/aquaproj/ar2/pkg/migrate"
@@ -121,6 +123,12 @@ func formatOverrides(base, inferred []*aquaregistry.Override) []*aquaregistry.Ov
 		if ov.Format == "" || len(ov.Files) == 0 || len(ov.Variants) != 0 || len(ov.Envs) != 0 {
 			continue
 		}
+		if migrate.UnnamedOS(ov.Asset) {
+			// The format of an asset the inference can't see, which addUnnamedOSAssets
+			// gives where the inference has nothing: forcing it here would hold the OS
+			// to it after the release starts naming its assets.
+			continue
+		}
 		o := &aquaregistry.Override{}
 		if matched := inferredFor(inferred, ov); matched != nil {
 			copied := *matched
@@ -153,9 +161,9 @@ func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 		if ov.GOOS == "" || len(ov.Envs) != 0 || len(ov.Variants) != 0 || !migrate.UnnamedOS(ov.Asset) {
 			continue
 		}
-		format := ov.Format
-		if format == "" {
-			format = base.Format
+		format, ok := unnamedOSFormat(ov, base)
+		if !ok {
+			continue
 		}
 		for _, goarch := range unnamedOSArchs(ov) {
 			env := ov.GOOS + "/" + goarch
@@ -166,17 +174,52 @@ func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 			// format overrides say for the OS: aqua applies the first override that
 			// matches, and one for the OS alone would otherwise win.
 			p.Overrides = slices.Insert(p.Overrides, leadingVariants(p.Overrides), &aquaregistry.Override{
-				GOOS:   ov.GOOS,
-				GOArch: goarch,
-				Asset:  ov.Asset,
-				Format: format,
-				// The spellings the definition renders the asset with, laid over
-				// the ones inferred from the other platforms' assets.
-				Replacements: ov.Replacements,
+				GOOS:         ov.GOOS,
+				GOArch:       goarch,
+				Asset:        ov.Asset,
+				Format:       format,
+				Replacements: ownSpellings(ov.Replacements, p.Replacements),
 			})
 			p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
 		}
 	}
+}
+
+// unnamedOSFormat is the format of the asset an override names: its own, the
+// definition's, or the one the name ends in. A name ending in {{.Format}} with no format
+// given anywhere can't be rendered, and false says so.
+func unnamedOSFormat(ov *aquaregistry.Override, base *aquaregistry.PackageInfo) (string, bool) {
+	if ov.Format != "" {
+		return ov.Format, true
+	}
+	if base.Format != "" {
+		return base.Format, true
+	}
+	if strings.Contains(ov.Asset, "{{.Format}}") {
+		return "", false
+	}
+	if _, format := aquaasset.RemoveExtFromAsset(ov.Asset); format != "" {
+		return format, true
+	}
+	return "raw", true
+}
+
+// ownSpellings is the replacements an added override renders its asset with: the
+// definition's and nothing else. aqua lays an override's replacements over the
+// definition's, which here are the ones inferred from the other platforms' assets, so a
+// spelling only those have is turned back into itself.
+func ownSpellings(own, inferred aquaregistry.Replacements) aquaregistry.Replacements {
+	out := maps.Clone(own)
+	for k := range inferred {
+		if _, ok := out[k]; ok {
+			continue
+		}
+		if out == nil {
+			out = aquaregistry.Replacements{}
+		}
+		out[k] = k
+	}
+	return out
 }
 
 // unnamedOSArchs returns the architectures an override's asset is for. One naming an
