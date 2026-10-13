@@ -18,8 +18,18 @@ func assetOf(t *testing.T, reg *Registry, env string) *Asset {
 	return nil
 }
 
-// koalaman/shellcheck's Windows build is shellcheck-<version>.zip, whose name says no OS.
-// The rule gives it to windows/amd64 as it is named, and the definition's files apply.
+// picked returns the asset each override the rules added names, by environment.
+func picked(p *aquaregistry.PackageInfo) map[string]string {
+	got := map[string]string{}
+	for _, ov := range p.Overrides {
+		got[ov.GOOS+"/"+ov.GOArch] = ov.Asset
+	}
+	return got
+}
+
+// koalaman/shellcheck's Windows build is shellcheck-<version>.zip, whose name says no OS
+// and is the only one of the release's that doesn't. The rule needs no filter, and the
+// definition's files apply to the asset it gives windows/amd64.
 func TestApplyAssetRules_shellcheck(t *testing.T) {
 	t.Parallel()
 	base := &aquaregistry.PackageInfo{
@@ -37,9 +47,14 @@ func TestApplyAssetRules_shellcheck(t *testing.T) {
 		SupportedEnvs: aquaregistry.SupportedEnvs{"linux", "darwin"},
 	}
 	merged := merge(inferred, base)
-	err := applyAssetRules(discardLogger(), merged, []*g2.AssetRule{
-		{Envs: []string{"windows/amd64"}, Filter: `Asset matches "^shellcheck-v[0-9]+[.][0-9]+[.][0-9]+[.]zip$"`},
-	}, names("shellcheck-v0.11.0.zip", "shellcheck-v0.11.0.linux.x86_64.tar.xz", "shellcheck-v0.11.0.darwin.aarch64.tar.xz"), "v0.11.0")
+	err := applyAssetRules(discardLogger(), merged, []*g2.AssetRule{{Envs: []string{"windows/amd64"}}}, &assetRelease{
+		names: names(
+			"shellcheck-v0.11.0.zip",
+			"shellcheck-v0.11.0.linux.x86_64.tar.xz", "shellcheck-v0.11.0.linux.armv6hf.tar.xz",
+			"shellcheck-v0.11.0.darwin.aarch64.tar.xz", "shellcheck-v0.11.0.darwin.x86_64.tar.gz",
+		),
+		version: "v0.11.0",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +82,9 @@ func checkShellcheck(t *testing.T, reg *Registry) {
 	}
 }
 
-// ip7z/7zip's console binaries for both Windows architectures are in one archive, and the
-// definition says where each is inside it.
+// ip7z/7zip's console binaries for both Windows architectures are in one archive, beside
+// the sources and the LZMA SDK, which say no OS either. The filter tells them apart, and
+// the definition says the format the inference doesn't know and where each binary is.
 func TestApplyAssetRules_7zip(t *testing.T) {
 	t.Parallel()
 	base := &aquaregistry.PackageInfo{
@@ -87,8 +103,15 @@ func TestApplyAssetRules_7zip(t *testing.T) {
 	}
 	merged := merge(inferred, base)
 	if err := applyAssetRules(discardLogger(), merged, []*g2.AssetRule{
-		{Envs: []string{"windows/amd64", "windows/arm64"}, Filter: `Asset matches "^7z[0-9]+-extra[.]7z$"`},
-	}, names("7z2604-extra.7z", "7z2604.exe", "7z2604-linux-x64.tar.xz"), "26.04"); err != nil {
+		{Envs: []string{"windows/amd64", "windows/arm64"}, Filter: `Asset contains "extra"`},
+	}, &assetRelease{
+		names: names(
+			"7z2604-extra.7z", "7z2604-src.7z", "7z2604-src.tar.xz", "lzma2604.7z",
+			"7z2604.exe", "7z2604.msi", "7z2604-linux-x64.tar.xz", "7z2604-mac.tar.xz",
+		),
+		version: "26.04",
+		filter:  `not (Asset endsWith ".exe") and not (Asset endsWith ".msi")`,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	reg, err := resolve(discardLogger(), "ip7z/7zip", merged, base, "26.04", nil)
@@ -107,12 +130,58 @@ func TestApplyAssetRules_7zip(t *testing.T) {
 	}
 }
 
+// The candidates are the assets the all_assets_filter keeps and whose name says no OS, in
+// the spellings the definition gives too; the inference picks each environment's among
+// them by the architecture the name says, and a name saying none is for every
+// architecture of the rule.
+func TestApplyAssetRules_candidates(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		rel  *assetRelease
+		want map[string]string
+	}{
+		{
+			name: "by architecture",
+			rel:  &assetRelease{names: names("tool-v1.0.0-x64.zip", "tool-v1.0.0-arm64.zip", "tool-v1.0.0-linux-x64.tar.gz")},
+			want: map[string]string{"windows/amd64": "tool-v1.0.0-x64.zip", "windows/arm64": "tool-v1.0.0-arm64.zip"},
+		},
+		{
+			name: "no architecture",
+			rel:  &assetRelease{names: names("tool-v1.0.0.zip", "tool-v1.0.0.zip.sha256", "tool-v1.0.0-darwin.zip")},
+			want: map[string]string{"windows/amd64": "tool-v1.0.0.zip", "windows/arm64": "tool-v1.0.0.zip"},
+		},
+		{
+			name: "all_assets_filter",
+			rel:  &assetRelease{names: names("tool-v1.0.0.zip", "tool-v1.0.0.tar.gz"), filter: `not (Asset endsWith ".zip")`},
+			want: map[string]string{"windows/amd64": "tool-v1.0.0.tar.gz", "windows/arm64": "tool-v1.0.0.tar.gz"},
+		},
+		{
+			name: "spelling",
+			rel:  &assetRelease{names: names("tool-v1.0.0-ubuntu.zip"), spellings: map[string]string{"linux": "ubuntu"}},
+			want: map[string]string{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.rel.version = "v1.0.0"
+			p := &aquaregistry.PackageInfo{}
+			if err := applyAssetRules(discardLogger(), p, []*g2.AssetRule{{Envs: []string{"windows/amd64", "windows/arm64"}}}, tc.rel); err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(tc.want, picked(p)); diff != "" {
+				t.Errorf("(-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // A rule leaving nothing for an environment leaves the inference alone.
 func TestApplyAssetRules_noMatch(t *testing.T) {
 	t.Parallel()
-	rules := []*g2.AssetRule{{Envs: []string{"windows/amd64"}, Filter: `Asset endsWith ".zip"`}}
 	p := &aquaregistry.PackageInfo{SupportedEnvs: aquaregistry.SupportedEnvs{"linux"}}
-	if err := applyAssetRules(discardLogger(), p, rules, names("tool.tar.gz"), "v1.0.0"); err != nil {
+	rules := []*g2.AssetRule{{Envs: []string{"windows/amd64"}, Filter: `Asset endsWith ".zip"`}}
+	if err := applyAssetRules(discardLogger(), p, rules, &assetRelease{names: names("tool.tar.gz"), version: "v1.0.0"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.Overrides) != 0 || len(p.SupportedEnvs) != 1 {
@@ -120,41 +189,20 @@ func TestApplyAssetRules_noMatch(t *testing.T) {
 	}
 }
 
-// The filter only narrows the assets down, and the inference picks each environment's
-// among what is left: here by the architecture the names say, and a name saying none is
-// for every architecture of the rule.
-func TestApplyAssetRules_infer(t *testing.T) {
+// The all_assets_filter the candidates are read through is the one answering for the
+// version, as aqua gr reads asset_filters.
+func TestAssetFilterFor(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name  string
-		names map[string]struct{}
-		want  map[string]string
-	}{
-		{
-			name:  "by architecture",
-			names: names("tool-v1.0.0-x64.zip", "tool-v1.0.0-arm64.zip", "tool-v1.0.0-linux-x64.tar.gz"),
-			want:  map[string]string{"windows/amd64": "tool-v1.0.0-x64.zip", "windows/arm64": "tool-v1.0.0-arm64.zip"},
+	cfg := &g2.Config{
+		AllAssetsFilter: "top",
+		AssetFilters: []*g2.AssetFilter{
+			{VersionConstraint: `semver(">= 2.0.0")`, AllAssetsFilter: "new"},
+			{VersionConstraint: `Version == "v1.5.0"`},
 		},
-		{
-			name:  "no architecture",
-			names: names("tool-v1.0.0.zip", "tool-v1.0.0.zip.sha256"),
-			want:  map[string]string{"windows/amd64": "tool-v1.0.0.zip", "windows/arm64": "tool-v1.0.0.zip"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			p := &aquaregistry.PackageInfo{}
-			rules := []*g2.AssetRule{{Envs: []string{"windows/amd64", "windows/arm64"}, Filter: `not (Asset contains "linux")`}}
-			if err := applyAssetRules(discardLogger(), p, rules, tc.names, "v1.0.0"); err != nil {
-				t.Fatal(err)
-			}
-			got := map[string]string{}
-			for _, ov := range p.Overrides {
-				got[ov.GOOS+"/"+ov.GOArch] = ov.Asset
-			}
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("(-want +got):\n%s", diff)
-			}
-		})
+	}
+	for version, want := range map[string]string{"v2.1.0": "new", "v1.5.0": "", "v1.0.0": "top"} {
+		if got := assetFilterFor(discardLogger(), cfg, "", version); got != want {
+			t.Errorf("%s: got %q, want %q", version, got, want)
+		}
 	}
 }

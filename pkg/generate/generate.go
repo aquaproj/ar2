@@ -399,8 +399,9 @@ func repo(pkgName string) (string, string, error) {
 // the definition's asset rules applied.
 func resolveInferred(logger *slog.Logger, input *Input, inferred, base *aquaregistry.PackageInfo, rel *release) (*Registry, error) {
 	merged := merge(inferred, base)
-	if input.Config != nil {
-		if err := applyAssetRules(logger, merged, input.Config.AssetRules, rel.names, input.Version); err != nil {
+	if input.Config != nil && len(input.Config.AssetRules) != 0 {
+		ar := newAssetRelease(logger, input.Config, base, input.Version, rel.names)
+		if err := applyAssetRules(logger, merged, input.Config.AssetRules, ar); err != nil {
 			return nil, err
 		}
 	}

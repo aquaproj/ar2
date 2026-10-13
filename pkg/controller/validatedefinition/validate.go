@@ -64,7 +64,7 @@ func Validate(w io.Writer, path string) error {
 }
 
 // validateAssetRules checks that each asset rule says which environments it is for, as
-// os/arch, and has a filter that compiles. A run reads them only when it generates a
+// os/arch, and that its filter, when it has one, compiles. A run reads them only when it generates a
 // version, which is too late to find a filter that isn't an expression.
 func validateAssetRules(rules []*aquag2.AssetRule) error {
 	for i, rule := range rules {
@@ -78,7 +78,7 @@ func validateAssetRules(rules []*aquag2.AssetRule) error {
 			}
 		}
 		if rule.Filter == "" {
-			return fmt.Errorf("%w: asset_rules[%d]", errAssetRuleNoFilter, i)
+			continue
 		}
 		if _, err := expr.CompileAssetFilter(rule.Filter); err != nil {
 			return fmt.Errorf("compile asset_rules[%d]'s filter: %w", i, err)

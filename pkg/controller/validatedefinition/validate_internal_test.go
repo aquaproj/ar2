@@ -135,7 +135,7 @@ func TestValidate_assetRules(t *testing.T) {
 		{name: "valid", rules: "  - envs: [windows/amd64]\n    filter: Asset endsWith \".zip\"\n"},
 		{name: "no envs", rules: "  - filter: Asset endsWith \".zip\"\n", want: errAssetRuleNoEnvs},
 		{name: "os only", rules: "  - envs: [windows]\n    filter: Asset endsWith \".zip\"\n", want: errAssetRuleEnv},
-		{name: "no filter", rules: "  - envs: [windows/amd64]\n", want: errAssetRuleNoFilter},
+		{name: "no filter", rules: "  - envs: [windows/amd64]\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
