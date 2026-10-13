@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/aquaproj/aqua/v2/pkg/expr"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"go.yaml.in/yaml/v3"
@@ -54,6 +56,33 @@ func Validate(w io.Writer, path string) error {
 	if cfg.Type == "" {
 		return fmt.Errorf("%w: %s", errNoType, cfg.Name)
 	}
+	if err := validateAssetRules(cfg.AssetRules); err != nil {
+		return fmt.Errorf("%s: %w", cfg.Name, err)
+	}
 	fmt.Fprintf(w, "%s: %s\n", cfg.Name, cfg.Type)
+	return nil
+}
+
+// validateAssetRules checks that each asset rule says which environments it is for, as
+// os/arch, and has a filter that compiles. A run reads them only when it generates a
+// version, which is too late to find a filter that isn't an expression.
+func validateAssetRules(rules []*aquag2.AssetRule) error {
+	for i, rule := range rules {
+		if len(rule.Envs) == 0 {
+			return fmt.Errorf("%w: asset_rules[%d]", errAssetRuleNoEnvs, i)
+		}
+		for _, env := range rule.Envs {
+			goos, goarch, ok := strings.Cut(env, "/")
+			if !ok || goos == "" || goarch == "" || strings.Contains(goarch, "/") {
+				return fmt.Errorf("%w: asset_rules[%d]: %q", errAssetRuleEnv, i, env)
+			}
+		}
+		if rule.Filter == "" {
+			return fmt.Errorf("%w: asset_rules[%d]", errAssetRuleNoFilter, i)
+		}
+		if _, err := expr.CompileAssetFilter(rule.Filter); err != nil {
+			return fmt.Errorf("compile asset_rules[%d]'s filter: %w", i, err)
+		}
+	}
 	return nil
 }

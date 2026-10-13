@@ -89,7 +89,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	if err != nil {
 		return nil, err
 	}
-	reg, err := resolve(logger, input.PkgName, merge(inferred, base), base, input.Version, rel.digests)
+	reg, err := resolveInferred(logger, input, inferred, base, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -393,4 +393,16 @@ func repo(pkgName string) (string, string, error) {
 		name = name[:i]
 	}
 	return owner, name, nil
+}
+
+// resolveInferred resolves what is inferred from the release over the definition, with
+// the definition's asset rules applied.
+func resolveInferred(logger *slog.Logger, input *Input, inferred, base *aquaregistry.PackageInfo, rel *release) (*Registry, error) {
+	merged := merge(inferred, base)
+	if input.Config != nil {
+		if err := applyAssetRules(logger, merged, input.Config.AssetRules, rel.names, input.Version); err != nil {
+			return nil, err
+		}
+	}
+	return resolve(logger, input.PkgName, merged, base, input.Version, rel.digests)
 }
