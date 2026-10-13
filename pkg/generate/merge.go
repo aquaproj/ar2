@@ -178,7 +178,7 @@ func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 				GOArch:       goarch,
 				Asset:        ov.Asset,
 				Format:       format,
-				Replacements: ownSpellings(ov.Replacements, p.Replacements),
+				Replacements: ownSpellings(overrideSpellings(base.Replacements, ov.Replacements), p.Replacements),
 			})
 			p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
 		}
@@ -204,6 +204,17 @@ func unnamedOSFormat(ov *aquaregistry.Override, base *aquaregistry.PackageInfo) 
 	return "raw", true
 }
 
+// overrideSpellings is the replacements an override renders with in the definition: the
+// definition's, with the override's laid over them, as aqua combines them.
+func overrideSpellings(definition, override aquaregistry.Replacements) aquaregistry.Replacements {
+	if len(definition) == 0 {
+		return override
+	}
+	out := maps.Clone(definition)
+	maps.Copy(out, override)
+	return out
+}
+
 // ownSpellings is the replacements an added override renders its asset with: the
 // definition's and nothing else. aqua lays an override's replacements over the
 // definition's, which here are the ones inferred from the other platforms' assets, so a
@@ -222,20 +233,26 @@ func ownSpellings(own, inferred aquaregistry.Replacements) aquaregistry.Replacem
 	return out
 }
 
-// unnamedOSArchs returns the architectures an override's asset is for. One naming an
-// architecture is for it; one whose name is built from the architecture is for both; one
-// saying neither is the OS's one build, which is amd64 far more often than not -- an arm64
-// machine that can run it is the emulation's to say.
+// unnamedOSArchs returns the architectures an override's asset is for: the one the
+// override names, both when the name is built from the architecture, the one the name
+// says (SuperCuber/dotter's darwin build is dotter.arm, read as arm64), and amd64 when it
+// says none -- the OS's one build, which is amd64 far more often than not. The arm64
+// machines of the OS get nothing then.
 func unnamedOSArchs(ov *aquaregistry.Override) []string {
 	switch {
 	case ov.GOArch != "":
 		return []string{ov.GOArch}
 	case strings.Contains(ov.Asset, ".Arch"):
 		return []string{"amd64", "arm64"}
-	default:
-		return []string{"amd64"}
 	}
+	if info := aquaasset.ParseAssetName(ov.Asset, ""); info.Score != noArchScore {
+		return []string{info.Arch}
+	}
+	return []string{"amd64"}
 }
+
+// noArchScore is the score aqua's parser gives an asset whose name says no architecture.
+const noArchScore = -2
 
 // leadingVariants is how many overrides at the start of the list select on a variant.
 func leadingVariants(overrides []*aquaregistry.Override) int {

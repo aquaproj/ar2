@@ -425,3 +425,46 @@ func TestFormatOverrides_unnamedOS(t *testing.T) {
 		t.Errorf("got %+v, want no format override", got)
 	}
 }
+
+// An asset whose name says the architecture is given to it: SuperCuber/dotter's darwin
+// build is dotter.arm.
+func TestAddUnnamedOSAssets_archInName(t *testing.T) {
+	t.Parallel()
+	p := &aquaregistry.PackageInfo{SupportedEnvs: aquaregistry.SupportedEnvs{"linux"}}
+	addUnnamedOSAssets(p, &aquaregistry.PackageInfo{Overrides: []*aquaregistry.Override{
+		{GOOS: "darwin", Asset: "dotter.arm", Format: "raw"},
+	}})
+	if !p.CheckSupportedEnvs("darwin", "arm64", "darwin/arm64") || p.CheckSupportedEnvs("darwin", "amd64", "darwin/amd64") {
+		t.Errorf("supported_envs is %v, want darwin/arm64 only", p.SupportedEnvs)
+	}
+}
+
+// A definition written by hand may give the spelling once for every platform, and the
+// added override renders with it.
+func TestUnnamedOSAsset_definitionSpellings(t *testing.T) {
+	t.Parallel()
+	base := &aquaregistry.PackageInfo{
+		Type:         "github_release",
+		RepoOwner:    "o",
+		RepoName:     "tool",
+		Replacements: map[string]string{"amd64": "x64"},
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Asset: "tool-{{.Version}}-{{.Arch}}.zip"},
+		},
+	}
+	inferred := &aquaregistry.PackageInfo{
+		Type:          "github_release",
+		RepoOwner:     "o",
+		RepoName:      "tool",
+		Asset:         "tool-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		Replacements:  map[string]string{"amd64": "x86_64"},
+		SupportedEnvs: aquaregistry.SupportedEnvs{"linux"},
+	}
+	reg, err := resolve(discardLogger(), "o/tool", merge(inferred, base), base, "v1.0.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if windows := assetFor(reg, "windows/amd64"); windows == nil || windows.Asset != "tool-v1.0.0-x64.zip" {
+		t.Errorf("windows/amd64 is %+v, want tool-v1.0.0-x64.zip", windows)
+	}
+}
