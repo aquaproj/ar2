@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"maps"
 	"strings"
 
 	aquaasset "github.com/aquaproj/aqua/v2/pkg/asset"
@@ -47,7 +48,7 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		VersionPrefix: pkgInfo.VersionPrefix,
 
 		Files:                      pkgInfo.Files,
-		Overrides:                  keepOverrides(pkgInfo.Overrides, pkgInfo.Asset, pkgInfo.Format),
+		Overrides:                  keepOverrides(pkgInfo.Overrides, &parentOf{asset: pkgInfo.Asset, format: pkgInfo.Format, replacements: pkgInfo.Replacements}),
 		Cosign:                     pkgInfo.Cosign,
 		SLSAProvenance:             pkgInfo.SLSAProvenance,
 		Minisign:                   pkgInfo.Minisign,
@@ -68,20 +69,23 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	}
 	trimmed.VersionOverrides = make([]*aquaregistry.VersionOverride, 0, len(pkgInfo.VersionOverrides))
 	for _, vo := range pkgInfo.VersionOverrides {
-		trimmed.VersionOverrides = append(trimmed.VersionOverrides, trimOverride(vo, pkgInfo.Asset, pkgInfo.Format))
+		trimmed.VersionOverrides = append(trimmed.VersionOverrides, trimOverride(vo, pkgInfo))
 	}
 	return trimmed
 }
 
-func trimOverride(vo *aquaregistry.VersionOverride, parentAsset, parentFormat string) *aquaregistry.VersionOverride {
-	asset := vo.Asset
-	if asset == "" {
-		asset = parentAsset
+func trimOverride(vo *aquaregistry.VersionOverride, pkgInfo *aquaregistry.PackageInfo) *aquaregistry.VersionOverride {
+	parent := &parentOf{asset: vo.Asset, format: vo.Format, replacements: vo.Replacements}
+	if parent.asset == "" {
+		parent.asset = pkgInfo.Asset
 	}
-	format := vo.Format
-	if format == "" {
-		format = parentFormat
+	if parent.format == "" {
+		parent.format = pkgInfo.Format
 	}
+	if parent.replacements == nil {
+		parent.replacements = pkgInfo.Replacements
+	}
+	asset := parent.asset
 	return &aquaregistry.VersionOverride{
 		VersionConstraints: vo.VersionConstraints,
 		// The prefix and the filter are part of deciding what the constraint sees,
@@ -90,7 +94,7 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset, parentFormat st
 		VersionFilter: vo.VersionFilter,
 
 		Files:                      vo.Files,
-		Overrides:                  keepOverrides(vo.Overrides, asset, format),
+		Overrides:                  keepOverrides(vo.Overrides, parent),
 		Cosign:                     vo.Cosign,
 		SLSAProvenance:             vo.SLSAProvenance,
 		Minisign:                   vo.Minisign,
@@ -153,6 +157,14 @@ func correctedFormat(asset, format string) string {
 	return format
 }
 
+// parentOf is what an override inherits from where it is written: the asset, the
+// format and the replacements of the version or the package.
+type parentOf struct {
+	asset        string
+	format       string
+	replacements aquaregistry.Replacements
+}
+
 // keepOverrides drops the overrides that say nothing, and trims what is left.
 //
 // goos, goarch, envs and variants are the conditions an override matches on; they change
@@ -168,13 +180,13 @@ func correctedFormat(asset, format string) string {
 // in an asset's name says which libc it was built against, and where the asset's name
 // says no OS, because then the release can't be read for which platform it is. There the
 // asset is the whole of what the override is for.
-func keepOverrides(overrides []*aquaregistry.Override, parentAsset, parentFormat string) []*aquaregistry.Override {
+func keepOverrides(overrides []*aquaregistry.Override, parent *parentOf) []*aquaregistry.Override {
 	out := make([]*aquaregistry.Override, 0, len(overrides))
 	for _, ov := range overrides {
 		if !saysSomething(ov) {
 			continue
 		}
-		out = append(out, trimOverrideByRuntime(ov, parentAsset, parentFormat))
+		out = append(out, trimOverrideByRuntime(ov, parent))
 	}
 	if len(out) == 0 {
 		return nil
@@ -194,10 +206,10 @@ func saysSomething(ov *aquaregistry.Override) bool {
 	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "") || unnamedOSOverride(ov)
 }
 
-func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset, parentFormat string) *aquaregistry.Override {
+func trimOverrideByRuntime(ov *aquaregistry.Override, parent *parentOf) *aquaregistry.Override {
 	asset := ov.Asset
 	if asset == "" {
-		asset = parentAsset
+		asset = parent.asset
 	}
 	out := &aquaregistry.Override{
 		GOOS:     ov.GOOS,
@@ -226,8 +238,17 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset, parentFormat 
 		out.Asset = ov.Asset
 		out.Format = ov.Format
 		if out.Format == "" {
-			out.Format = parentFormat
+			out.Format = parent.format
 		}
+		// And every spelling the asset is rendered with, the ones the parser knows
+		// included: the asset is rendered for the platform alone, with nothing read
+		// off the release to supply them. aqua lays an override's replacements over
+		// the definition's, so both go in.
+		out.Replacements = maps.Clone(parent.replacements)
+		if out.Replacements == nil && len(ov.Replacements) != 0 {
+			out.Replacements = aquaregistry.Replacements{}
+		}
+		maps.Copy(out.Replacements, ov.Replacements)
 	}
 	if len(ov.Variants) != 0 {
 		// The one asset the release can't be read for: which libc a build was made

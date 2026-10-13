@@ -345,3 +345,40 @@ func TestAddUnnamedOSAssets_arch(t *testing.T) {
 		}
 	}
 }
+
+// An asset built from the architecture is rendered with the definition's spellings, not
+// the ones inferred from the other platforms' assets.
+func TestUnnamedOSAsset_replacements(t *testing.T) {
+	t.Parallel()
+	g1 := &aquaregistry.PackageInfo{
+		Type:         "github_release",
+		RepoOwner:    "o",
+		RepoName:     "tool",
+		Asset:        "tool-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		Replacements: map[string]string{"amd64": "x64"},
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Asset: "tool-{{.Version}}-{{.Arch}}.zip", Format: "zip"},
+		},
+	}
+	cfg, _ := migrate.Config("o/tool", g1, nil)
+	base, err := cfg.SetVersion(discardLogger(), "v1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inferred := &aquaregistry.PackageInfo{
+		Type:          "github_release",
+		RepoOwner:     "o",
+		RepoName:      "tool",
+		Asset:         "tool-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		Replacements:  map[string]string{"amd64": "x86_64"},
+		SupportedEnvs: aquaregistry.SupportedEnvs{"linux"},
+	}
+	reg, err := resolve(discardLogger(), "o/tool", merge(inferred, base), base, "v1.0.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	windows := assetFor(reg, "windows", "amd64")
+	if windows == nil || windows.Asset != "tool-v1.0.0-x64.zip" {
+		t.Errorf("windows/amd64 is %+v, want tool-v1.0.0-x64.zip", windows)
+	}
+}

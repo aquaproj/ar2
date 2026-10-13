@@ -170,6 +170,9 @@ func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 				GOArch: goarch,
 				Asset:  ov.Asset,
 				Format: format,
+				// The spellings the definition renders the asset with, laid over
+				// the ones inferred from the other platforms' assets.
+				Replacements: ov.Replacements,
 			})
 			p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
 		}
