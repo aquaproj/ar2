@@ -6,6 +6,7 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/migrate"
 )
 
 func workflow(s string) *aquaregistry.GitHubArtifactAttestations {
@@ -257,5 +258,90 @@ func TestMerge_unnamedOSAssetAfterVariants(t *testing.T) {
 	})
 	if len(got.Overrides) != 2 || got.Overrides[0] != musl || got.Overrides[1].Asset != "tool-{{.Version}}.tar.gz" {
 		t.Errorf("the overrides are %+v", got.Overrides)
+	}
+}
+
+// koalaman/shellcheck from aqua-registry's definition to the resolved entries: the Windows
+// build, shellcheck-<version>.zip, says no OS, and the definition is what gives it to
+// Windows, ahead of the format override the same Windows override makes.
+func TestUnnamedOSAsset_shellcheck(t *testing.T) {
+	t.Parallel()
+	g1 := &aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "koalaman",
+		RepoName:           "shellcheck",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{
+				VersionConstraints: "true",
+				Asset:              "shellcheck-{{.Version}}.{{.OS}}.{{.Arch}}.{{.Format}}",
+				Format:             "tar.xz",
+				Files:              []*aquaregistry.File{{Name: "shellcheck", Src: "shellcheck-{{.Version}}/shellcheck"}},
+				Replacements:       map[string]string{"amd64": "x86_64", "arm64": "aarch64"},
+				Overrides: []*aquaregistry.Override{
+					{
+						GOOS:   "windows",
+						Asset:  "shellcheck-{{.Version}}.{{.Format}}",
+						Format: "zip",
+						Files:  []*aquaregistry.File{{Name: "shellcheck"}},
+					},
+				},
+			},
+		},
+	}
+	cfg, _ := migrate.Config("koalaman/shellcheck", g1, nil)
+	base, err := cfg.SetVersion(discardLogger(), "v0.11.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What aqua gr infers from v0.11.0's assets: nothing for Windows.
+	inferred := &aquaregistry.PackageInfo{
+		Type:          "github_release",
+		RepoOwner:     "koalaman",
+		RepoName:      "shellcheck",
+		Asset:         "shellcheck-{{.Version}}.{{.OS}}.{{.Arch}}.{{.Format}}",
+		Format:        "tar.xz",
+		Replacements:  map[string]string{"amd64": "x86_64", "arm64": "aarch64"},
+		SupportedEnvs: aquaregistry.SupportedEnvs{"linux", "darwin"},
+	}
+	reg, err := resolve(discardLogger(), "koalaman/shellcheck", merge(inferred, base), base, "v0.11.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := assetFor(reg, "windows", "arm64"); a != nil {
+		t.Errorf("windows/arm64 got the amd64 build without emulation: %+v", a)
+	}
+	windows := assetFor(reg, "windows", "amd64")
+	if windows == nil {
+		t.Fatal("no windows/amd64 entry")
+	}
+	if windows.Asset != "shellcheck-v0.11.0.zip" || windows.Format != "zip" {
+		t.Errorf("windows/amd64 is %s (%s), want shellcheck-v0.11.0.zip (zip)", windows.Asset, windows.Format)
+	}
+	if len(windows.Files) != 1 || windows.Files[0].Src != "shellcheck.exe" {
+		t.Errorf("windows/amd64 files are %+v, want shellcheck.exe", windows.Files)
+	}
+}
+
+func assetFor(reg *Registry, goos, goarch string) *Asset {
+	for _, a := range reg.Assets {
+		if a.OS == goos && a.Arch == goarch {
+			return a
+		}
+	}
+	return nil
+}
+
+// An asset whose name is built from the architecture is for both of them.
+func TestAddUnnamedOSAssets_arch(t *testing.T) {
+	t.Parallel()
+	p := &aquaregistry.PackageInfo{SupportedEnvs: aquaregistry.SupportedEnvs{"linux"}}
+	addUnnamedOSAssets(p, &aquaregistry.PackageInfo{Overrides: []*aquaregistry.Override{
+		{GOOS: "windows", Asset: "tool-{{.Version}}-{{.Arch}}.zip", Format: "zip"},
+	}})
+	for _, goarch := range []string{"amd64", "arm64"} {
+		if !p.CheckSupportedEnvs("windows", goarch, "windows/"+goarch) {
+			t.Errorf("windows/%s isn't supported: %v", goarch, p.SupportedEnvs)
+		}
 	}
 }

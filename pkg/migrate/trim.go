@@ -47,7 +47,7 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 		VersionPrefix: pkgInfo.VersionPrefix,
 
 		Files:                      pkgInfo.Files,
-		Overrides:                  keepOverrides(pkgInfo.Overrides, pkgInfo.Asset),
+		Overrides:                  keepOverrides(pkgInfo.Overrides, pkgInfo.Asset, pkgInfo.Format),
 		Cosign:                     pkgInfo.Cosign,
 		SLSAProvenance:             pkgInfo.SLSAProvenance,
 		Minisign:                   pkgInfo.Minisign,
@@ -68,15 +68,19 @@ func trimInferred(pkgInfo *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	}
 	trimmed.VersionOverrides = make([]*aquaregistry.VersionOverride, 0, len(pkgInfo.VersionOverrides))
 	for _, vo := range pkgInfo.VersionOverrides {
-		trimmed.VersionOverrides = append(trimmed.VersionOverrides, trimOverride(vo, pkgInfo.Asset))
+		trimmed.VersionOverrides = append(trimmed.VersionOverrides, trimOverride(vo, pkgInfo.Asset, pkgInfo.Format))
 	}
 	return trimmed
 }
 
-func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquaregistry.VersionOverride {
+func trimOverride(vo *aquaregistry.VersionOverride, parentAsset, parentFormat string) *aquaregistry.VersionOverride {
 	asset := vo.Asset
 	if asset == "" {
 		asset = parentAsset
+	}
+	format := vo.Format
+	if format == "" {
+		format = parentFormat
 	}
 	return &aquaregistry.VersionOverride{
 		VersionConstraints: vo.VersionConstraints,
@@ -86,7 +90,7 @@ func trimOverride(vo *aquaregistry.VersionOverride, parentAsset string) *aquareg
 		VersionFilter: vo.VersionFilter,
 
 		Files:                      vo.Files,
-		Overrides:                  keepOverrides(vo.Overrides, asset),
+		Overrides:                  keepOverrides(vo.Overrides, asset, format),
 		Cosign:                     vo.Cosign,
 		SLSAProvenance:             vo.SLSAProvenance,
 		Minisign:                   vo.Minisign,
@@ -161,15 +165,16 @@ func correctedFormat(asset, format string) string {
 // What an override can say is where the executable sits inside the archive, how the build
 // is signed, and which asset it is. That last one is usually what the release's own asset
 // list says, so it is trimmed -- except where the condition is a variant, because nothing
-// in an asset's name says which libc it was built against. There the asset is the whole
-// of what the override is for.
-func keepOverrides(overrides []*aquaregistry.Override, parentAsset string) []*aquaregistry.Override {
+// in an asset's name says which libc it was built against, and where the asset's name
+// says no OS, because then the release can't be read for which platform it is. There the
+// asset is the whole of what the override is for.
+func keepOverrides(overrides []*aquaregistry.Override, parentAsset, parentFormat string) []*aquaregistry.Override {
 	out := make([]*aquaregistry.Override, 0, len(overrides))
 	for _, ov := range overrides {
 		if !saysSomething(ov) {
 			continue
 		}
-		out = append(out, trimOverrideByRuntime(ov, parentAsset))
+		out = append(out, trimOverrideByRuntime(ov, parentAsset, parentFormat))
 	}
 	if len(out) == 0 {
 		return nil
@@ -189,7 +194,7 @@ func saysSomething(ov *aquaregistry.Override) bool {
 	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "") || unnamedOSOverride(ov)
 }
 
-func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquaregistry.Override {
+func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset, parentFormat string) *aquaregistry.Override {
 	asset := ov.Asset
 	if asset == "" {
 		asset = parentAsset
@@ -216,8 +221,13 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 	if unnamedOSOverride(ov) {
 		// An asset whose name says no OS: the release can't be read for which
 		// platform it is, so the definition says it. See addUnnamedOSAssets.
+		// Its format too, which the definition may say once for every platform and
+		// the conversion takes off the top level when the names are built from it.
 		out.Asset = ov.Asset
 		out.Format = ov.Format
+		if out.Format == "" {
+			out.Format = parentFormat
+		}
 	}
 	if len(ov.Variants) != 0 {
 		// The one asset the release can't be read for: which libc a build was made

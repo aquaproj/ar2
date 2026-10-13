@@ -2,6 +2,7 @@ package generate
 
 import (
 	"slices"
+	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/runtime"
@@ -52,8 +53,7 @@ func merge(inferred, base *aquaregistry.PackageInfo) *aquaregistry.PackageInfo {
 	}
 
 	// An asset whose name says no OS is one the inference can't give to any, and the
-	// definition can: see addUnnamedOSAssets. After the variant and format overrides, so
-	// that a variant for the same platform still applies first.
+	// definition can: see addUnnamedOSAssets.
 	addUnnamedOSAssets(p, base)
 
 	// The extension aqua gives files[].src on Windows. The release's asset names say
@@ -144,10 +144,6 @@ func formatOverrides(base, inferred []*aquaregistry.Override) []*aquaregistry.Ov
 // inferred. An override in the definition naming the asset for the platform is what puts
 // it back. It is used only where the inference has nothing, so a release that starts
 // naming its assets is read off the release again.
-//
-// An override naming no architecture is taken for amd64. A name saying neither OS nor
-// architecture is the one build the release has for the OS, and that is amd64 far more
-// often than not; an arm64 machine that can run it is the emulation's to say.
 func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 	if p.SupportedEnvs == nil {
 		// The inference covers every platform.
@@ -157,26 +153,52 @@ func addUnnamedOSAssets(p, base *aquaregistry.PackageInfo) {
 		if ov.GOOS == "" || len(ov.Envs) != 0 || len(ov.Variants) != 0 || !migrate.UnnamedOS(ov.Asset) {
 			continue
 		}
-		goarch := ov.GOArch
-		if goarch == "" {
-			goarch = "amd64"
-		}
-		env := ov.GOOS + "/" + goarch
-		if p.CheckSupportedEnvs(ov.GOOS, goarch, env) {
-			continue
-		}
 		format := ov.Format
 		if format == "" {
 			format = base.Format
 		}
-		p.Overrides = append(p.Overrides, &aquaregistry.Override{
-			GOOS:   ov.GOOS,
-			GOArch: goarch,
-			Asset:  ov.Asset,
-			Format: format,
-		})
-		p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
+		for _, goarch := range unnamedOSArchs(ov) {
+			env := ov.GOOS + "/" + goarch
+			if p.CheckSupportedEnvs(ov.GOOS, goarch, env) {
+				continue
+			}
+			// Right after the variant overrides, ahead of what the inference and the
+			// format overrides say for the OS: aqua applies the first override that
+			// matches, and one for the OS alone would otherwise win.
+			p.Overrides = slices.Insert(p.Overrides, leadingVariants(p.Overrides), &aquaregistry.Override{
+				GOOS:   ov.GOOS,
+				GOArch: goarch,
+				Asset:  ov.Asset,
+				Format: format,
+			})
+			p.SupportedEnvs = append(slices.Clone(p.SupportedEnvs), env)
+		}
 	}
+}
+
+// unnamedOSArchs returns the architectures an override's asset is for. One naming an
+// architecture is for it; one whose name is built from the architecture is for both; one
+// saying neither is the OS's one build, which is amd64 far more often than not -- an arm64
+// machine that can run it is the emulation's to say.
+func unnamedOSArchs(ov *aquaregistry.Override) []string {
+	switch {
+	case ov.GOArch != "":
+		return []string{ov.GOArch}
+	case strings.Contains(ov.Asset, ".Arch"):
+		return []string{"amd64", "arm64"}
+	default:
+		return []string{"amd64"}
+	}
+}
+
+// leadingVariants is how many overrides at the start of the list select on a variant.
+func leadingVariants(overrides []*aquaregistry.Override) int {
+	for i, ov := range overrides {
+		if len(ov.Variants) == 0 {
+			return i
+		}
+	}
+	return len(overrides)
 }
 
 // inferredFor returns the inferred override aqua would apply on the platform the

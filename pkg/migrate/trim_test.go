@@ -291,3 +291,22 @@ func TestConfig_unnamedOSAssetNotRead(t *testing.T) {
 		t.Errorf("got overrides nothing reads: %+v", cfg.Overrides)
 	}
 }
+
+// The format of an asset whose name says no OS comes from the definition when the override
+// says none: the conversion takes it off the top level when the names are built from it.
+func TestConfig_unnamedOSAssetParentFormat(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("o/tool", &aquaregistry.PackageInfo{
+		Type:      "github_release",
+		RepoOwner: "o",
+		RepoName:  "tool",
+		Asset:     "tool-{{.Version}}-{{.OS}}-{{.Arch}}.{{.Format}}",
+		Format:    "zip",
+		Overrides: []*aquaregistry.Override{
+			{GOOS: "windows", Asset: "tool-{{.Version}}.{{.Format}}"},
+		},
+	}, nil)
+	if len(cfg.Overrides) != 1 || cfg.Overrides[0].Format != "zip" {
+		t.Errorf("the overrides are %+v, want windows with format zip", cfg.Overrides)
+	}
+}
