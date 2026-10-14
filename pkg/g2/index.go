@@ -62,9 +62,15 @@ func (c *Client) File(ctx context.Context, ref, path string) (string, error) {
 
 // IndexPullRequest returns the open pull request updating the catalogue, or nil.
 func (c *Client) IndexPullRequest(ctx context.Context) (*gogithub.PullRequest, error) {
+	return c.pullRequestFrom(ctx, IndexBranch)
+}
+
+// pullRequestFrom returns the open pull request from one of the repository's own branches,
+// or nil when there is none.
+func (c *Client) pullRequestFrom(ctx context.Context, branch string) (*gogithub.PullRequest, error) {
 	opts := &gogithub.PullRequestListOptions{
 		State: stateOpen,
-		Head:  c.owner + ":" + IndexBranch,
+		Head:  c.owner + ":" + branch,
 	}
 	opts.PerPage = 1
 	prs, resp, err := c.gh.PullRequests.List(ctx, c.owner, c.repo, opts)

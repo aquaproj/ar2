@@ -227,3 +227,109 @@ func RenderVersionsList(logger *slog.Logger, source string, files map[string]str
 	out.Sort()
 	return marshalVersions(out)
 }
+
+// VersionsBranch is where an update to the packages' lists of versions is committed.
+//
+// One fixed branch, as the catalogue has: a list is made from what the default branch holds,
+// so two runs writing to it produce what the second would have alone, and a run whose pull
+// request is still open adds to it instead of opening another.
+const VersionsBranch = HeadBranchPrefix + "versions"
+
+// VersionsListFile is the versions.json the package whose id this is should hold, made from
+// the versions directory on ref, or nil when what ref holds already says it.
+//
+// It is for a list that fell behind: a pull request adding one version leaves the list alone,
+// since two of them for one package would conflict on it, and the list is brought up to date
+// after they merge. The list ref holds is the starting point, and only the versions it lacks
+// are read and the ones gone taken out; a list that can't be read is made again from every
+// version.
+func (c *Client) VersionsListFile(ctx context.Context, logger *slog.Logger, ref, id string) (*File, error) {
+	dir := PackageDir(id)
+	listPath := dir + "/" + aquag2.VersionsFileName
+	tree, err := c.versionsTree(ctx, ref, dir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := c.File(ctx, ref, listPath)
+	if err != nil {
+		return nil, err
+	}
+	if tree == "" {
+		if content == "" {
+			return nil, nil //nolint:nilnil // no versions and no list, which is in step
+		}
+		return &File{Path: listPath, Deleted: true}, nil
+	}
+	held := readList(content)
+	if held != nil && held.Source == tree {
+		return nil, nil //nolint:nilnil // the list is of what the directory holds
+	}
+	entries, err := c.listedEntries(ctx, logger, ref, dir, held)
+	if err != nil {
+		return nil, err
+	}
+	out := &aquag2.Versions{Source: tree, Versions: make([]*aquag2.Version, 0, len(entries))}
+	for _, v := range entries {
+		out.Versions = append(out.Versions, v)
+	}
+	out.Sort()
+	rendered, err := marshalVersions(out)
+	if err != nil {
+		return nil, err
+	}
+	return &File{Path: listPath, Content: rendered}, nil
+}
+
+// listedEntries is what the list should say about each version the directory on ref holds:
+// what held says about the ones it lists, and what each other one's file says.
+func (c *Client) listedEntries(ctx context.Context, logger *slog.Logger, ref, dir string, held *aquag2.Versions) (map[string]*aquag2.Version, error) {
+	versions, err := c.versionsIn(ctx, logger, ref, dir)
+	if err != nil {
+		return nil, err
+	}
+	entries := map[string]*aquag2.Version{}
+	if held != nil {
+		for _, v := range held.Versions {
+			if v == nil {
+				continue
+			}
+			if _, ok := versions[v.Version]; ok {
+				entries[v.Version] = v
+			}
+		}
+	}
+	for version := range versions {
+		if _, ok := entries[version]; ok {
+			continue
+		}
+		file, err := c.File(ctx, ref, dir+"/"+aquag2.Path(version))
+		if err != nil {
+			return nil, fmt.Errorf("read the registry.json of %s: %w", version, err)
+		}
+		entries[version] = versionEntry(logger, version, file)
+	}
+	return entries, nil
+}
+
+// readList reads a list of versions, or nil when there is none or it can't be read.
+func readList(content string) *aquag2.Versions {
+	if content == "" {
+		return nil
+	}
+	list, err := aquag2.ReadVersions(strings.NewReader(content))
+	if err != nil {
+		return nil
+	}
+	return list
+}
+
+// VersionsPullRequest returns the open pull request updating the lists of versions, or nil
+// when there is none.
+func (c *Client) VersionsPullRequest(ctx context.Context) (*gogithub.PullRequest, error) {
+	return c.pullRequestFrom(ctx, VersionsBranch)
+}
+
+// CreateVersionsPullRequest opens a pull request updating the lists of versions.
+func (c *Client) CreateVersionsPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error) {
+	return c.CreatePullRequestFrom(ctx, logger, VersionsBranch, base, title, body)
+}
