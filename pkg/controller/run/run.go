@@ -459,8 +459,9 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	// and it is recorded after asking rather than after opening a pull request.
 	record(candidate.Package, versions, existing, todo)
 
-	generated, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions, existing,
+	generated, tampered, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions, existing,
 		limitBudget(budget, existing, breadth))
+	c.reportTampered(ctx, logger, input, candidate.Name, tampered)
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
@@ -566,18 +567,20 @@ func limitBudget(budget int, existing map[string]struct{}, breadth *g2.Breadth) 
 }
 
 // generateVersions generates the versions the repository is missing, newest first,
-// within the share of the run the package has.
-func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, versions []string, existing map[string]struct{}, budget *share) ([]*version, int) {
+// within the share of the run the package has. It also returns the versions a check of the
+// release's integrity stopped, which are reported as an issue rather than only logged.
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, versions []string, existing map[string]struct{}, budget *share) ([]*version, []*tamperedVersion, int) {
 	generated := make([]*version, 0, budget.attempts)
+	var tampered []*tamperedVersion
 	attempted := 0
 	for _, tag := range versions {
 		if attempted >= budget.attempts {
-			return generated, attempted
+			return generated, tampered, attempted
 		}
 		if budget.versions > 0 && len(generated) >= budget.versions {
 			// The package has what this turn was for, and the rest of its history
 			// is what the next turn is for.
-			return generated, attempted
+			return generated, tampered, attempted
 		}
 		if _, ok := existing[tag]; ok {
 			continue
@@ -586,19 +589,22 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		v, err := c.generate(ctx, logger, input, def, pkgName, tag)
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
-			// all, and a signature that can't be verified stops the version rather
-			// than being dropped from it. The next run sees the version still
-			// missing and tries again.
+			// all, a server can have a bad minute, and a signature that can't be
+			// verified stops the version rather than being dropped from it. The next
+			// run sees the version still missing and tries again.
 			logger.Warn("failed to generate registry.json",
 				"package", pkgName, "version", tag, "error", err.Error())
 			c.problems = append(c.problems, &summary.Problem{
 				Package: pkgName, Version: tag, Reason: err.Error(),
 			})
+			if verify.Tampered(err) {
+				tampered = append(tampered, &tamperedVersion{version: tag, reason: err.Error()})
+			}
 			continue
 		}
 		generated = append(generated, v)
 	}
-	return generated, attempted
+	return generated, tampered, attempted
 }
 
 // repos is what a package's releases are read from: the instance's client when the
@@ -614,7 +620,7 @@ func (c *Controller) repos(def *definition, base *aquaregistry.PackageInfo) genr
 
 // generate builds registry.json for one package version and completes it.
 func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string) (*version, error) {
-	reg, err := c.generator.Generate(ctx, logger, &generate.Input{
+	reg, left, err := c.generator.Generate(ctx, logger, &generate.Input{
 		PkgName: pkgName,
 		Version: tag,
 		Base:    input.PkgInfos[pkgName],
@@ -649,7 +655,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 		Version:     tag,
 		Registry:    reg,
 		NeedsReview: filled.NeedsReview || dropped,
-		Excluded:    filled.Excluded,
+		Excluded:    append(excludedOf(left, reg), filled.Excluded...),
 	}
 	if filled.Offered == 0 {
 		if err := publishedNothing(filled); err != nil {
@@ -662,6 +668,25 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 		v.Unresolved = filled.Unresolved
 	}
 	return v, nil
+}
+
+// excludedOf is the environments the generator left out, as the entries the issue about them
+// carries. Nothing was picked for them, so the entry says only the environment and where the
+// package comes from; there is no asset for 'ar2 test' to try.
+func excludedOf(left []*generate.Left, reg *generate.Registry) []*verify.Excluded {
+	out := make([]*verify.Excluded, 0, len(left))
+	for _, l := range left {
+		asset := &generate.Asset{OS: l.OS, Arch: l.Arch}
+		if l.Libc != "" {
+			asset.Variants = map[string]string{"libc": l.Libc}
+		}
+		if len(reg.Assets) != 0 {
+			a := reg.Assets[0]
+			asset.Type, asset.RepoOwner, asset.RepoName, asset.Host = a.Type, a.RepoOwner, a.RepoName, a.Host
+		}
+		out = append(out, &verify.Excluded{Asset: asset, Reason: l.Reason})
+	}
+	return out
 }
 
 // errPublishedNothing is a version whose release has nothing for any environment.

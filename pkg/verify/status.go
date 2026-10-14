@@ -3,7 +3,9 @@ package verify
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 )
 
 // StatusError is what a download the server refused comes back as.
@@ -35,4 +37,18 @@ func Refused(err error) bool {
 		return false
 	}
 	return status.Code >= http.StatusBadRequest && status.Code < http.StatusInternalServerError
+}
+
+// Transient reports whether the error is about the moment rather than the release: a server
+// error, a rate limit, or a connection that failed. The same download may well work on the
+// next run, so what it says about the release is nothing yet.
+func Transient(err error) bool {
+	if status, ok := errors.AsType[*StatusError](err); ok {
+		return status.Code == http.StatusTooManyRequests || status.Code >= http.StatusInternalServerError
+	}
+	if _, ok := errors.AsType[*url.Error](err); ok {
+		return true
+	}
+	_, ok := errors.AsType[net.Error](err)
+	return ok
 }

@@ -46,7 +46,7 @@ func TestGenerate_forgeInstance(t *testing.T) { //nolint:funlen,cyclop
 	defer server.Close()
 
 	g := New(nil, nil)
-	reg, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
+	reg, _, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
 		PkgName: "codeberg.org/mergiraf/mergiraf",
 		Version: "v0.20.0",
 		Base: &aquaregistry.PackageInfo{

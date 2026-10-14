@@ -128,3 +128,75 @@ func TestController_reportExcluded_nothingToSay(t *testing.T) {
 	quiet := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
 	quiet.reportExcluded(context.Background(), discardLogger(), "an/owner", excludedVersions())
 }
+
+// A version a check of integrity stopped is said in an issue of its own kind, beside the
+// package's issue about environments, and the next one comments on it.
+func TestController_reportTampered(t *testing.T) {
+	t.Parallel()
+	issues := &fakeIssues{}
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	c.UseIssues(issues, "aquaproj", "aqua-registry-g2")
+	excluded := excludedTitle("an/owner")
+	other := 3
+	issues.open = []*gogithub.Issue{{Number: &other, Title: &excluded}}
+
+	stopped := []*tamperedVersion{{version: "v1.2.3", reason: "the digest of a.tar.gz doesn't match the downloaded asset"}}
+	c.reportTampered(context.Background(), discardLogger(), &Input{}, "an/owner", stopped)
+	if len(issues.created) != 1 {
+		t.Fatalf("%d issues were opened", len(issues.created))
+	}
+	checkTamperedIssue(t, issues.created[0])
+	if len(issues.comments[other]) != 0 {
+		t.Error("the issue about environments was commented on")
+	}
+
+	title := tamperedTitle("an/owner")
+	number := 9
+	issues.open = append(issues.open, &gogithub.Issue{Number: &number, Title: &title})
+	c.reportTampered(context.Background(), discardLogger(), &Input{}, "an/owner", stopped)
+	if len(issues.created) != 1 || len(issues.comments[number]) != 1 {
+		t.Errorf("%d opened, %d comments on the open one", len(issues.created), len(issues.comments[number]))
+	}
+
+	c.reportTampered(context.Background(), discardLogger(), &Input{}, "an/owner", nil)
+	if len(issues.created) != 1 || len(issues.comments[number]) != 1 {
+		t.Error("nothing stopped and something was said")
+	}
+}
+
+// An environment nothing was picked for is said in the issue, and left out of the entries
+// ar2 test takes, since there is no asset to try.
+func TestExcludedBody_nothingPicked(t *testing.T) {
+	t.Parallel()
+	body, err := excludedBody("an/owner", []*excludedVersion{{
+		version: "v1.2.3",
+		excluded: []*verify.Excluded{{
+			Asset:  &generate.Asset{OS: "linux", Arch: "amd64", Type: "github_release"},
+			Reason: "assets of an environment can't be told apart by their names: a.tgz, a-rocm.tgz",
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "- `linux/amd64`: assets of an environment can't be told apart") {
+		t.Errorf("the issue doesn't say what went:\n%s", body)
+	}
+	if !strings.Contains(body, "\"assets\": []") {
+		t.Errorf("an entry with no asset is in what ar2 test takes:\n%s", body)
+	}
+}
+
+func checkTamperedIssue(t *testing.T, created gogithub.CreateIssueRequest) {
+	t.Helper()
+	if created.Title != tamperedTitle("an/owner") {
+		t.Errorf("the issue is called %q", created.Title)
+	}
+	if len(created.Labels) != 1 || created.Labels[0] != TamperedLabel {
+		t.Errorf("the labels are %v", created.Labels)
+	}
+	for _, want := range []string{"v1.2.3", "doesn't match the downloaded asset", "an/owner"} {
+		if !strings.Contains(created.GetBody(), want) {
+			t.Errorf("the issue doesn't say %q:\n%s", want, created.GetBody())
+		}
+	}
+}

@@ -51,7 +51,7 @@ func TestGenerate_gitLab(t *testing.T) { //nolint:funlen,cyclop
 		SupportedEnvs: aquaregistry.SupportedEnvs{"darwin/arm64", "linux/amd64"},
 	}
 	g := New(nil, nil)
-	reg, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
+	reg, _, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
 		PkgName: "gitlab.com/gitlab-org/cli",
 		Version: "v1.122.0",
 		Base:    base,

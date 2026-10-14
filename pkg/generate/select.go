@@ -29,28 +29,86 @@ import (
 // A release publishing a glibc and a musl build of a platform gets an entry for each,
 // distinguished by its libc variant. Which one a machine installs is aqua's to decide when
 // it installs.
-func selectAssets(logger *slog.Logger, input *Input, base *aquaregistry.PackageInfo, rel *release) (*Registry, error) {
+//
+// An environment that can't be given an asset is left out, and said: one whose assets
+// nothing tells apart, and one the definition's supported_envs names that the release has
+// nothing for. The environments that do have an asset keep the version.
+func selectAssets(logger *slog.Logger, input *Input, base *aquaregistry.PackageInfo, rel *release) (*Registry, []*Left, error) {
 	def, err := definition(input.PkgName, base)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	filter, err := allAssetsFilter(logger, input.Scaffold, def.VersionPrefix, input.Version)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	names, err := filterAssets(filter, slices.Sorted(maps.Keys(rel.names)))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sel, err := pick(logger, input, def, names)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return entries(logger, input, def, sel, rel.digests)
+	left, err := leftOut(sel, def)
+	if err != nil {
+		return nil, nil, err
+	}
+	reg, err := entries(logger, input, def, sel, rel.digests)
+	if err != nil {
+		return nil, nil, err
+	}
+	return reg, left, nil
 }
 
-// pick picks the asset of each environment, failing on an environment whose assets nothing
-// tells apart.
+// Left is an environment the generated file leaves out, and why.
+type Left struct {
+	OS   string
+	Arch string
+	// Libc is the libc variant the environment is for, or "".
+	Libc   string
+	Reason string
+}
+
+// Environment is the environment left out, as os/arch.
+func (l *Left) Environment() string {
+	return l.OS + "/" + l.Arch
+}
+
+// leftOut is what the file leaves out: the environments whose assets nothing tells apart,
+// and the ones the definition's supported_envs names that nothing was picked for.
+func leftOut(sel *aquaasset.Selection, def *aquaregistry.PackageInfo) ([]*Left, error) {
+	left := make([]*Left, 0, len(sel.Ties))
+	covered := map[string]struct{}{}
+	for _, a := range sel.Assets {
+		covered[a.Env()] = struct{}{}
+	}
+	for _, t := range sel.Ties {
+		covered[t.OS+"/"+t.Arch] = struct{}{}
+		left = append(left, &Left{
+			OS: t.OS, Arch: t.Arch, Libc: t.Libc,
+			Reason: fmt.Sprintf("%s: %s", errTie.Error(), strings.Join(t.Names, ", ")),
+		})
+	}
+	if len(def.SupportedEnvs) == 0 {
+		return left, nil
+	}
+	rts, err := runtime.GetRuntimesFromEnvs(def.SupportedEnvs)
+	if err != nil {
+		return nil, fmt.Errorf("read the definition's supported_envs: %w", err)
+	}
+	for _, rt := range rts {
+		if _, ok := covered[rt.Env()]; ok {
+			continue
+		}
+		left = append(left, &Left{OS: rt.GOOS, Arch: rt.GOARCH, Reason: errNoAssetForEnv.Error()})
+	}
+	return left, nil
+}
+
+// pick picks the asset of each environment. An environment whose assets nothing tells apart
+// is left in the selection's ties, for the file to leave out; only a release where that is
+// every environment fails.
 func pick(logger *slog.Logger, input *Input, def *aquaregistry.PackageInfo, names []string) (*aquaasset.Selection, error) {
 	spellings := aquaasset.Spellings(def.Replacements)
 	opts := &aquaasset.SelectOptions{
@@ -66,6 +124,12 @@ func pick(logger *slog.Logger, input *Input, def *aquaregistry.PackageInfo, name
 		}
 	}
 	sel.Ties = definedTies(logger, sel.Ties, def)
+	if len(sel.Assets) != 0 {
+		for _, t := range sel.Ties {
+			logger.Warn("assets nothing tells apart are left out, for a filter to settle", "tie", t.String())
+		}
+		return sel, nil
+	}
 	if len(sel.Ties) != 0 {
 		ties := make([]string, len(sel.Ties))
 		for i, t := range sel.Ties {
@@ -73,10 +137,7 @@ func pick(logger *slog.Logger, input *Input, def *aquaregistry.PackageInfo, name
 		}
 		return nil, fmt.Errorf("%w: %s", errTie, strings.Join(ties, "; "))
 	}
-	if len(sel.Assets) == 0 {
-		return nil, errNoAsset
-	}
-	return sel, nil
+	return nil, errNoAsset
 }
 
 // definedTies returns the ties in the environments the definition says the package is for.

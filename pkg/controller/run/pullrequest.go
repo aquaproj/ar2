@@ -23,6 +23,9 @@ type version struct {
 	// LostEnvironments names the environments the version before it covered and this
 	// one doesn't.
 	LostEnvironments []string
+	// GainedEnvironments names the platforms, as os/arch, this version covers and the
+	// version before it didn't.
+	GainedEnvironments []string
 	// Unresolved names the environments whose entry points at a file the archive doesn't
 	// hold. Such a version goes to a pull request of its own: what it says can't be true,
 	// so it can't merge, and in the pull request with the rest it would stop the versions
@@ -184,6 +187,16 @@ func lostEnvironmentLines(versions []*version) []string {
 	return lines
 }
 
+func gainedEnvironmentLines(versions []*version) []string {
+	var lines []string
+	for _, v := range versions {
+		for _, gained := range v.GainedEnvironments {
+			lines = append(lines, v.Version+" "+gained)
+		}
+	}
+	return lines
+}
+
 func prTitle(pkgName string, versions []*version) string {
 	if len(versions) == 1 {
 		return fmt.Sprintf("feat(%s): add %s", pkgName, versions[0].Version)
@@ -211,6 +224,11 @@ func prBody(versions []*version, unconverted []string, needsReview bool, rel rel
 			"to a spelling the parser doesn't know produces no entry for that environment at all. The "+
 			"definition is where the answer goes, as a replacement naming the spelling. A release that "+
 			"stopped building for the environment is the other reason, and then there is nothing to fix.")
+	writeLost(&b, gainedEnvironmentLines(versions),
+		"These versions cover platforms the version before them didn't:",
+		"The asset names are read from the release, so an asset placed on a platform it wasn't on before "+
+			"may be a build the release started publishing, or another program of the release that its "+
+			"name doesn't tell apart. The first merges as it is; the second is what all_assets_filter is for.")
 	writeUnconverted(&b, unconverted)
 	writeWaiting(&b, unconverted, needsReview)
 	return b.String()

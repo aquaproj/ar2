@@ -180,7 +180,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		return err
 	}
 
-	reg, err := generate.New(gh.Repositories, httpClient).Generate(ctx, logger.Logger, &generate.Input{
+	reg, left, err := generate.New(gh.Repositories, httpClient).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,
@@ -188,6 +188,9 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	})
 	if err != nil {
 		return fmt.Errorf("generate registry.json: %w", err)
+	}
+	for _, l := range left {
+		logger.Warn("the file leaves the environment out", "environment", l.Environment(), "reason", l.Reason)
 	}
 
 	// Assets without a digest are hashed whether or not --verify is set: a

@@ -22,7 +22,7 @@ func assetOf(t *testing.T, reg *Registry, env string) *Asset {
 // selected generates the entries of a release holding the given assets.
 func selected(t *testing.T, input *Input, base *aquaregistry.PackageInfo, assets ...string) *Registry {
 	t.Helper()
-	reg, err := selectAssets(discardLogger(), input, base, &release{names: names(assets...)})
+	reg, _, err := selectAssets(discardLogger(), input, base, &release{names: names(assets...)})
 	if err != nil {
 		t.Fatal(err)
 	}
