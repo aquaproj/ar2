@@ -208,7 +208,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	}
 	if needsReview {
 		// The caller creating a pull request has to keep it out of auto-merge.
-		logger.Warn("registry.json needs review: files were relocated or couldn't be found")
+		logger.Warn("registry.json needs review: files couldn't be found or the archive couldn't be checked")
 	}
 
 	return write(args.Output, reg)

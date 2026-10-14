@@ -8,15 +8,16 @@
 // registry.json that resolves cleanly and fails at install time.
 //
 // So the archive decides the merge policy. A package whose files all resolve is
-// carried over unchanged. One whose file is elsewhere in the archive under the same
-// name has moved rather than changed -- the directory an upstream adds around what it
-// packs, or drops -- and recording where it is now says what the definition said, so
-// that merges on its own too. What needs a human is a guess: a file found under a name
-// the definition didn't give it, a name the archive holds more than one of, or a name
-// the archive doesn't hold at all.
+// carried over unchanged. One whose file is elsewhere in the archive has moved rather than
+// changed -- the directory an upstream adds around what it packs, or drops -- and the one
+// executable of the name is the file wherever it is, so recording where it is now says
+// what the definition said, and that merges on its own too. What the archive can't answer
+// -- no executable of the name, or several -- leaves the environment out, for the
+// definition to say.
 package verify
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -28,7 +29,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -100,11 +100,10 @@ type Result struct {
 	// Files is the files list to record. It is the input list when every src was
 	// found, and a relocated one otherwise.
 	Files []*generate.File
-	// NeedsReview is set when resolving a src took a guess: the archive holds the file
-	// under another name, holds that name more than once, or doesn't hold it at all. A
-	// pull request carrying such a result must not be merged automatically.
+	// NeedsReview is set when a file couldn't be resolved. A pull request carrying such a
+	// result must not be merged automatically.
 	NeedsReview bool
-	// Unresolved names the files that aren't anywhere in the archive.
+	// Unresolved names the files the archive holds no executable of, or several of.
 	Unresolved []string
 	// Holds is what the archive does hold, when something couldn't be resolved. It is the
 	// one thing that says what the definition should have said, and the archive is gone as
@@ -240,64 +239,54 @@ type resolver struct {
 type found struct {
 	// Path is where it is, relative to the archive's root.
 	Path string
-	// Executable is whether it can be run, which is what tells a command from a file
-	// named after one.
-	Executable bool
 }
 
-// resolve returns the entry to record, and whether finding it took a guess. It
-// returns nil when the archive holds nothing of the name.
+// resolve returns the entry to record, or nil when the archive doesn't hold the file. When
+// it holds several files the entry could mean, it returns nil and their paths.
 //
-// A file of the same name elsewhere in the archive is the same file: what changed is
-// the directory the release puts it in, which is what an upstream adds or drops around
-// what it packs, and recording where it is now says what the definition said. That is a
-// move, not a guess. Finding it under another name, or under a name the archive holds
-// more than one of, is a guess about which file was meant.
-func (r *resolver) resolve(file *generate.File) (*generate.File, bool) {
+// The definition's src is kept when the archive holds it. Otherwise the file is looked for
+// by its name, which comes from the definition and doesn't change when an upstream
+// reorganizes its archive, among the files that can be run: what tells the command from a
+// file named after it, a completion script or a man page, is that it is an executable, and
+// that is read from the file itself rather than from a mode the archive may not carry. One
+// such file is the command wherever it is, so recording where it is now says what the
+// definition said. More than one is an archive saying the name twice with nothing to tell
+// them apart.
+func (r *resolver) resolve(file *generate.File) (*generate.File, []string) {
 	src := file.Src
 	if src == "" {
 		src = file.Name
 	}
 	if exists(r.dir, src) {
-		return file, false
+		return file, nil
 	}
 	// aqua completes the Windows extension when it resolves files[].src, and at
 	// install time renames the extracted file to match. The archive holds the name
 	// without it, and that is what the entry has to say: nothing has renamed anything
 	// by the time the next reader looks for it.
 	if bare, ok := withoutWindowsExt(r.goos, r.ext, src); ok && exists(r.dir, bare) {
-		return &generate.File{Name: file.Name, Src: bare}, false
+		return &generate.File{Name: file.Name, Src: bare}, nil
 	}
-	found, others, ok := r.byName(file.Name)
-	if !ok {
-		return nil, false
+	found, several := r.byName(file.Name)
+	if found == "" {
+		return nil, several
 	}
-	if path.Base(src) == path.Base(found) && others == 0 {
-		r.logger.Info("files[].src is elsewhere in the archive under the same name",
-			"name", file.Name, "old_src", src, "new_src", found)
-		return &generate.File{Name: file.Name, Src: found}, false
-	}
-	r.logger.Warn("files[].src doesn't match the archive; relocating it",
-		"name", file.Name, "old_src", src, "new_src", found, "other_paths_of_that_name", others)
-	return &generate.File{Name: file.Name, Src: found}, true
+	r.logger.Info("files[].src is elsewhere in the archive",
+		"name", file.Name, "old_src", src, "new_src", found)
+	return &generate.File{Name: file.Name, Src: found}, nil
 }
 
-// byName is where in the archive a file of that name is, with or without the Windows
-// extension, and how many other paths carry that same name without answering for it.
+// byName is the one executable in the archive carrying the name, with or without the Windows
+// extension, or, when there are several, "" and their paths.
 //
-// On Windows the extension is looked for first. git-bug's archive holds git-bug.exe
-// beside a completion script called git-bug, and the name alone finds the script.
+// On Windows the extension is looked for first. git-bug's archive holds git-bug.exe beside
+// a completion script called git-bug, and the name alone finds the script.
 //
-// Where several files carry the name, the one that can be run is the command. A release
-// shipping a completion script named after its command is the ordinary case -- CMake's
-// archive holds bin/cmake and share/bash-completion/completions/cmake -- and the script
-// is not executable, so the archive answers which is which rather than leaving it to a
-// guess about paths.
-//
-// The others are what makes the answer a guess or not: none left is a file the archive
-// identified, and any left is an archive saying the name more than once with nothing to
-// tell them apart.
-func (r *resolver) byName(name string) (string, int, bool) {
+// A release shipping a completion script named after its command is the ordinary case --
+// CMake's archive holds bin/cmake and share/bash-completion/completions/cmake -- and the
+// script is no executable, so the archive answers which is which rather than leaving it to
+// a guess about paths.
+func (r *resolver) byName(name string) (string, []string) {
 	if r.index == nil {
 		index, err := indexByName(r.dir)
 		if err != nil {
@@ -306,35 +295,76 @@ func (r *resolver) byName(name string) (string, int, bool) {
 		r.index = index
 	}
 	for _, candidate := range r.candidates(name) {
-		paths, ok := r.index[candidate]
-		if !ok || len(paths) == 0 {
+		var runnable []string
+		for _, f := range r.index[candidate] {
+			if r.runnable(f.Path) {
+				runnable = append(runnable, f.Path)
+			}
+		}
+		switch len(runnable) {
+		case 0:
 			continue
+		case 1:
+			return runnable[0], nil
+		default:
+			return "", runnable
 		}
-		if runnable := executables(paths); len(runnable) == 1 {
-			return runnable[0].Path, 0, true
-		}
-		return paths[0].Path, len(paths) - 1, true
 	}
-	return "", 0, false
+	return "", nil
 }
 
-// executables is the files of the name that can be run.
-//
-// An archive that carries no modes at all -- a zip written on Windows -- has none, and
-// then the name is all there is to go on.
-func executables(paths []*found) []*found {
-	out := make([]*found, 0, len(paths))
-	for _, path := range paths {
-		if path.Executable {
-			out = append(out, path)
+// runnable reports whether the file at the path, relative to the archive's root, can be run:
+// an ELF, Mach-O or PE executable, a script naming its interpreter, or on Windows a script
+// of an extension Windows runs.
+func (r *resolver) runnable(rel string) bool {
+	if r.goos == osWindows {
+		for _, ext := range windowsScriptExts {
+			if strings.HasSuffix(strings.ToLower(rel), ext) {
+				return true
+			}
 		}
 	}
-	return out
+	return executableHeader(filepath.Join(r.dir, filepath.FromSlash(rel)))
+}
+
+// windowsScriptExts are the extensions of the scripts Windows runs, which carry no header to
+// read: sass/dart-sass runs from sass.bat.
+var windowsScriptExts = []string{".bat", ".cmd", ".ps1"} //nolint:gochecknoglobals
+
+// executableHeaders are how the files that can be run begin: ELF, PE, Mach-O in either byte
+// order and width, a universal Mach-O, and a script naming its interpreter.
+var executableHeaders = [][]byte{ //nolint:gochecknoglobals
+	{0x7f, 'E', 'L', 'F'},
+	{'M', 'Z'},
+	{0xfe, 0xed, 0xfa, 0xce},
+	{0xfe, 0xed, 0xfa, 0xcf},
+	{0xce, 0xfa, 0xed, 0xfe},
+	{0xcf, 0xfa, 0xed, 0xfe},
+	{0xca, 0xfe, 0xba, 0xbe},
+	{'#', '!'},
+}
+
+// executableHeader reports whether the file begins the way an executable does.
+func executableHeader(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 4) //nolint:mnd // the longest header
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+	for _, h := range executableHeaders {
+		if bytes.HasPrefix(head, h) {
+			return true
+		}
+	}
+	return false
 }
 
 // candidates is the names to look for, in the order the environment makes likely.
 func (r *resolver) candidates(name string) []string {
-	if r.goos == "windows" {
+	if r.goos == osWindows {
 		return []string{name + r.ext, name}
 	}
 	return []string{name, name + r.ext}
@@ -347,31 +377,38 @@ func (r *resolver) candidates(name string) []string {
 // extracted files is a command. The name comes from registry.yaml and doesn't change
 // when an upstream reorganizes its archive, so looking for it is a far narrower
 // guess than picking a binary out of the tree.
+//
+// A file it can't resolve is said in unresolved, as its name, and with the paths when the
+// archive holds several executables of the name.
 func resolveFiles(logger *slog.Logger, dir, goos, ext string, files []*generate.File) ([]*generate.File, bool, []string, []string) {
-	var (
-		needsReview bool
-		unresolved  []string
-	)
+	var unresolved []string
 	r := &resolver{logger: logger, dir: dir, goos: goos, ext: ext}
 	out := make([]*generate.File, 0, len(files))
 	for _, file := range files {
-		resolved, relocated := r.resolve(file)
+		resolved, several := r.resolve(file)
 		if resolved == nil {
-			unresolved = append(unresolved, file.Name)
-			needsReview = true
+			unresolved = append(unresolved, unresolvedName(file.Name, several))
 			out = append(out, file)
 			continue
 		}
-		needsReview = needsReview || relocated
 		out = append(out, resolved)
 	}
 	if len(unresolved) == 0 {
-		return out, needsReview, nil, nil
+		return out, false, nil, nil
 	}
 	// What the archive does hold, because that is what whoever writes the definition
 	// needs and there is no other way to see it: the asset is downloaded by a run and
 	// gone by the time anybody reads about it.
-	return out, needsReview, unresolved, holds(r.index)
+	return out, true, unresolved, holds(r.index)
+}
+
+// unresolvedName is how a file that couldn't be resolved is said: its name, and the
+// executables of that name when the archive holds several.
+func unresolvedName(name string, several []string) string {
+	if len(several) == 0 {
+		return name
+	}
+	return name + " (several executables of this name: " + strings.Join(several, ", ") + ")"
 }
 
 // holdsLimit is how many of an archive's files are worth saying. A release that packs a
@@ -392,6 +429,9 @@ func holds(index map[string][]*found) []string {
 	}
 	return paths
 }
+
+// osWindows is the OS whose executables carry an extension.
+const osWindows = "windows"
 
 // windowsExt is the extension aqua gives an executable on Windows.
 const windowsExt = ".exe"
@@ -414,7 +454,7 @@ func windowsExtOf(asset *generate.Asset) string {
 // withoutWindowsExt returns src with the Windows extension ext removed, and whether it had
 // it.
 func withoutWindowsExt(goos, ext, src string) (string, bool) {
-	if goos != "windows" {
+	if goos != osWindows {
 		return src, false
 	}
 	bare := strings.TrimSuffix(src, ext)
@@ -445,10 +485,7 @@ func indexByName(dir string) (map[string][]*found, error) {
 		if err != nil {
 			return err //nolint:wrapcheck
 		}
-		index[d.Name()] = append(index[d.Name()], &found{
-			Path:       filepath.ToSlash(rel),
-			Executable: executable(d),
-		})
+		index[d.Name()] = append(index[d.Name()], &found{Path: filepath.ToSlash(rel)})
 		return nil
 	})
 	if err != nil {
@@ -465,19 +502,6 @@ func indexByName(dir string) (map[string][]*found, error) {
 		})
 	}
 	return index, nil
-}
-
-// executable reports whether the file can be run.
-//
-// Any of the three bits, because what an archive records is whatever the machine that
-// packed it had: a release built on a Unix carries 0755 for its commands and 0644 for
-// what it ships beside them.
-func executable(d fs.DirEntry) bool {
-	info, err := d.Info()
-	if err != nil {
-		return false
-	}
-	return info.Mode().Perm()&0o111 != 0
 }
 
 // downloadURL returns where the asset is downloaded from.

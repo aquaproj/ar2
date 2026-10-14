@@ -82,8 +82,8 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 		return nil
 	}
 	if needsReview {
-		// A relocated files[].src is a guess. Merging it without anyone looking is
-		// exactly what the archive check exists to prevent.
+		// Something the version says is in doubt, and merging it without anyone
+		// looking is what the checks exist to prevent.
 		logger.Warn("leaving the pull request for review", "number", pr.GetNumber())
 		return nil
 	}
@@ -271,8 +271,7 @@ func writeWaiting(b *strings.Builder, unconverted []string, needsReview bool) {
 	}
 	b.WriteString("\nAuto-merge is off. What it is waiting on is above")
 	if len(unconverted) == 0 {
-		b.WriteString(", or in the run's log: `files[].src` may not have matched the archive and been " +
-			"relocated by name, which is a guess, or the archive may not have been checkable at all")
+		b.WriteString(", or in the run's log: the archive may not have been checkable at all")
 	}
 	b.WriteString(".\n")
 }
