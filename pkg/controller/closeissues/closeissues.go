@@ -46,7 +46,7 @@ func (c *Controller) DryRun() {
 }
 
 // labels are the issues ar2 opens about a package, one kind each.
-var labels = []string{issuemark.KindMissingEnvironment, issuemark.KindIntegrity} //nolint:gochecknoglobals
+var labels = []string{issuemark.KindMissingEnvironment, issuemark.KindIntegrity, issuemark.KindTransientFailure} //nolint:gochecknoglobals
 
 // perPage is how many issues or comments one request lists.
 const perPage = 100
@@ -56,7 +56,7 @@ const perPage = 100
 // What an issue is about is read from the records ar2 wrote into it and into each comment it
 // added, and asked of what the default branch serves: an environment left out is resolved once
 // the version's file covers it again, or the version is no longer served at all, and a version
-// a check of integrity stopped is resolved once it is served. An issue saying something nothing
+// a check of integrity stopped, or one that kept failing, is resolved once it is served. An issue saying something nothing
 // has resolved yet stays open, and so does one holding no record, which is one written before
 // the records were.
 func (c *Controller) Close(ctx context.Context, logger *slog.Logger) error {
@@ -179,7 +179,7 @@ func (c *Controller) check(ctx context.Context, records []*issuemark.Record) ([]
 func judge(r *issuemark.Record, version string, reg *aquag2.Registry) ([]string, []string) {
 	name := r.Package + " " + version
 	switch r.Kind {
-	case issuemark.KindIntegrity:
+	case issuemark.KindIntegrity, issuemark.KindTransientFailure:
 		if reg == nil {
 			return []string{name}, nil
 		}

@@ -228,3 +228,20 @@ func TestIssueRecords(t *testing.T) {
 		t.Errorf("the issue about integrity (-want +got):\n%s", diff)
 	}
 }
+
+// The issue about versions that keep failing says which and why, and records them for ar2
+// close-issues.
+func TestKeepsFailingBody(t *testing.T) {
+	t.Parallel()
+	body, err := keepsFailingBody("an/owner", []*tamperedVersion{{version: "v1.2.3", reason: "download the asset: status code 502"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "- v1.2.3: download the asset: status code 502") {
+		t.Errorf("the issue doesn't say what failed:\n%s", body)
+	}
+	want := []*issuemark.Record{{Kind: issuemark.KindTransientFailure, Package: "an/owner", Versions: map[string][]string{"v1.2.3": nil}}}
+	if diff := cmp.Diff(want, issuemark.Parse(body)); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+}

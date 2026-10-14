@@ -464,9 +464,10 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if !ok {
 		return 0, 0, nil
 	}
-	generated, tampered, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions,
+	generated, stopped, attempted := c.generateVersions(ctx, logger, input, def, candidate, versions,
 		c.withInFlight(candidate.Name, versions, existing, inFlight), share)
-	c.reportTampered(ctx, logger, input, candidate.Name, tampered)
+	c.reportTampered(ctx, logger, input, candidate.Name, stopped.tampered)
+	c.reportKeepsFailing(ctx, logger, input, candidate.Name, stopped.keepsFailing)
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
@@ -635,27 +636,42 @@ func (c *Controller) withInFlight(pkgName string, versions []string, existing, i
 	return out
 }
 
+// stopped is the versions a package's turn couldn't generate that are reported as an issue
+// rather than only logged.
+type stopped struct {
+	// tampered are the ones a check of the release's integrity stopped.
+	tampered []*tamperedVersion
+	// keepsFailing are the ones that have now failed failuresBeforeIssue runs in a row for a
+	// reason that should pass on another try.
+	keepsFailing []*tamperedVersion
+}
+
 // generateVersions generates the versions the repository is missing, newest first,
-// within the share of the run the package has. It also returns the versions a check of the
-// release's integrity stopped, which are reported as an issue rather than only logged.
-func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, versions []string, existing map[string]struct{}, budget *share) ([]*version, []*tamperedVersion, int) {
+// within the share of the run the package has. It also returns the versions it couldn't that
+// are reported as an issue rather than only logged, and records in the package's state how
+// each attempt went, which is what tells a version that keeps failing from a bad minute.
+func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, input *Input, def *definition, candidate *Candidate, versions []string, existing map[string]struct{}, budget *share) ([]*version, *stopped, int) {
+	pkgName := candidate.Name
 	generated := make([]*version, 0, budget.attempts)
-	var tampered []*tamperedVersion
+	out := &stopped{}
 	attempted := 0
 	for _, tag := range versions {
 		if attempted >= budget.attempts {
-			return generated, tampered, attempted
+			return generated, out, attempted
 		}
 		if budget.versions > 0 && len(generated) >= budget.versions {
 			// The package has what this turn was for, and the rest of its history
 			// is what the next turn is for.
-			return generated, tampered, attempted
+			return generated, out, attempted
 		}
 		if _, ok := existing[tag]; ok {
 			continue
 		}
 		attempted++
 		v, err := c.generate(ctx, logger, input, def, pkgName, tag)
+		if countFailure(candidate.Package, tag, err) {
+			out.keepsFailing = append(out.keepsFailing, &tamperedVersion{version: tag, reason: err.Error()})
+		}
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
 			// all, a server can have a bad minute, and a signature that can't be
@@ -667,13 +683,13 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 				Package: pkgName, Version: tag, Reason: err.Error(),
 			})
 			if verify.Tampered(err) {
-				tampered = append(tampered, &tamperedVersion{version: tag, reason: err.Error()})
+				out.tampered = append(out.tampered, &tamperedVersion{version: tag, reason: err.Error()})
 			}
 			continue
 		}
 		generated = append(generated, v)
 	}
-	return generated, tampered, attempted
+	return generated, out, attempted
 }
 
 // repos is what a package's releases are read from: the instance's client when the

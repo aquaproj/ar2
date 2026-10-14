@@ -8,6 +8,7 @@ import (
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/issuemark"
+	"github.com/google/go-cmp/cmp"
 	gogithub "github.com/google/go-github/v92/github"
 )
 
@@ -100,6 +101,9 @@ func TestController_Close(t *testing.T) {
 				issueOf(t, 4, &issuemark.Record{Kind: issuemark.KindIntegrity, Package: "foo/foo", Versions: map[string][]string{"v1": nil}}),
 				issueOf(t, 5, &issuemark.Record{Kind: issuemark.KindIntegrity, Package: "foo/foo", Versions: map[string][]string{"v9": nil}}),
 			},
+			issuemark.KindTransientFailure: {
+				issueOf(t, 6, &issuemark.Record{Kind: issuemark.KindTransientFailure, Package: "foo/foo", Versions: map[string][]string{"v1": nil}}),
+			},
 		},
 		comments: map[int][]string{
 			1: {markerOf(t, missing(map[string][]string{"v2": {"linux/arm64"}}))},
@@ -114,8 +118,8 @@ func TestController_Close(t *testing.T) {
 	if err := New(issues, reg, "aquaproj", "aqua-registry-g2").Close(context.Background(), slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatal(err)
 	}
-	if len(issues.closed) != 2 || issues.closed[0] != 1 || issues.closed[1] != 4 {
-		t.Errorf("closed %v, want 1 and 4", issues.closed)
+	if diff := cmp.Diff([]int{1, 4, 6}, issues.closed); diff != "" {
+		t.Errorf("closed (-want +got):\n%s", diff)
 	}
 	if len(issues.said[1]) != 1 || len(issues.said[2]) != 0 {
 		t.Errorf("commented %v", issues.said)
