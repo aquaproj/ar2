@@ -15,11 +15,12 @@ import (
 // like is what the test reads: a definition is a file on a package branch, and a fixture
 // shortened to fit in a function stops being one.
 type definitionCase struct {
-	name      string
-	fixture   string
-	spellings []string
-	checksums int
-	overrides int
+	name          string
+	fixture       string
+	spellings     []string
+	checksums     int
+	overrides     int
+	variantAssets int
 }
 
 func definitionCases() []definitionCase {
@@ -59,11 +60,20 @@ func definitionCases() []definitionCase {
 			overrides: 1,
 		},
 		{
-			// One that names a variant is what makes an entry for that variant generated,
-			// and one with a later sibling the same environment could match is the first
-			// match rather than nothing at all.
+			// One naming a variant's asset whose name doesn't say its libc is the only thing
+			// saying which build it is, and one with a later sibling the same environment
+			// could match is the first match rather than nothing at all.
 			name:    "the overrides that are doing something stay",
 			fixture: "kept-override",
+		},
+		{
+			// The musl build's name says musl, which is what the generator reads it by. Its
+			// override, and the glibc one naming nothing but the variant, then say only
+			// which build of linux they are for.
+			name:          "a variant's asset whose name says its libc goes",
+			fixture:       "variant-asset",
+			overrides:     2,
+			variantAssets: 1,
 		},
 	}
 }
@@ -90,6 +100,9 @@ func TestDefinition(t *testing.T) {
 			}
 			if removed.Overrides != tt.overrides {
 				t.Errorf("%d overrides went, want %d", removed.Overrides, tt.overrides)
+			}
+			if removed.VariantAssets != tt.variantAssets {
+				t.Errorf("%d variants' assets went, want %d", removed.VariantAssets, tt.variantAssets)
 			}
 		})
 	}
