@@ -22,6 +22,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/tidy"
 	"github.com/aquaproj/ar2/pkg/cli/validatedefinition"
 	"github.com/aquaproj/ar2/pkg/cli/validateindex"
+	"github.com/aquaproj/ar2/pkg/cli/versions"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/cobra-util/cobrautil"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
@@ -66,6 +67,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		rewrite.New(logger, gFlags),
 		validatedefinition.New(logger, gFlags),
 		validateindex.New(logger, gFlags),
+		versions.New(logger, gFlags),
 	)
 	return cobrautil.Command(env, cmd, nil)
 }
