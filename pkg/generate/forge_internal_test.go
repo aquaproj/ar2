@@ -46,7 +46,7 @@ func TestGenerate_forgeInstance(t *testing.T) { //nolint:funlen,cyclop
 	defer server.Close()
 
 	g := New(nil, nil)
-	reg, _, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
+	generated, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
 		PkgName: "codeberg.org/mergiraf/mergiraf",
 		Version: "v0.20.0",
 		Base: &aquaregistry.PackageInfo{
@@ -67,6 +67,7 @@ func TestGenerate_forgeInstance(t *testing.T) { //nolint:funlen,cyclop
 	if err != nil {
 		t.Fatal(err)
 	}
+	reg := generated.Registry
 	if len(reg.Assets) == 0 {
 		t.Fatal("wanted an entry per environment, got none")
 	}
