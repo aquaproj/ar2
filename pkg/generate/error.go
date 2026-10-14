@@ -3,7 +3,11 @@ package generate
 import "errors"
 
 var (
-	errNoPackage     = errors.New("aqua gr returned no package")
+	// errTie is returned when nothing in a release's asset names tells apart the assets of
+	// an environment. A filter in the definition is what settles it.
+	errTie = errors.New("assets of an environment can't be told apart by their names")
+	// errNoAsset is returned when a release holds no asset for any environment.
+	errNoAsset       = errors.New("the release has no asset for any environment")
 	errPkgNameFormat = errors.New("the package name must be <repo_owner>/<repo_name>")
 	// errBundleStatus is returned when the bundle beside an asset can't be downloaded.
 	errBundleStatus = errors.New("the signature bundle didn't download")

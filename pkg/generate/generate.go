@@ -1,21 +1,16 @@
 package generate
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	aquaconfig "github.com/aquaproj/aqua/v2/pkg/config"
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	"github.com/aquaproj/aqua/v2/pkg/g2"
-	"go.yaml.in/yaml/v3"
 )
 
 // Input holds the parameters of a single generation.
@@ -60,10 +55,10 @@ func New(gh genrgst.RepositoriesService, httpClient *http.Client) *Generator {
 
 // Generate resolves a release into registry.json.
 //
-// The asset naming rule is not read from a registry: aqua gr infers it from the
-// release's own asset list, which is what stops an upstream renaming from breaking
-// the registry. The inferred PackageInfo is then resolved for each os/arch the same
-// way aqua resolves it at install time, so the static result installs identically.
+// The asset of each environment is picked from the release's own asset list by name,
+// rather than rendered from a template in a registry, which is what stops an upstream
+// renaming from breaking the registry. The definition supplies what a release can't say,
+// such as the executables inside the archive and how the assets are signed.
 func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *Input) (*Registry, error) {
 	input, err := useConfig(logger, input)
 	if err != nil {
@@ -74,22 +69,18 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		return nil, err
 	}
 
-	// Only a release exposes an asset list to infer from. For every other type the
+	// Only a release exposes an asset list to pick from. For every other type the
 	// URL or the path is a template that nothing but registry.yaml knows, so its
 	// definition is used as it is.
 	if base != nil && !inferable(base) {
-		return resolve(logger, input.PkgName, base, nil, input.Version, nil)
+		return resolve(logger, input.PkgName, base, input.Version, nil)
 	}
 
-	inferred, err := g.packageInfo(ctx, logger, withSpellings(input, base), base)
-	if err != nil {
-		return nil, err
-	}
 	rel, err := g.release(ctx, input, base)
 	if err != nil {
 		return nil, err
 	}
-	reg, err := resolveInferred(logger, input, inferred, base, rel)
+	reg, err := selectAssets(logger, input, base, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +91,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// Before the inference, so that a release which moved from one way of signing to
 	// another has the old one dropped and the new one read off the same asset list.
 	dropUnpublished(logger, reg, rel.names)
+	inferSLSA(reg, base, rel.names)
 	// What is inferred about signing is GitHub's: the identity it assumes is a
 	// workflow of the package's repository on github.com, which a release on an
 	// instance is not signed by. A definition naming cosign itself is left alone,
@@ -110,30 +102,6 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		}
 	}
 	return reg, nil
-}
-
-// withSpellings tells aqua gr how this release writes the platforms it can't read.
-//
-// aqua gr works out what a release supports by reading its asset names, and it knows
-// the spellings it knows. luau-lang/luau calls its Linux build luau-ubuntu.zip, so
-// the asset belongs to no platform at all and the package comes back with no Linux
-// in it — not a wrong asset name for Linux, no Linux.
-//
-// The definition already says what the spelling means, and it says it the same way
-// whether it is aqua-registry's or the registry's own.
-func withSpellings(input *Input, base *aquaregistry.PackageInfo) *Input {
-	if base == nil || len(base.Replacements) == 0 {
-		return input
-	}
-	out := *input
-	scaffold := &genrgst.RawConfig{}
-	if out.Scaffold != nil {
-		copied := *out.Scaffold
-		scaffold = &copied
-	}
-	scaffold.Replacements = base.Replacements
-	out.Scaffold = scaffold
-	return &out
 }
 
 // useConfig replaces the aqua-registry definition with aqua-registry-g2's own when
@@ -202,82 +170,6 @@ func resolveBase(logger *slog.Logger, input *Input) (*aquaregistry.PackageInfo, 
 		return nil, fmt.Errorf("apply version_overrides of the aqua-registry definition: %w", err)
 	}
 	return base, nil
-}
-
-// packageInfo runs aqua gr for one version and reads back the PackageInfo it prints.
-//
-// aqua gr only exposes its inference by writing YAML to a writer, so the result is
-// parsed back rather than reimplemented. Reimplementing it would risk resolving
-// differently from aqua itself, which is the one thing the generated registry.json
-// must not do.
-func (g *Generator) packageInfo(ctx context.Context, logger *slog.Logger, input *Input, base *aquaregistry.PackageInfo) (*aquaregistry.PackageInfo, error) {
-	param := &aquaconfig.Param{
-		// Limit 1 makes aqua gr resolve the single release given by "<pkg>@<version>"
-		// instead of walking the release history to build version_overrides.
-		Limit: 1,
-	}
-	if input.Scaffold != nil {
-		path, clean, err := writeScaffold(input.Scaffold)
-		if err != nil {
-			return nil, err
-		}
-		defer clean()
-		param.GenerateConfigFilePath = path
-	}
-
-	// What aqua gr is asked for is the repository, which it reads out of the argument.
-	// The package name is that for a package on github.com; for one on an instance the
-	// name begins with the instance, so the repository is given instead.
-	arg := input.PkgName + "@" + input.Version
-	if OnInstance(base) {
-		owner, name, err := repoOf(input, base)
-		if err != nil {
-			return nil, err
-		}
-		arg = owner + "/" + name + "@" + input.Version
-	}
-
-	buf := &bytes.Buffer{}
-	// No client for GitLab: aqua gr reads a project named gitlab.com/... through one,
-	// and what is asked for here is a repository, read through the client the package's
-	// own instance is behind.
-	ctrl := genrgst.NewController(g.repos(input), nil, nil, nil, buf)
-	if err := ctrl.GenerateRegistry(ctx, param, logger, arg); err != nil {
-		return nil, fmt.Errorf("generate a registry: %w", err)
-	}
-
-	cfg := &aquaregistry.Config{}
-	if err := yaml.NewDecoder(buf).Decode(cfg); err != nil {
-		return nil, fmt.Errorf("read the generated registry as YAML: %w", err)
-	}
-	if len(cfg.PackageInfos) == 0 {
-		return nil, errNoPackage
-	}
-	return cfg.PackageInfos[0], nil
-}
-
-// scaffoldFilePerm keeps the temporary scaffold file readable only by ar2.
-const scaffoldFilePerm = 0o600
-
-// writeScaffold writes the aqua gr configuration to a temporary file, which is the
-// only way GenerateRegistry accepts it.
-func writeScaffold(raw *genrgst.RawConfig) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "ar2")
-	if err != nil {
-		return "", nil, fmt.Errorf("create a temporary directory: %w", err)
-	}
-	clean := func() { os.RemoveAll(dir) }
-	path := filepath.Join(dir, "scaffold.yaml")
-	b, err := yaml.Marshal(raw)
-	if err != nil {
-		clean()
-		return "", nil, fmt.Errorf("marshal the scaffold configuration: %w", err)
-	}
-	if err := os.WriteFile(path, b, scaffoldFilePerm); err != nil {
-		clean()
-		return "", nil, fmt.Errorf("write the scaffold configuration: %w", err)
-	}
-	return path, clean, nil
 }
 
 // release is what a release says about its own assets.
@@ -393,17 +285,4 @@ func repo(pkgName string) (string, string, error) {
 		name = name[:i]
 	}
 	return owner, name, nil
-}
-
-// resolveInferred resolves what is inferred from the release over the definition, with
-// the definition's asset rules applied.
-func resolveInferred(logger *slog.Logger, input *Input, inferred, base *aquaregistry.PackageInfo, rel *release) (*Registry, error) {
-	merged := merge(inferred, base)
-	if input.Config != nil && len(input.Config.AssetRules) != 0 {
-		ar := newAssetRelease(logger, input.Config, base, input.Version, rel.names)
-		if err := applyAssetRules(logger, merged, input.Config.AssetRules, ar); err != nil {
-			return nil, err
-		}
-	}
-	return resolve(logger, input.PkgName, merged, base, input.Version, rel.digests)
 }
