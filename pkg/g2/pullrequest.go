@@ -169,10 +169,12 @@ const labelColor = "ededed"
 // WaitingPullRequest returns the package's open pull request of versions waiting for a
 // definition, or nil when it has none.
 //
-// It is the one whose head branch is named after a version rather than after the package: the
-// pull request a run opens for everything it generated is on the package's own head branch,
-// and this is the other kind.
+// It is the one from the package's waiting branch: see WaitingHeadBranchName.
 func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogithub.PullRequest, error) {
+	branch, ok := c.WaitingHeadBranch(pkgName)
+	if !ok {
+		return nil, nil //nolint:nilnil // a package the registry doesn't hold has nothing waiting
+	}
 	opts := &gogithub.PullRequestListOptions{State: stateOpen}
 	opts.PerPage = pullRequestsPerPage
 	for {
@@ -181,7 +183,7 @@ func (c *Client) WaitingPullRequest(ctx context.Context, pkgName string) (*gogit
 			return nil, fmt.Errorf("list open pull requests: %w", err)
 		}
 		for _, pr := range prs {
-			if c.IsVersionHeadBranch(pkgName, pr.GetHead().GetRef()) {
+			if pr.GetHead().GetRef() == branch {
 				return pr, nil
 			}
 		}

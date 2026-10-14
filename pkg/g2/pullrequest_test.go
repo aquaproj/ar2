@@ -13,13 +13,15 @@ import (
 )
 
 // The pull request waiting for a definition is found by the package's name, which the
-// client resolves to the id its version branches are named after.
+// client resolves to the id its waiting branch is named after. A version's pull request
+// isn't it.
 func TestWaitingPullRequest(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode([]*gogithub.PullRequest{
 			{Number: new(1), Head: &gogithub.PullRequestBranch{Ref: new("ar2_1790772767")}},
-			{Number: new(2), Head: &gogithub.PullRequestBranch{Ref: new("ar2_1790772767_v2.0.0")}},
+			{Number: new(3), Head: &gogithub.PullRequestBranch{Ref: new("ar2_1790772767_v2.0.0")}},
+			{Number: new(2), Head: &gogithub.PullRequestBranch{Ref: new("ar2_1790772767__needs-definition")}},
 		})
 	}))
 	t.Cleanup(srv.Close)

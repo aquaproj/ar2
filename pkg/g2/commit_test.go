@@ -257,11 +257,11 @@ func TestClient_CommitPackage_dropsTheList(t *testing.T) {
 
 // The versions waiting for a definition are committed without the list, which the package's
 // own pull requests write and would conflict with.
-func TestClient_CommitWaiting(t *testing.T) {
+func TestClient_CommitVersions(t *testing.T) {
 	t.Parallel()
 	git := &fakeGit{}
 	c := newTestClient(t, git)
-	if err := c.CommitWaiting(t.Context(), "cli/cli", "ar2_"+testID+"_v1.0.0", "parent", "feat: wait", []*g2.File{
+	if err := c.CommitVersions(t.Context(), "cli/cli", "ar2_"+testID+"_v1.0.0", "parent", "feat: wait", []*g2.File{
 		{Path: aquag2.Path("v1.0.0"), Content: "{}"},
 	}); err != nil {
 		t.Fatal(err)

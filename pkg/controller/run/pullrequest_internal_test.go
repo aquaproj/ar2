@@ -51,6 +51,10 @@ func (f *fakeRegistry) IsVersionHeadBranch(_, branch string) bool {
 	return g2.IsVersionHeadBranch(fakeID, branch)
 }
 
+func (f *fakeRegistry) WaitingHeadBranch(string) (string, bool) {
+	return g2.WaitingHeadBranchName(fakeID), true
+}
+
 func (f *fakeRegistry) Versions(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
@@ -90,7 +94,7 @@ func (f *fakeRegistry) CommitPackage(_ context.Context, _ *slog.Logger, _, branc
 	return nil
 }
 
-func (f *fakeRegistry) CommitWaiting(ctx context.Context, pkgName, branch, parent, message string, files []*g2.File) error {
+func (f *fakeRegistry) CommitVersions(ctx context.Context, pkgName, branch, parent, message string, files []*g2.File) error {
 	f.waiting = true
 	return f.CommitPackage(ctx, nil, pkgName, branch, parent, message, files)
 }
@@ -181,9 +185,8 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
-	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", []*version{
-		{Version: "v2.1.0", Registry: &generate.Registry{}},
-	}, false)
+	err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli",
+		&version{Version: "v2.1.0", Registry: &generate.Registry{}}, false)
 	if err != nil {
 		t.Fatalf("a pull request that can't auto-merge is still a pull request: %v", err)
 	}
@@ -192,26 +195,29 @@ func TestOpenPullRequest_autoMergeFails(t *testing.T) {
 	}
 }
 
-// TestOpenPullRequest_paths checks that each version lands where the package branch
-// keeps it.
+// TestOpenPullRequest_paths checks that a version lands where the package keeps it, on a
+// branch of its own, without the list of versions, which the pull requests of the package's
+// other versions would conflict on.
 func TestOpenPullRequest_paths(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
-	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", []*version{
-		{Version: "v2.1.0", Registry: &generate.Registry{}},
-		{Version: "v2.2.0", Registry: &generate.Registry{}},
-	}, false); err != nil {
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli",
+		&version{Version: "v2.1.0", Registry: &generate.Registry{}}, false); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"versions/v2.1.0/registry-1.json", "versions/v2.2.0/registry-1.json"}
-	if len(reg.committed) != len(want) {
-		t.Fatalf("%d files were committed, want %d", len(reg.committed), len(want))
+	if want := g2.VersionHeadBranchName(fakeID, "v2.1.0"); reg.commitBranch != want || reg.fromBranch != want {
+		t.Errorf("committed to %q and opened from %q, want %q", reg.commitBranch, reg.fromBranch, want)
 	}
-	for i, file := range reg.committed {
-		if file.Path != want[i] {
-			t.Errorf("file %d is at %q, want %q", i, file.Path, want[i])
-		}
+	if !reg.waiting {
+		t.Error("the commit wrote the list of versions")
+	}
+	paths := make([]string, 0, len(reg.committed))
+	for _, file := range reg.committed {
+		paths = append(paths, file.Path)
+	}
+	if diff := cmp.Diff([]string{"versions/v2.1.0/registry-1.json"}, paths); diff != "" {
+		t.Errorf("what was committed (-want +got):\n%s", diff)
 	}
 }
 
@@ -229,8 +235,8 @@ func TestPRBodyReason(t *testing.T) {
 	}
 }
 
-// The versions that can't merge go together, on a branch named after the oldest, and the ones
-// that can are left for the pull request of the package.
+// The versions that can't merge go together, on the package's waiting branch, and the ones
+// that can are left for pull requests of their own.
 func TestOpenUnresolved(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
@@ -243,8 +249,8 @@ func TestOpenUnresolved(t *testing.T) {
 	if err := c.openUnresolved(t.Context(), discardLogger(), &definition{}, "ogham/exa", versions, nil); err != nil {
 		t.Fatal(err)
 	}
-	if want := "ar2_1790772767_v0.8.0"; reg.commitBranch != want {
-		t.Errorf("committed to %q, want the branch of the oldest of them, %q", reg.commitBranch, want)
+	if want := "ar2_1790772767__needs-definition"; reg.commitBranch != want {
+		t.Errorf("committed to %q, want the package's waiting branch, %q", reg.commitBranch, want)
 	}
 	if reg.fromBranch != reg.commitBranch {
 		t.Errorf("opened from %q, want %q", reg.fromBranch, reg.commitBranch)
@@ -259,7 +265,7 @@ func TestOpenUnresolved(t *testing.T) {
 		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
 	}
 	if !reg.waiting {
-		t.Error("the commit wrote the list of versions, which the package's own pull requests write too")
+		t.Error("the commit wrote the list of versions, which the other pull requests would conflict on")
 	}
 }
 
@@ -292,7 +298,7 @@ func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
 	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
-	inFlight := map[string]struct{}{"ar2_1790772767_v0.7.0": {}}
+	inFlight := map[string]struct{}{"ar2_1790772767__needs-definition": {}}
 	versions := []*version{
 		{Version: "v0.8.0", Registry: &generate.Registry{}, Unresolved: []string{"darwin/arm64: exa"}},
 	}
@@ -304,21 +310,47 @@ func TestOpenUnresolved_alreadyWaiting(t *testing.T) {
 	}
 }
 
-// The pull request of the package itself is not one of these, so it doesn't stop them.
+// Only the package's waiting branch is the pull request of versions waiting for a
+// definition: neither the package's own branch nor a version's is.
 func TestWaiting(t *testing.T) {
 	t.Parallel()
 	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
-	own := map[string]struct{}{"ar2_1790772767": {}}
-	if branch, ok := c.waiting("ogham/exa", own); ok {
-		t.Errorf("the package's own branch counted as one waiting: %q", branch)
+	for _, branch := range []string{"ar2_1790772767", "ar2_1790772767_v0.7.0", "ar2_1790772768__needs-definition"} {
+		if _, ok := c.waiting("ogham/exa", map[string]struct{}{branch: {}}); ok {
+			t.Errorf("%s counted as the package's versions waiting", branch)
+		}
 	}
-	version := map[string]struct{}{"ar2_1790772767_v0.7.0": {}}
-	if _, ok := c.waiting("ogham/exa", version); !ok {
-		t.Error("a version's branch should count as one waiting")
+	if _, ok := c.waiting("ogham/exa", map[string]struct{}{"ar2_1790772767__needs-definition": {}}); !ok {
+		t.Error("the package's waiting branch didn't count")
 	}
-	other := map[string]struct{}{"ar2_1790772768_v2.0.0": {}}
-	if _, ok := c.waiting("ogham/exa", other); ok {
-		t.Error("another package's branch counted as this one's")
+}
+
+// A version whose pull request is open isn't generated again, and the package's other
+// versions are.
+func TestWithInFlight(t *testing.T) {
+	t.Parallel()
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	got := c.withInFlight("cli/cli", []string{"v2.2.0", "v2.1.0", "v2.0.0"},
+		map[string]struct{}{"v2.0.0": {}},
+		map[string]struct{}{g2.VersionHeadBranchName(fakeID, "v2.1.0"): {}, "ar2_1790772767": {}})
+	if diff := cmp.Diff(map[string]struct{}{"v2.0.0": {}, "v2.1.0": {}}, got); diff != "" {
+		t.Errorf("the versions not to generate (-want +got):\n%s", diff)
+	}
+}
+
+// A package the registry doesn't hold yet waits while the pull request carrying its definition
+// is open, whether a version's or the one of the versions waiting for a definition.
+func TestHasVersionInFlight(t *testing.T) {
+	t.Parallel()
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	for branch, want := range map[string]bool{
+		g2.VersionHeadBranchName(fakeID, "v2.1.0"): true,
+		g2.WaitingHeadBranchName(fakeID):           true,
+		g2.HeadBranchName(fakeID):                  false,
+	} {
+		if got := c.hasVersionInFlight("cli/cli", map[string]struct{}{branch: {}}); got != want {
+			t.Errorf("%s: got %v, want %v", branch, got, want)
+		}
 	}
 }
 
@@ -391,7 +423,7 @@ func TestOpenPullRequest_replacesPublished(t *testing.T) {
 	if replacesPublished(versions, map[string]struct{}{"v2.0.0": {}}) {
 		t.Fatal("a version the registry is missing was seen as published")
 	}
-	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", versions, true); err != nil {
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", versions[0], true); err != nil {
 		t.Fatal(err)
 	}
 	if merger.calls != 0 {

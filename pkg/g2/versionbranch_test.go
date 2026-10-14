@@ -27,3 +27,22 @@ func TestVersionHeadBranchName(t *testing.T) {
 		})
 	}
 }
+
+// The branch of the versions waiting for a definition names the package, and no version's
+// branch can be it.
+func TestWaitingHeadBranchName(t *testing.T) {
+	t.Parallel()
+	branch := g2.WaitingHeadBranchName("1790772767")
+	if branch != "ar2_1790772767__needs-definition" {
+		t.Errorf("got %q", branch)
+	}
+	if g2.IsVersionHeadBranch("1790772767", branch) {
+		t.Error("the waiting branch reads as a version's")
+	}
+	if id, ok := g2.HeadBranchID(branch); !ok || id != "1790772767" {
+		t.Errorf("the waiting branch is %q's", id)
+	}
+	if branch == g2.VersionHeadBranchName("1790772767", "_needs-definition") {
+		t.Error("a version's branch can be the waiting one")
+	}
+}

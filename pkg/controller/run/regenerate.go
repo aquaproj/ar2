@@ -343,14 +343,14 @@ func (c *Controller) commitRegenerated(ctx context.Context, logger *slog.Logger,
 
 // commitRegeneratedFiles commits what was generated again: with the list of versions for a
 // pull request of its own, and without it onto one waiting for a definition, which leaves
-// the list alone (see CommitWaiting).
+// the list alone (see CommitVersions).
 func (c *Controller) commitRegeneratedFiles(ctx context.Context, logger *slog.Logger, pkgName, branch, base, title string, files []*g2.File, where *target) error {
 	commit := func() error {
 		return c.g2.CommitPackage(ctx, logger, pkgName, branch, base, title, files)
 	}
 	if where.pending {
 		commit = func() error {
-			return c.g2.CommitWaiting(ctx, pkgName, branch, base, title, files)
+			return c.g2.CommitVersions(ctx, pkgName, branch, base, title, files)
 		}
 	}
 	if err := commit(); err != nil {

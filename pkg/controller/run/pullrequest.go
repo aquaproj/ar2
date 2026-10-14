@@ -37,13 +37,14 @@ type version struct {
 	Excluded []*verify.Excluded
 }
 
-// openPullRequest commits every version generated for a package and opens one pull
-// request for them.
+// openPullRequest commits one version and opens a pull request for it.
 //
-// One pull request per package rather than per version: two for the same package would
-// both write its versions.json, so the second would conflict once the first merged. It
-// also keeps the number of pull requests to something a maintainer can look at.
-func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, versions []*version, replaces bool) error {
+// One pull request per version, so that a version that has to be looked at keeps no other
+// from merging, and a version can be generated again on its own. None of them writes the
+// package's versions.json: two would conflict on it, and it is brought up to date after they
+// merge.
+func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, v *version, replaces bool) error {
+	versions := []*version{v}
 	base, err := c.g2.PackageBase(ctx, pkgName)
 	if err != nil {
 		return fmt.Errorf("take the package over: %w", err)
@@ -55,16 +56,16 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 	}
 	needsReview := contents.needsReview
 
-	head, ok := c.g2.HeadBranch(pkgName)
+	head, ok := c.g2.VersionHeadBranch(pkgName, v.Version)
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
 	}
 	title := prTitle(pkgName, versions)
-	if err := c.g2.CommitPackage(ctx, logger, pkgName, head, base, title, contents.files); err != nil {
+	if err := c.g2.CommitVersions(ctx, pkgName, head, base, title, contents.files); err != nil {
 		return fmt.Errorf("commit registry.json: %w", err)
 	}
 
-	pr, err := c.g2.CreatePullRequest(ctx, logger, pkgName, title,
+	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, head, g2.DefaultBranch, title,
 		prBody(versions, contents.unconverted, needsReview, releasesOf(def.config)))
 	if err != nil {
 		return err //nolint:wrapcheck
@@ -73,7 +74,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 		logger.Warn("failed to write the job summary", "error", err.Error())
 	}
 	logger.Info("opened a pull request",
-		"package", pkgName, "number", pr.GetNumber(), "needs_review", needsReview)
+		"package", pkgName, "version", v.Version, "number", pr.GetNumber(), "needs_review", needsReview)
 
 	if replaces {
 		logger.Warn("the pull request replaces a published file, so it is left for a person to merge",
@@ -278,7 +279,7 @@ func writeWaiting(b *strings.Builder, unconverted []string, needsReview bool) {
 
 // openUnresolved opens the pull request of the versions that can't merge as they stand.
 //
-// One pull request for all of them, on a branch named after the oldest: what they are waiting
+// One pull request for all of them, on the package's waiting branch: what they are waiting
 // for is one thing said once in the definition -- the layout of an era of the release -- so
 // fixing it fixes them together, and the work belongs in one place.
 //
@@ -306,10 +307,7 @@ func (c *Controller) openUnresolved(ctx context.Context, logger *slog.Logger, de
 	if err != nil {
 		return fmt.Errorf("take the package over: %w", err)
 	}
-	// The versions come newest first, so the oldest is the last of them. Named after it, a
-	// later run that finds the same era finds the same branch.
-	oldest := versions[len(versions)-1]
-	branch, ok := c.g2.VersionHeadBranch(pkgName, oldest.Version)
+	branch, ok := c.g2.WaitingHeadBranch(pkgName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoBranch, pkgName)
 	}
@@ -319,7 +317,7 @@ func (c *Controller) openUnresolved(ctx context.Context, logger *slog.Logger, de
 	}
 
 	title := unresolvedTitle(pkgName, versions)
-	if err := c.g2.CommitWaiting(ctx, pkgName, branch, base, title, files); err != nil {
+	if err := c.g2.CommitVersions(ctx, pkgName, branch, base, title, files); err != nil {
 		return fmt.Errorf("commit registry.json: %w", err)
 	}
 	pr, err := c.g2.CreatePullRequestFrom(ctx, logger, branch, g2.DefaultBranch, title,
@@ -359,16 +357,15 @@ func unresolvedFiles(def *definition, versions []*version) ([]*g2.File, error) {
 
 // waiting says the package already has versions waiting for a definition, and on which
 // branch.
-//
-// Any branch of the package's but its own: the one a run opens for every version it generated
-// is the package's own, and these are named after a version.
 func (c *Controller) waiting(pkgName string, inFlight map[string]struct{}) (string, bool) {
-	for branch := range inFlight {
-		if c.g2.IsVersionHeadBranch(pkgName, branch) {
-			return branch, true
-		}
+	branch, ok := c.g2.WaitingHeadBranch(pkgName)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	if _, ok := inFlight[branch]; !ok {
+		return "", false
+	}
+	return branch, true
 }
 
 func unresolvedTitle(pkgName string, versions []*version) string {

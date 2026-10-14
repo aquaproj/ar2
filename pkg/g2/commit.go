@@ -97,16 +97,15 @@ func (c *Client) CommitPackage(ctx context.Context, logger *slog.Logger, pkgName
 	return c.moveBranch(ctx, branch, sha)
 }
 
-// CommitWaiting writes the package's files onto a new commit on top of parent and points
+// CommitVersions writes the package's files onto a new commit on top of parent and points
 // branch at it, the way CommitPackage does, but leaves versions.json alone.
 //
-// It is for the pull request of versions waiting for a definition, which a person merges
-// whenever the definition is written. The package's own pull requests go on merging in the
-// meantime and each writes the list, so a list written here too would conflict with
-// whichever of them merged first -- every time, since that is what happens while a person
-// is away. Left alone, the list is behind once this merges, and the next commit for the
-// package sees that its source isn't the versions directory any more and makes it again.
-func (c *Client) CommitWaiting(ctx context.Context, pkgName, branch, parent, message string, files []*File) error {
+// It is for a pull request adding versions while others for the same package are open: the
+// pull request of one version, and the one of the versions waiting for a definition. The list
+// records the sha of the versions directory it was made from, so two pull requests writing it
+// would conflict with whichever of them merged first. Left alone, the list is behind once
+// they merge, and update-versions brings it up to date.
+func (c *Client) CommitVersions(ctx context.Context, pkgName, branch, parent, message string, files []*File) error {
 	dir, ok := c.Dir(pkgName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errNoIdentity, pkgName)
