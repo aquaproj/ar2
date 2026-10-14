@@ -19,6 +19,9 @@ const (
 	KindMissingEnvironment = "missing-environment"
 	// KindIntegrity is an issue about versions a check of the release's integrity stopped.
 	KindIntegrity = "integrity"
+	// KindTransientFailure is an issue about versions that keep failing for a reason that
+	// should pass on another try.
+	KindTransientFailure = "transient-failure"
 )
 
 // Record is what one issue or comment is about.

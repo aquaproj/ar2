@@ -165,6 +165,13 @@ type Package struct {
 	// history is walked again from time to time to find what the sweep structurally
 	// cannot.
 	LastDeepCheck time.Time `json:"last_deep_check,omitzero"`
+	// TransientFailures counts, by version, the runs in a row whose attempt at the version
+	// failed for a reason that should pass on another try: a server error, a rate limit, a
+	// connection that failed. Such a failure is retried rather than reported, which is right
+	// for one bad minute and wrong for a version that never gets past it, and the count is
+	// what tells the two apart. A version leaves it once an attempt fails for anything else
+	// or doesn't fail.
+	TransientFailures map[string]int `json:"transient_failures,omitempty"`
 }
 
 // Fingerprint reduces a sweep's versions to something worth storing for every
