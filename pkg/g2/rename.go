@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -47,7 +49,12 @@ func (c *Client) RenamePackage(ctx context.Context, logger *slog.Logger, from, t
 	if cfg.Name == to {
 		return nil, nil //nolint:nilnil // nothing to do, which is not a definition
 	}
-	content, err := renamedConfig(cfg, from, to)
+	dir, _ := c.Dir(from)
+	raw, err := c.File(ctx, DefaultBranch, dir+"/"+ConfigFileName)
+	if err != nil {
+		return nil, err
+	}
+	content, err := renamedConfig(cfg, raw, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +90,19 @@ name finds nothing under it.
 `, from, to, from, from)
 }
 
-// renamedConfig is the definition under the new name.
+// renamedConfig is the definition under the new name, as the file raw is with what the rename
+// changes and nothing else.
 //
 // The old name becomes an alias, kept alongside the ones it already had rather than
 // replacing them: a package renamed twice has to answer to both of its old names, and a
 // definition recording only the last one would leave the older pointing at a name
 // nothing holds any more.
-func renamedConfig(cfg *aquag2.Config, from, to string) (string, error) {
+//
+// The file is edited rather than rendered again from cfg. A definition is a file a maintainer
+// edits: rendering it again moved repo_id to the end, indented every list another way and
+// would have dropped any comment in it, all in a pull request about a name. cfg is changed the
+// same way, for what reads it after.
+func renamedConfig(cfg *aquag2.Config, raw, from, to string) (string, error) {
 	if cfg == nil {
 		return "", fmt.Errorf("%w: %s", errNoConfigToRename, from)
 	}
@@ -98,17 +111,81 @@ func renamedConfig(cfg *aquag2.Config, from, to string) (string, error) {
 		return "", err
 	}
 	cfg.RepoOwner, cfg.RepoName = owner, name
+	lines := strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
 	if cfg.Name != "" {
 		cfg.Name = to
+		lines = setTopLevel(lines, "name", to)
 	}
+	lines = setTopLevel(lines, "repo_owner", owner)
+	lines = setTopLevel(lines, "repo_name", name)
 	if !hasAlias(cfg, from) {
 		cfg.Aliases = append(cfg.Aliases, &aquaregistry.Alias{Name: from})
+		lines = addAlias(lines, from)
 	}
-	b, err := yaml.Marshal(cfg)
+	return strings.Join(lines, "\n") + "\n", nil
+}
+
+// setTopLevel makes the top-level key say value, adding it after the package's name when the
+// file doesn't have it.
+func setTopLevel(lines []string, key, value string) []string {
+	line := key + ": " + scalar(value)
+	if i := topLevelIndex(lines, key); i >= 0 {
+		lines[i] = line
+		return lines
+	}
+	return slices.Insert(lines, topLevelIndex(lines, "name")+1, line)
+}
+
+// addAlias adds the name to the end of the top-level aliases, written the way the entries it
+// already has are, and adds the list after the package's name when the file has none.
+func addAlias(lines []string, name string) []string {
+	i := topLevelIndex(lines, "aliases")
+	if i < 0 || strings.TrimSpace(strings.TrimPrefix(lines[i], "aliases:")) != "" {
+		// None, or one written inline, such as aliases: [], which becomes a block.
+		if i >= 0 {
+			lines = slices.Delete(lines, i, i+1)
+		}
+		at := topLevelIndex(lines, "name") + 1
+		return slices.Insert(lines, at, "aliases:", "  - name: "+scalar(name))
+	}
+	indent := "  "
+	last := i
+	for j := i + 1; j < len(lines) && inBlock(lines[j]); j++ {
+		if strings.TrimSpace(lines[j]) == "" {
+			continue
+		}
+		if last == i {
+			indent = lines[j][:len(lines[j])-len(strings.TrimLeft(lines[j], " "))]
+		}
+		last = j
+	}
+	return slices.Insert(lines, last+1, indent+"- name: "+scalar(name))
+}
+
+// inBlock reports whether a line can be part of the block a top-level key opens: one that is
+// indented, an entry of a list written without indentation, a comment, or a blank line.
+func inBlock(line string) bool {
+	return line == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "#")
+}
+
+// topLevelIndex is the line the top-level key is on, or -1.
+func topLevelIndex(lines []string, key string) int {
+	for i, line := range lines {
+		if line == key+":" || strings.HasPrefix(line, key+": ") {
+			return i
+		}
+	}
+	return -1
+}
+
+// scalar writes a value as YAML: as it is when it needs no quoting, which a package name
+// doesn't, and quoted otherwise.
+func scalar(value string) string {
+	b, err := yaml.Marshal(value)
 	if err != nil {
-		return "", fmt.Errorf("marshal the definition of the renamed package: %w", err)
+		return strconv.Quote(value)
 	}
-	return string(b), nil
+	return strings.TrimSuffix(string(b), "\n")
 }
 
 // splitRepo reads the owner and the repository out of a package name.

@@ -17,7 +17,7 @@ func TestRenamedConfig(t *testing.T) {
 		RepoOwner: "sst",
 		RepoName:  "opencode",
 	}}
-	got, err := renamedConfig(cfg, "sst/opencode", "anomalyco/opencode")
+	got, err := renamedConfig(cfg, "type: github_release\nrepo_owner: sst\nrepo_name: opencode\n", "sst/opencode", "anomalyco/opencode")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRenamedConfig_keepsTheOlderNames(t *testing.T) {
 		RepoName:  "b",
 		Aliases:   []*aquaregistry.Alias{{Name: "a/a"}},
 	}}
-	if _, err := renamedConfig(cfg, "b/b", "c/c"); err != nil {
+	if _, err := renamedConfig(cfg, "name: b/b\n", "b/b", "c/c"); err != nil {
 		t.Fatal(err)
 	}
 	names := make([]string, 0, len(cfg.Aliases))
@@ -67,11 +67,81 @@ func TestRenamedConfig_twice(t *testing.T) {
 		RepoName:  "a",
 		Aliases:   []*aquaregistry.Alias{{Name: "a/a"}},
 	}}
-	if _, err := renamedConfig(cfg, "a/a", "b/b"); err != nil {
+	if _, err := renamedConfig(cfg, "", "a/a", "b/b"); err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.Aliases) != 1 {
 		t.Errorf("got %d aliases, want the one it had", len(cfg.Aliases))
+	}
+}
+
+// The file is edited where the rename changes it and left as it was everywhere else: its
+// indentation, where repo_id is and its comments. leoafarias/fvm's rename moved repo_id to the
+// end and indented every list by four.
+func TestRenamedConfig_keepsTheFile(t *testing.T) {
+	t.Parallel()
+	raw := `name: leoafarias/fvm
+aliases:
+  - name: conceptadev/fvm
+type: github_release
+repo_owner: leoafarias
+repo_name: fvm
+repo_id: 172011048
+# Why the overrides are there.
+version_overrides:
+  - version_constraint: "true"
+    files:
+      - name: fvm
+        src: fvm/fvm
+`
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
+		Name: "leoafarias/fvm", RepoOwner: "leoafarias", RepoName: "fvm",
+		Aliases: []*aquaregistry.Alias{{Name: "conceptadev/fvm"}},
+	}}
+	got, err := renamedConfig(cfg, raw, "leoafarias/fvm", "btwld/fvm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `name: btwld/fvm
+aliases:
+  - name: conceptadev/fvm
+  - name: leoafarias/fvm
+type: github_release
+repo_owner: btwld
+repo_name: fvm
+repo_id: 172011048
+# Why the overrides are there.
+version_overrides:
+  - version_constraint: "true"
+    files:
+      - name: fvm
+        src: fvm/fvm
+`
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+}
+
+// A definition with no aliases gets the list after its name, and one written inline gets it as
+// a block.
+func TestRenamedConfig_firstAlias(t *testing.T) {
+	t.Parallel()
+	for name, raw := range map[string]string{
+		"none":   "name: a/a\ntype: github_release\nrepo_owner: a\nrepo_name: a\n",
+		"inline": "name: a/a\naliases: []\ntype: github_release\nrepo_owner: a\nrepo_name: a\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{Name: "a/a", RepoOwner: "a", RepoName: "a"}}
+			got, err := renamedConfig(cfg, raw, "a/a", "b/b")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "name: b/b\naliases:\n  - name: a/a\ntype: github_release\nrepo_owner: b\nrepo_name: b\n"
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("(-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
