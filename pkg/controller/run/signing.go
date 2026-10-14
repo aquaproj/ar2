@@ -110,6 +110,36 @@ func lostEnvironments(older, newer *aquag2.Registry) []string {
 	return lost
 }
 
+// gainedEnvironments returns the platforms, as os/arch, the newer version covers and the
+// older one didn't.
+//
+// Gaining one is not a loss, but it is a change somebody should see before it merges: the
+// asset names are read from the release, and an asset that is placed in an environment it
+// wasn't in before is as likely to be another program the release started publishing as a
+// build of the package. A libc variant of a platform the older version already covered is
+// not a new platform.
+func gainedEnvironments(older, newer *aquag2.Registry) []string {
+	before := make(map[string]struct{}, len(older.Assets))
+	for _, a := range older.Assets {
+		before[a.OS+"/"+a.Arch] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var gained []string
+	for _, a := range newer.Assets {
+		env := a.OS + "/" + a.Arch
+		if _, ok := before[env]; ok {
+			continue
+		}
+		if _, ok := seen[env]; ok {
+			continue
+		}
+		seen[env] = struct{}{}
+		gained = append(gained, env)
+	}
+	sort.Strings(gained)
+	return gained
+}
+
 // checkSigning marks the versions that can be verified with less than the one
 // before them, so that they are left for review instead of merging themselves.
 //
@@ -137,6 +167,12 @@ func checkSigning(logger *slog.Logger, pkgName string, versions []*version, base
 				"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
 			v.NeedsReview = true
 			v.LostEnvironments = lost
+		}
+		if gained := gainedEnvironments(baseline, v.Registry); len(gained) > 0 {
+			logger.Warn("this version covers platforms the one before it didn't",
+				"package", pkgName, "version", v.Version, "gained", strings.Join(gained, ", "))
+			v.NeedsReview = true
+			v.GainedEnvironments = gained
 		}
 	}
 }

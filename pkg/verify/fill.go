@@ -97,9 +97,10 @@ func (v *Verifier) Complete(ctx context.Context, logger *slog.Logger, pkgName, v
 // fill completes one entry, and says whether the file keeps it.
 //
 // What loses an entry is the release: an environment it publishes nothing for, or
-// publishes something the definition can't be read against. What doesn't is a server
-// having a bad minute, which leaves the entry in and the version for review -- the
-// difference is what Refused decides.
+// publishes something the definition can't be read against. What stops the version is
+// either a server having a bad minute, which the next run tries again, or an asset that
+// isn't what the release says it is, which a person has to look at before anything of the
+// release is offered. Refused, Transient and Tampered tell them apart.
 func (v *Verifier) fill(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, extract bool, filled *Filled) (bool, error) {
 	if !fetches(asset) {
 		// The entry builds the package rather than fetching one, so there is no
@@ -111,18 +112,10 @@ func (v *Verifier) fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 			"os", asset.OS, "arch", asset.Arch, "type", asset.Type)
 		return true, nil
 	}
-	if extract && !Extractable(asset.Format) {
-		// Nothing is wrong with the package; this machine has no tool to open
-		// the format. The checksum below is still recorded, so the entry is
-		// complete apart from its files having gone unchecked.
-		logger.Warn("can't open this format here, so its files go unchecked",
-			"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
-		if keep, done := v.signedOnly(ctx, logger, pkgName, version, asset, filled); done {
-			return keep, nil
-		}
-	} else if extract {
-		if keep, done := v.extracted(ctx, logger, pkgName, version, asset, filled); done {
-			return keep, nil
+	if extract {
+		keep, done, err := v.check(ctx, logger, pkgName, version, asset, filled)
+		if err != nil || done {
+			return keep, err
 		}
 	}
 	// A checksum is not optional the way extracting is: an entry without one
@@ -141,14 +134,31 @@ func (v *Verifier) fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 	return true, nil
 }
 
+// check opens the asset and reads its files, or, for a format this machine can't open, checks
+// only its signatures. It says whether the file keeps the entry and whether anything is left
+// to do for it.
+func (v *Verifier) check(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, filled *Filled) (bool, bool, error) {
+	if Extractable(asset.Format) {
+		return v.extracted(ctx, logger, pkgName, version, asset, filled)
+	}
+	// Nothing is wrong with the package; this machine has no tool to open the format. The
+	// checksum is still recorded, so the entry is complete apart from its files having
+	// gone unchecked.
+	logger.Warn("can't open this format here, so its files go unchecked",
+		"os", asset.OS, "arch", asset.Arch, "format", asset.Format)
+	return v.signedOnly(ctx, logger, pkgName, version, asset, filled)
+}
+
 // extracted opens the asset and reads its files, and says whether the file keeps the entry
 // and whether anything is left to do for it.
 //
-// Nothing here fails a version: what it meets is either the release's answer about an
-// environment or a moment that may answer differently, and both are recorded rather than
-// returned.
-func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, filled *Filled) (bool, bool) {
+// What it meets is the release's answer about an environment, which is recorded, or
+// something that stops the version: see stops.
+func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, filled *Filled) (bool, bool, error) {
 	review, missing, holds, err := v.fillByExtracting(ctx, logger, pkgName, version, asset)
+	if stops(err) {
+		return false, true, err
+	}
 	switch {
 	case len(missing) > 0:
 		// The entry names a file the archive doesn't hold anywhere, so what it says
@@ -157,14 +167,14 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 		reason := describe(asset, missing, holds)
 		filled.Unresolved = append(filled.Unresolved, reason)
 		filled.exclude(asset, reason)
-		return false, true
+		return false, true, nil
 	case err != nil && (Refused(err) || errors.Is(err, errNotArm64)):
 		// What the release has for arm64 is a 32-bit ARM build, which is the release
 		// having nothing for the environment as much as a 404 is.
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
 		filled.exclude(asset, err.Error())
-		return false, true
+		return false, true, nil
 	case err != nil:
 		// The entry isn't mergeable as it stands, but it is most of the way
 		// there: the checksum may already be recorded and the asset name came
@@ -174,12 +184,19 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 		logger.Warn("failed to check the files against the archive",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
 		filled.NeedsReview = true
-		return true, false
+		return true, false, nil
 	default:
 		filled.NeedsReview = filled.NeedsReview || review
 		// Extracting recorded the checksum, so there is nothing else for this entry.
-		return true, true
+		return true, true, nil
 	}
+}
+
+// stops reports whether an error stops the version rather than being recorded against the
+// entry: a moment that may answer differently next run, which a pull request would only
+// freeze, or an asset that isn't what the release says it is.
+func stops(err error) bool {
+	return err != nil && (Transient(err) || Tampered(err))
 }
 
 // signedOnly checks the signatures an entry claims when its asset can't be opened here, and
@@ -189,28 +206,30 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 // bytes, so it is checked the same way. Skipping it with the files left the entry saying it
 // is attested without what the attestation's certificate records -- lxc/incus's darwin/amd64
 // .pkg was generated on Linux that way. The errors are treated the way extracted treats them.
-func (v *Verifier) signedOnly(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, filled *Filled) (bool, bool) {
+func (v *Verifier) signedOnly(ctx context.Context, logger *slog.Logger, pkgName, version string, asset *generate.Asset, filled *Filled) (bool, bool, error) {
 	if v.signatures == nil {
-		return false, false
+		return false, false, nil
 	}
 	checksum, err := v.VerifySignatures(ctx, logger, pkgName, version, asset)
 	if err == nil {
 		err = setChecksum(asset, checksum)
 	}
 	switch {
+	case stops(err):
+		return false, true, fmt.Errorf("check the signatures of the asset for %s/%s: %w", asset.OS, asset.Arch, err)
 	case err != nil && Refused(err):
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
 		filled.exclude(asset, err.Error())
-		return false, true
+		return false, true, nil
 	case err != nil:
 		logger.Warn("failed to check the signatures of an asset that can't be opened here",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
 		filled.NeedsReview = true
-		return true, false
+		return true, false, nil
 	default:
 		// The download recorded the checksum, so there is nothing else for this entry.
-		return true, true
+		return true, true, nil
 	}
 }
 
@@ -280,7 +299,7 @@ func setChecksum(asset *generate.Asset, checksum string) error {
 		return nil
 	}
 	if asset.Checksum != checksum {
-		return fmt.Errorf("the digest of %s doesn't match the downloaded asset", asset.Asset)
+		return fmt.Errorf("%w: the digest of %s doesn't match the downloaded asset", ErrTampered, asset.Asset)
 	}
 	return nil
 }

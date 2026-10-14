@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/sign"
 )
 
 func TestFetches(t *testing.T) {
@@ -176,5 +178,69 @@ func TestComplete_nothingIsLeft(t *testing.T) {
 	}
 	if len(reg.Assets) != 1 {
 		t.Errorf("what the file holds is %+v", reg.Assets)
+	}
+}
+
+// A server error, a rate limit and a connection that failed are the moment rather than the
+// release, and so is nothing else.
+func TestTransient(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a server error", err: fmt.Errorf("download: %w", &StatusError{Code: 502}), want: true},
+		{name: "a rate limit", err: &StatusError{Code: 429}, want: true},
+		{name: "a connection that failed", err: &url.Error{Op: "Get", URL: "https://example.com", Err: errors.New("connection reset by peer")}, want: true},
+		{name: "not there", err: &StatusError{Code: 404}, want: false},
+		{name: "a digest that disagrees", err: fmt.Errorf("%w: the digest", ErrTampered), want: false},
+		{name: "anything else", err: errors.New("unarchive"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Transient(tt.err); got != tt.want {
+				t.Errorf("Transient is %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A digest that disagrees with the bytes and a signature that doesn't verify both say the
+// release can't be trusted as it stands.
+func TestTampered(t *testing.T) {
+	t.Parallel()
+	if err := setChecksum(&generate.Asset{Checksum: "abc", Asset: "a.tar.gz"}, "def"); !Tampered(err) {
+		t.Errorf("a digest that disagrees isn't tampering: %v", err)
+	}
+	if !Tampered(fmt.Errorf("check: %w", sign.ErrUnverified)) {
+		t.Error("a signature that doesn't verify isn't tampering")
+	}
+	if Tampered(&StatusError{Code: 500}) {
+		t.Error("a server error is tampering")
+	}
+}
+
+// A server having a bad minute stops the version, for the next run to try again, rather than
+// sending it out for review or leaving the environment out.
+func TestComplete_stopsOnAServerError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "windows") {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		fmt.Fprint(w, "an asset")
+	}))
+	defer srv.Close()
+
+	reg := &generate.Registry{Assets: []*generate.Asset{
+		{OS: "linux", Arch: "amd64", Format: "raw", URL: srv.URL + "/linux-amd64"},
+		{OS: "windows", Arch: "amd64", Format: "raw", URL: srv.URL + "/windows-amd64"},
+	}}
+	_, err := New(srv.Client(), nil).Complete(context.Background(), discardLogger(), "a/package", "v1.0.0", reg, false)
+	if !Transient(err) {
+		t.Fatalf("got %v, want an error the next run tries again", err)
 	}
 }

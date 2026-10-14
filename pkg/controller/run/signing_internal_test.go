@@ -436,3 +436,57 @@ func TestCheckSigning_lostEnvironment(t *testing.T) {
 		t.Errorf("what it lost is wrong (-want +got):\n%s", diff)
 	}
 }
+
+// A platform the newer version covers and the older one didn't is a gain, and a libc variant
+// of a platform already covered is not a new platform.
+func TestGainedEnvironments(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		older, newer *aquag2.Registry
+		want         []string
+	}{
+		{
+			name:  "a platform that came",
+			older: registryOf(signed("darwin", "arm64")),
+			newer: registryOf(signed("linux", "amd64"), signed("darwin", "arm64")),
+			want:  []string{"linux/amd64"},
+		},
+		{
+			name:  "nothing new",
+			older: registryOf(signed("linux", "amd64"), signed("darwin", "arm64")),
+			newer: registryOf(signed("darwin", "arm64")),
+			want:  nil,
+		},
+		{
+			name:  "a variant of a platform already covered",
+			older: registryOf(signed("linux", "amd64")),
+			newer: withVariant(registryOf(signed("linux", "amd64")), "libc", "musl"),
+			want:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, gainedEnvironments(tt.older, tt.newer)); diff != "" {
+				t.Errorf("what came is wrong (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// A version covering a platform the one before it didn't is left for review, with the
+// platform said.
+func TestCheckSigning_gainedEnvironment(t *testing.T) {
+	t.Parallel()
+	versions := []*version{
+		{Version: "v1.1.0", Registry: registryOf(signed("linux", "amd64"), signed("windows", "amd64"))},
+	}
+	checkSigning(discardLogger(), "kcp-dev/kcp", versions, registryOf(signed("linux", "amd64")))
+	if !versions[0].NeedsReview {
+		t.Error("a version that gained a platform should be left for review")
+	}
+	if diff := cmp.Diff([]string{"windows/amd64"}, versions[0].GainedEnvironments); diff != "" {
+		t.Errorf("what it gained is wrong (-want +got):\n%s", diff)
+	}
+}

@@ -32,7 +32,7 @@ func TestSelectAssets_libc(t *testing.T) {
 func TestSelectAssets_tie(t *testing.T) {
 	t.Parallel()
 	input := &Input{PkgName: "ollama/ollama", Version: "v0.5.0"}
-	_, err := selectAssets(discardLogger(), input, nil, &release{names: names(
+	_, _, err := selectAssets(discardLogger(), input, nil, &release{names: names(
 		"ollama-linux-amd64.tgz", "ollama-linux-amd64-rocm.tgz",
 	)})
 	if !errors.Is(err, errTie) {
@@ -84,7 +84,7 @@ func TestSelectAssets_windowsExt(t *testing.T) {
 // file.
 func TestSelectAssets_noAsset(t *testing.T) {
 	t.Parallel()
-	_, err := selectAssets(discardLogger(), &Input{PkgName: "foo/foo", Version: "v1.0.0"}, nil, &release{names: names("README.md", "checksums.txt")})
+	_, _, err := selectAssets(discardLogger(), &Input{PkgName: "foo/foo", Version: "v1.0.0"}, nil, &release{names: names("README.md", "checksums.txt")})
 	if !errors.Is(err, errNoAsset) {
 		t.Fatalf("got %v, want no asset", err)
 	}
@@ -144,5 +144,37 @@ func TestSelectAssets_tieOutsideSupportedEnvs(t *testing.T) {
 	))
 	if diff := cmp.Diff(map[string]string{"linux/amd64": "kcp_0.33.1_linux_amd64.tar.gz"}, got); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
+	}
+}
+
+// An environment whose assets nothing tells apart is left out, and said, while the ones that
+// have an asset keep the version. So is an environment the definition supports that the
+// release has nothing for.
+func TestSelectAssets_leftOut(t *testing.T) {
+	t.Parallel()
+	base := &aquaregistry.PackageInfo{
+		Type: "github_release", RepoOwner: "ollama", RepoName: "ollama",
+		SupportedEnvs: aquaregistry.SupportedEnvs{"linux", "darwin"},
+	}
+	reg, left, err := selectAssets(discardLogger(), &Input{PkgName: "ollama/ollama", Version: "v0.5.0"}, base, &release{names: names(
+		"ollama-linux-amd64.tgz", "ollama-linux-amd64-rocm.tgz", "ollama-linux-arm64.tgz",
+	)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(map[string]string{"linux/arm64": "ollama-linux-arm64.tgz"}, assetsByEnv(reg)); diff != "" {
+		t.Errorf("the file (-want +got):\n%s", diff)
+	}
+	got := map[string]string{}
+	for _, l := range left {
+		got[l.Environment()] = l.Reason
+	}
+	want := map[string]string{
+		"linux/amd64":  errTie.Error() + ": ollama-linux-amd64-rocm.tgz, ollama-linux-amd64.tgz",
+		"darwin/amd64": errNoAssetForEnv.Error(),
+		"darwin/arm64": errNoAssetForEnv.Error(),
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("what is left out (-want +got):\n%s", diff)
 	}
 }

@@ -65,7 +65,7 @@ func (c *Controller) reportExcluded(ctx context.Context, logger *slog.Logger, pk
 		logger.Warn("failed to say which environments were left out", "error", err.Error())
 		return
 	}
-	if err := c.sayExcluded(ctx, logger, pkgName, body); err != nil {
+	if err := c.say(ctx, logger, pkgName, excludedTitle(pkgName), ExcludedLabel, body); err != nil {
 		// The versions are published and the pull request is open. Failing the package
 		// over the report would undo nothing and generate nothing.
 		logger.Warn("failed to report the environments that were left out",
@@ -79,10 +79,9 @@ type excludedVersion struct {
 	excluded []*verify.Excluded
 }
 
-// sayExcluded adds to the package's issue, or opens it.
-func (c *Controller) sayExcluded(ctx context.Context, logger *slog.Logger, pkgName, body string) error {
-	title := excludedTitle(pkgName)
-	issue, found, err := c.excludedIssue(ctx, title)
+// say adds to the package's issue of the kind the label names, or opens it.
+func (c *Controller) say(ctx context.Context, logger *slog.Logger, pkgName, title, label, body string) error {
+	issue, found, err := c.openIssue(ctx, title, label)
 	if err != nil {
 		return err
 	}
@@ -90,25 +89,25 @@ func (c *Controller) sayExcluded(ctx context.Context, logger *slog.Logger, pkgNa
 		created, _, err := c.issues.Create(ctx, c.issuesOwner, c.issuesRepo, gogithub.CreateIssueRequest{
 			Title:  title,
 			Body:   &body,
-			Labels: []string{ExcludedLabel},
+			Labels: []string{label},
 		})
 		if err != nil {
 			return fmt.Errorf("open an issue: %w", err)
 		}
-		logger.Info("said which environments were left out", "package", pkgName, "issue", created.GetNumber())
+		logger.Info("opened an issue", "package", pkgName, "label", label, "issue", created.GetNumber())
 		return nil
 	}
 	if _, _, err := c.issues.CreateComment(ctx, c.issuesOwner, c.issuesRepo, issue.GetNumber(),
 		gogithub.IssueCommentRequest{Body: body}); err != nil {
 		return fmt.Errorf("comment on issue %d: %w", issue.GetNumber(), err)
 	}
-	logger.Info("said which environments were left out", "package", pkgName, "issue", issue.GetNumber())
+	logger.Info("commented on the issue", "package", pkgName, "label", label, "issue", issue.GetNumber())
 	return nil
 }
 
-// excludedIssue is the package's open issue, and whether it has one.
-func (c *Controller) excludedIssue(ctx context.Context, title string) (*gogithub.Issue, bool, error) {
-	opts := &gogithub.IssueListByRepoOptions{Labels: []string{ExcludedLabel}, State: "open"}
+// openIssue is the package's open issue of the given title and label, and whether it has one.
+func (c *Controller) openIssue(ctx context.Context, title, label string) (*gogithub.Issue, bool, error) {
+	opts := &gogithub.IssueListByRepoOptions{Labels: []string{label}, State: "open"}
 	opts.ListOptions.PerPage = issuesPerPage
 	for {
 		issues, resp, err := c.issues.ListByRepo(ctx, c.issuesOwner, c.issuesRepo, opts)
@@ -171,7 +170,9 @@ func excludedBody(pkgName string, versions []*excludedVersion) (string, error) {
 func marshalExcluded(excluded []*verify.Excluded) (string, error) {
 	reg := &generate.Registry{Assets: make([]*generate.Asset, 0, len(excluded))}
 	for _, e := range excluded {
-		if e.Asset == nil {
+		// An environment nothing was picked for has no asset, and nothing for ar2 test to
+		// try. The line above the blocks already says why it went.
+		if e.Asset == nil || (e.Asset.Asset == "" && e.Asset.URL == "") {
 			continue
 		}
 		reg.Assets = append(reg.Assets, e.Asset)
@@ -191,4 +192,63 @@ func runURL() string {
 		return ""
 	}
 	return fmt.Sprintf("%s/%s/actions/runs/%s", server, repo, id)
+}
+
+// TamperedLabel is what the issues about a release that failed a check of its integrity are
+// found by.
+const TamperedLabel = "integrity"
+
+// tamperedVersion is one version that was stopped, and the check it failed.
+type tamperedVersion struct {
+	version string
+	reason  string
+}
+
+// reportTampered says, as an issue, which versions were stopped because the release failed a
+// check of its integrity.
+//
+// Such a version isn't published for any environment, and a run tries it again every time
+// because it is still missing, so without the issue the only trace of it is a line in each
+// run's summary. What stopped it is either a release that isn't what it says -- an asset
+// replaced after it was published, a signature that doesn't verify -- or a definition naming
+// the wrong signer, and telling the two apart takes a person. One issue per package,
+// commented on again, the same way an environment left out is.
+//
+// A run writing files instead of opening pull requests says nothing either.
+func (c *Controller) reportTampered(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, versions []*tamperedVersion) {
+	if c.issues == nil || input.SkipPR || len(versions) == 0 {
+		return
+	}
+	if err := c.say(ctx, logger, pkgName, tamperedTitle(pkgName), TamperedLabel, tamperedBody(pkgName, versions)); err != nil {
+		logger.Warn("failed to report the versions a check of integrity stopped",
+			"package", pkgName, "error", err.Error())
+	}
+}
+
+// tamperedTitle is what the package's issue about integrity is called, and how it is found
+// again.
+func tamperedTitle(pkgName string) string {
+	return pkgName + ": a release failed a check of its integrity"
+}
+
+// tamperedBody says which versions were stopped and by what.
+func tamperedBody(pkgName string, versions []*tamperedVersion) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "These versions of `%s` were not published for any environment, because the release "+
+		"failed a check of its integrity:\n\n", pkgName)
+	for _, v := range versions {
+		fmt.Fprintf(&b, "- %s: %s\n", v.version, v.reason)
+	}
+	b.WriteString("\n")
+	if run := runURL(); run != "" {
+		fmt.Fprintf(&b, "Generated by %s\n\n", run)
+	}
+	b.WriteString("An asset whose digest disagrees with what GitHub reports for it was replaced after it " +
+		"was published. A signature that doesn't verify is either the release not being what it says, or " +
+		"the definition naming a signer the release isn't signed by. Which one it is has to be looked at: " +
+		"the environments that did check out are no more trustworthy than the one that didn't, so none of " +
+		"them is published until it is.\n\n")
+	b.WriteString("Every run tries these versions again, since they are still missing. A definition fixed on " +
+		"the package's branch is what the next run generates them from.\n")
+	return b.String()
 }
