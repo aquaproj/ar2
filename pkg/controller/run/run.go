@@ -85,9 +85,9 @@ type Contents interface {
 	// A regeneration compares what it would commit against them.
 	File(ctx context.Context, ref, path string) (string, error)
 	CommitPackage(ctx context.Context, logger *slog.Logger, pkgName, branch, parent, message string, files []*g2.File) error
-	// CommitWaiting is the commit of versions waiting for a definition, which leaves the
-	// list of versions alone.
-	CommitWaiting(ctx context.Context, pkgName, branch, parent, message string, files []*g2.File) error
+	// CommitVersions is the commit of a version's pull request, or of the versions waiting
+	// for a definition, which leaves the list of versions alone.
+	CommitVersions(ctx context.Context, pkgName, branch, parent, message string, files []*g2.File) error
 }
 
 // Definitions is what the registry says a package is, and what it says about itself.
@@ -112,6 +112,7 @@ type Branches interface {
 	HeadBranch(pkgName string) (string, bool)
 	VersionHeadBranch(pkgName, version string) (string, bool)
 	IsVersionHeadBranch(pkgName, branch string) bool
+	WaitingHeadBranch(pkgName string) (string, bool)
 }
 
 // PullRequests is how a run puts what it generated to a person, and how it sees what is
@@ -459,30 +460,38 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	// and it is recorded after asking rather than after opening a pull request.
 	record(candidate.Package, versions, existing, todo)
 
-	generated, tampered, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions, existing,
-		limitBudget(budget, existing, breadth))
+	share, ok := c.shareOf(logger, def, candidate.Name, limitBudget(budget, existing, breadth), inFlight)
+	if !ok {
+		return 0, 0, nil
+	}
+	generated, tampered, attempted := c.generateVersions(ctx, logger, input, def, candidate.Name, versions,
+		c.withInFlight(candidate.Name, versions, existing, inFlight), share)
 	c.reportTampered(ctx, logger, input, candidate.Name, tampered)
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
 
-	c.reviewLostSigning(ctx, logger, candidate.Name, generated, versions, existing)
-
-	if input.SkipPR {
-		return len(generated), attempted, writeAll(input.OutputDir, candidate.Name, generated)
-	}
-
-	if err := c.openPullRequests(ctx, logger, def, candidate.Name, generated, existing, inFlight); err != nil {
+	if err := c.publish(ctx, logger, input, def, candidate.Name, generated, versions, existing, inFlight); err != nil {
 		return 0, attempted, err
 	}
 	return len(generated), attempted, nil
 }
 
+// publish takes what a package's turn generated to pull requests, or to files when the run
+// opens none, once each version has been compared with the one before it.
+func (c *Controller) publish(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName string, generated []*version, versions []string, existing, inFlight map[string]struct{}) error {
+	c.reviewLostSigning(ctx, logger, pkgName, generated, versions, existing)
+	if input.SkipPR {
+		return writeAll(input.OutputDir, pkgName, generated)
+	}
+	return c.openPullRequests(ctx, logger, def, pkgName, generated, existing, inFlight)
+}
+
 // openPullRequests takes what a package's turn generated to the pull requests it belongs in.
 //
-// Two of them at most: the versions that can merge go to the package's own, and the ones whose
-// entry names a file the archive doesn't hold go together to one of their own. Neither waits
-// for the other, which is the point of telling them apart.
+// Each version that can be offered gets a pull request of its own, and the ones whose entry
+// names a file the archive doesn't hold go together to one waiting for a definition. None
+// waits for another, which is the point of telling them apart.
 func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, def *definition, pkgName string, generated []*version, existing map[string]struct{}, inFlight map[string]struct{}) error {
 	sound, unresolved := partition(generated)
 	if err := c.openUnresolved(ctx, logger, def, pkgName, unresolved, inFlight); err != nil {
@@ -491,10 +500,12 @@ func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, 
 	// After the pull requests, so that what the issue says is in the registry is on its
 	// way there rather than only generated.
 	defer c.reportExcluded(ctx, logger, pkgName, sound)
-	if len(sound) == 0 {
-		return nil
+	for _, v := range sound {
+		if err := c.openPullRequest(ctx, logger, def, pkgName, v, replacesPublished([]*version{v}, existing)); err != nil {
+			return err
+		}
 	}
-	return c.openPullRequest(ctx, logger, def, pkgName, sound, replacesPublished(sound, existing))
+	return nil
 }
 
 // replacesPublished says whether any of the versions is one the registry already serves.
@@ -564,6 +575,64 @@ func limitBudget(budget int, existing map[string]struct{}, breadth *g2.Breadth) 
 		attempts: min(budget, attempts),
 		versions: want,
 	}
+}
+
+// shareOf is the share of the run the package gets, and false when it gets none this time.
+//
+// A package the registry doesn't hold yet is taken over by one version's pull request, which
+// carries its definition. Another would carry it too, and they would conflict on it, so while
+// that one is open the package waits.
+func (c *Controller) shareOf(logger *slog.Logger, def *definition, pkgName string, s *share, inFlight map[string]struct{}) (*share, bool) {
+	if def.held {
+		return s, true
+	}
+	if c.hasVersionInFlight(pkgName, inFlight) {
+		logger.Info("the package's first pull request is open, so its other versions wait", "package", pkgName)
+		return nil, false
+	}
+	return takeOver(s), true
+}
+
+// takeOver is the share of a package the registry doesn't hold yet: one version, whose pull
+// request brings the definition. The rest are generated once it has merged, each with a pull
+// request of its own that the definition already on the default branch serves.
+func takeOver(s *share) *share {
+	return &share{attempts: s.attempts, versions: 1}
+}
+
+// hasVersionInFlight says whether any of the package's versions has a pull request open,
+// its own or the one of the versions waiting for a definition. Either carries the definition
+// of a package the registry doesn't hold yet.
+func (c *Controller) hasVersionInFlight(pkgName string, inFlight map[string]struct{}) bool {
+	if _, ok := c.waiting(pkgName, inFlight); ok {
+		return true
+	}
+	for branch := range inFlight {
+		if c.g2.IsVersionHeadBranch(pkgName, branch) {
+			return true
+		}
+	}
+	return false
+}
+
+// withInFlight is the versions not to generate: the ones the registry holds, and the ones
+// whose pull request is open. A version waiting on its pull request -- for its checks, or for
+// somebody to look at it -- is generated again only when that pull request is closed.
+func (c *Controller) withInFlight(pkgName string, versions []string, existing, inFlight map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(existing))
+	for v := range existing {
+		out[v] = struct{}{}
+	}
+	for _, v := range versions {
+		branch, ok := c.g2.VersionHeadBranch(pkgName, v)
+		if !ok {
+			continue
+		}
+		if _, ok := inFlight[branch]; ok {
+			out[v] = struct{}{}
+		}
+	}
+	return out
 }
 
 // generateVersions generates the versions the repository is missing, newest first,

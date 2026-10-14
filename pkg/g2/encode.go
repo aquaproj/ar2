@@ -117,31 +117,39 @@ func isSafe(c byte) bool {
 // have to make an exception for the branch a pull request comes from.
 const HeadBranchPrefix = "ar2_"
 
-// HeadBranchName returns the branch a pull request for the package with this id is opened
-// from.
+// HeadBranchName returns the branch a pull request about the package as a whole is opened
+// from: tidying its definition, regenerating what it holds, adding it, taking versions out.
 //
-// It carries no version: one pull request adds every version of the package that a
-// run found, which keeps the number of pull requests down and, more importantly,
-// keeps two of them from writing the same package's versions.json at once. Two would
-// conflict on merge, since the second is written against a base the first has moved.
+// It carries no version, and it is one branch per package, because these pull requests write
+// the package's versions.json or its definition, which two at once would conflict on. A run
+// adding versions opens one per version instead: see VersionHeadBranchName.
 func HeadBranchName(id string) string {
 	return HeadBranchPrefix + id
 }
 
-// VersionHeadBranchName returns the branch a pull request for one version alone is opened
+// VersionHeadBranchName returns the branch the pull request adding one version is opened
 // from.
 //
-// One version has a branch of its own when what was generated for it can't merge: it names a
-// file the archive doesn't hold, so the definition has to say something it doesn't, and until
-// somebody writes that the version waits. In the pull request with the rest it would keep the
-// versions that were right from merging, which is the whole reason for a branch per version
-// here and one per package everywhere else.
-//
-// Two of these don't conflict with each other or with the package's own, because a pull
-// request moves the default branch only when it merges, and this one doesn't until a
-// person has been.
+// Each version has a pull request of its own, so that one that has to be looked at keeps no
+// other from merging. They don't conflict with each other: each adds its own version's
+// directory, and none writes the package's versions.json, which is brought up to date after
+// they merge.
 func VersionHeadBranchName(id, version string) string {
 	return HeadBranchName(id) + "_" + EncodePackageName(version)
+}
+
+// waitingSuffix ends the branch of the versions waiting for a definition. It begins with an
+// underscore that isn't followed by two hex digits, which an encoded version never is, so no
+// version's branch can be this one.
+const waitingSuffix = "_needs-definition"
+
+// WaitingHeadBranchName returns the branch the pull request of a package's versions waiting
+// for a definition is opened from.
+//
+// They are waiting for one thing said once in the definition -- the layout of an era of the
+// release -- so they are one pull request, and the definition goes on its branch.
+func WaitingHeadBranchName(id string) string {
+	return HeadBranchName(id) + "_" + waitingSuffix
 }
 
 // IsVersionHeadBranch reports whether the branch is one of the package's version branches.
