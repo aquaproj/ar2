@@ -1,0 +1,19 @@
+type: github_release
+repo_owner: anthropics
+repo_name: claude-code
+description: Claude Code
+files:
+  - name: claude
+overrides:
+  - goos: linux
+    variants:
+      - key: libc
+        value: glibc
+  - goos: linux
+    asset: claude-{{.OS}}-{{.Arch}}-musl.{{.Format}}
+    format: tar.gz
+    variants:
+      - key: libc
+        value: musl
+  - goos: windows
+    format: zip
