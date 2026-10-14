@@ -50,10 +50,47 @@ func TestConfig_replacementsAllKnown(t *testing.T) {
 // goos, goarch, envs and variants are conditions: they say what an override matches and
 // change nothing, so an override carrying only those says nothing here. aqua-registry
 // writes one first so that an aqua too old to know variants matches it and stays on the
-// asset it always had; nothing reading this registry is that old.
+// asset it always had; nothing reading this registry is that old. A variant's asset whose
+// name says musl says nothing either: the generator reads the libc off the name.
 func TestConfig_conditionOnlyOverride(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
+	cfg, _ := migrate.Config("cli/cli", pnpm("pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}"), nil)
+	if len(cfg.VersionOverrides) == 0 {
+		t.Fatal("got no version_overrides")
+	}
+	if overrides := cfg.VersionOverrides[0].Overrides; len(overrides) != 0 {
+		t.Fatalf("got %d overrides, want none:\n%+v", len(overrides), overrides)
+	}
+}
+
+// A variant's asset whose name doesn't say its libc is the one thing the asset list can't be
+// read for, so the override naming it stays, with its format: the first override that
+// matches is the only one applied, so what is inferred for the OS elsewhere doesn't reach the
+// asset named here.
+func TestConfig_unreadableVariant(t *testing.T) {
+	t.Parallel()
+	cfg, _ := migrate.Config("cli/cli", pnpm("pnpm-alpine-{{.Arch}}.{{.Format}}"), nil)
+	if len(cfg.VersionOverrides) == 0 {
+		t.Fatal("got no version_overrides")
+	}
+	overrides := cfg.VersionOverrides[0].Overrides
+	if len(overrides) != 1 {
+		t.Fatalf("got %d overrides, want the one that says something:\n%+v", len(overrides), overrides)
+	}
+	if got := overrides[0].Asset; got != "pnpm-alpine-{{.Arch}}.{{.Format}}" {
+		t.Errorf("the asset is %q, want the musl one", got)
+	}
+	if got := overrides[0].Format; got != "tar.gz" {
+		t.Errorf("the format is %q, want tar.gz", got)
+	}
+	if len(overrides[0].Variants) != 1 || overrides[0].Variants[0].Value != "musl" {
+		t.Errorf("the override matches %+v, want the musl variant", overrides[0].Variants)
+	}
+}
+
+// pnpm is a definition whose musl build is the given asset.
+func pnpm(musl string) *aquaregistry.PackageInfo {
+	return &aquaregistry.PackageInfo{
 		Type:               "github_release",
 		RepoOwner:          "pnpm",
 		RepoName:           "pnpm",
@@ -68,34 +105,13 @@ func TestConfig_conditionOnlyOverride(t *testing.T) {
 					{GOOS: "linux", Variants: []*aquaregistry.Variant{{Key: "libc", Value: "glibc"}}},
 					{
 						GOOS:     "linux",
-						Asset:    "pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}",
+						Asset:    musl,
 						Format:   "tar.gz",
 						Variants: []*aquaregistry.Variant{{Key: "libc", Value: "musl"}},
 					},
 				},
 			},
 		},
-	}, nil)
-
-	if len(cfg.VersionOverrides) == 0 {
-		t.Fatal("got no version_overrides")
-	}
-	overrides := cfg.VersionOverrides[0].Overrides
-	if len(overrides) != 1 {
-		t.Fatalf("got %d overrides, want the one that says something:\n%+v", len(overrides), overrides)
-	}
-	// And it keeps its asset: which libc a build was made against is in no asset name the
-	// parser knows how to read, so without it the override says nothing either.
-	if got := overrides[0].Asset; got != "pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}" {
-		t.Errorf("the asset is %q, want the musl one", got)
-	}
-	// And its format: the first override that matches is the only one applied, so what
-	// is inferred for the OS elsewhere doesn't reach the asset named here.
-	if got := overrides[0].Format; got != "tar.gz" {
-		t.Errorf("the format is %q, want tar.gz", got)
-	}
-	if len(overrides[0].Variants) != 1 || overrides[0].Variants[0].Value != "musl" {
-		t.Errorf("the override matches %+v, want the musl variant", overrides[0].Variants)
 	}
 }
 

@@ -1,18 +1,13 @@
 type: github_release
-repo_owner: anthropics
-repo_name: claude-code
-description: Claude Code
+repo_owner: pnpm
+repo_name: pnpm
+description: pnpm
 files:
-  - name: claude
+  - name: pnpm
 overrides:
-  # Naming glibc is what makes an entry for it generated, so it stays although it says
-  # nothing else.
+  # The musl build's name doesn't say musl, so nothing but this says which build it is.
   - goos: linux
-    variants:
-      - key: libc
-        value: glibc
-  - goos: linux
-    asset: claude-{{.OS}}-{{.Arch}}-musl.{{.Format}}
+    asset: pnpm-alpine-{{.Arch}}.{{.Format}}
     variants:
       - key: libc
         value: musl

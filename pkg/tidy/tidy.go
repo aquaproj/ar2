@@ -11,6 +11,7 @@ package tidy
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/aquaproj/aqua/v2/pkg/asset"
@@ -32,16 +33,23 @@ const (
 )
 
 // selectorKeys are what an override says about which environment it is for.
-//
-// variants is not one of them. An override carrying variants says that the variant exists
-// at all, which is what makes an entry for it generated: claude-code's linux/glibc entry
-// is there because the definition names glibc beside musl, and the override naming it says
-// nothing else.
 var selectorKeys = map[string]struct{}{ //nolint:gochecknoglobals
 	"goos":   {},
 	"goarch": {},
 	"envs":   {},
 }
+
+// variantsKey is the field that says which build of an environment an override is for.
+//
+// For a package released on GitHub it is a selector too: a glibc and a musl build are told
+// apart by their names, and the entry for each is generated from the name whatever the
+// definition says. An override naming nothing but the variant, as claude-code's linux/glibc
+// one does, says nothing. For a package downloaded by a URL it is what makes the variant's
+// entry generated at all.
+const variantsKey = "variants"
+
+// variantAssetKeys are the fields of a variant's override that say which asset it is.
+var variantAssetKeys = []string{"asset", "url", "format"} //nolint:gochecknoglobals
 
 // Removed is what a tidying took out of a definition.
 type Removed struct {
@@ -51,11 +59,13 @@ type Removed struct {
 	Checksums int
 	// Overrides is how many overrides went for saying nothing.
 	Overrides int
+	// VariantAssets is how many variants' assets went for saying their libc in the name.
+	VariantAssets int
 }
 
 // Any reports whether anything went.
 func (r *Removed) Any() bool {
-	return len(r.Spellings) > 0 || r.Checksums > 0 || r.Overrides > 0
+	return len(r.Spellings) > 0 || r.Checksums > 0 || r.Overrides > 0 || r.VariantAssets > 0
 }
 
 // Definition takes out of a definition what it doesn't have to say: the spellings the
@@ -85,10 +95,13 @@ func Definition(content string) (string, *Removed, error) {
 	// the platform into that URL through the replacements, and nothing else in the
 	// definition says what it should be. Taking them out of one leaves a URL asking for
 	// darwin/amd64 where the release publishes darwin/x64.
-	spellings := releasedOnGitHub(nodes)
+	github := releasedOnGitHub(nodes)
 	for _, mapping := range nodes {
-		if spellings {
+		if github {
 			removed.Spellings = append(removed.Spellings, trim(mapping)...)
+			if dropVariantAsset(mapping) {
+				removed.VariantAssets++
+			}
 		}
 		if dropChecksum(mapping) {
 			removed.Checksums++
@@ -97,7 +110,7 @@ func Definition(content string) (string, *Removed, error) {
 	// After the fields rather than with them, because an override saying nothing is what
 	// taking the last field out of one leaves behind.
 	for _, mapping := range nodes {
-		removed.Overrides += dropEmptyOverrides(mapping)
+		removed.Overrides += dropEmptyOverrides(mapping, github)
 	}
 	if !removed.Any() {
 		return content, removed, nil
@@ -145,6 +158,28 @@ func dropChecksum(mapping *ast.MappingNode) bool {
 		return false
 	}
 	mapping.Values = without(mapping.Values, value)
+	return true
+}
+
+// dropVariantAsset takes out of a variant's override the asset it names, when the name says
+// the libc the build is for, and says whether it did.
+//
+// The generator reads a release's glibc and musl builds off their names, so
+// claude-{{.OS}}-{{.Arch}}-musl.{{.Format}} says nothing the asset list doesn't. An asset
+// whose name doesn't say its libc stays: nothing but the override says which build it is.
+func dropVariantAsset(mapping *ast.MappingNode) bool {
+	if mappingValue(mapping, variantsKey) == nil {
+		return false
+	}
+	value := mappingValue(mapping, "asset")
+	if value == nil || asset.LibcOf("linux", scalar(value.Value)) == "" {
+		return false
+	}
+	for _, key := range variantAssetKeys {
+		if v := mappingValue(mapping, key); v != nil {
+			mapping.Values = without(mapping.Values, v)
+		}
+	}
 	return true
 }
 
@@ -220,7 +255,7 @@ func trim(mapping *ast.MappingNode) []string {
 // sibling. version_overrides are left alone altogether -- an entry with nothing but its
 // constraint says that those versions take the definition as it is, which is what stops an
 // older era below it from answering for them.
-func dropEmptyOverrides(mapping *ast.MappingNode) int {
+func dropEmptyOverrides(mapping *ast.MappingNode, variantsSelect bool) int {
 	value := mappingValue(mapping, overridesKey)
 	if value == nil {
 		return 0
@@ -229,14 +264,15 @@ func dropEmptyOverrides(mapping *ast.MappingNode) int {
 	if !ok {
 		return 0
 	}
+	// From the last, so that what an override is compared with is the siblings that stay.
 	removed := 0
-	kept := make([]ast.Node, 0, len(seq.Values))
-	for i, entry := range seq.Values {
-		if saysOnlyWhere(entry) && !matchedLater(entry, seq.Values[i+1:]) {
+	var kept []ast.Node
+	for _, entry := range slices.Backward(seq.Values) {
+		if saysOnlyWhere(entry, variantsSelect) && !matchedLater(entry, kept) {
 			removed++
 			continue
 		}
-		kept = append(kept, entry)
+		kept = append([]ast.Node{entry}, kept...)
 	}
 	if removed == 0 {
 		return 0
@@ -251,7 +287,7 @@ func dropEmptyOverrides(mapping *ast.MappingNode) int {
 
 // saysOnlyWhere reports whether the override says which environment it is for and nothing
 // more.
-func saysOnlyWhere(node ast.Node) bool {
+func saysOnlyWhere(node ast.Node, variantsSelect bool) bool {
 	values := entries(node)
 	if len(values) == 0 {
 		return false
@@ -260,6 +296,9 @@ func saysOnlyWhere(node ast.Node) bool {
 		key, ok := value.Key.(*ast.StringNode)
 		if !ok {
 			return false
+		}
+		if key.Value == variantsKey && variantsSelect {
+			continue
 		}
 		if _, ok := selectorKeys[key.Value]; !ok {
 			return false

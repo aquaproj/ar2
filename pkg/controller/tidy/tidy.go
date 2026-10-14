@@ -146,7 +146,8 @@ func (c *Controller) tidyPackage(ctx context.Context, logger *slog.Logger, pkgNa
 	}
 	logger.Info("the definition says what it doesn't have to",
 		"replacements", strings.Join(removed.Spellings, ", "),
-		"checksum_blocks", removed.Checksums, "empty_overrides", removed.Overrides)
+		"checksum_blocks", removed.Checksums, "empty_overrides", removed.Overrides,
+		"variant_assets", removed.VariantAssets)
 	if args.DryRun {
 		return false, nil
 	}
@@ -199,6 +200,9 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, p
 // worth saying apart: one thing is read off the release every time, the other is read by
 // nobody at all.
 func what(removed *tidy.Removed) string {
+	if removed.VariantAssets > 0 {
+		return whatOfVariants(removed)
+	}
 	switch {
 	case removed.Checksums == 0 && removed.Overrides == 0:
 		return "drop the replacements a release is read for"
@@ -209,6 +213,15 @@ func what(removed *tidy.Removed) string {
 	default:
 		return "drop what the definition doesn't have to say"
 	}
+}
+
+// whatOfVariants names a tidying that took variants' assets out. The overrides that go with
+// them are what taking the asset out of one leaves behind, so they don't make it another.
+func whatOfVariants(removed *tidy.Removed) string {
+	if len(removed.Spellings) == 0 && removed.Checksums == 0 {
+		return "drop the variants' assets a release is read for"
+	}
+	return "drop what the definition doesn't have to say"
 }
 
 // body says what went and why nothing follows from it.
@@ -237,11 +250,20 @@ func body(removed *tidy.Removed) string {
 			"even knows it exists, so the definition was saying it to nobody.\n",
 			blocks(removed.Checksums))
 	}
+	if removed.VariantAssets > 0 {
+		fmt.Fprintf(&b, "\n%s named the asset of a libc variant whose name says the libc, such as "+
+			"`-musl`. A release's glibc and musl builds are read off their names, and each gets an "+
+			"entry of its own, so the definition was saying something the asset list says. An asset "+
+			"whose name doesn't say its libc stays: nothing else says which build it is.\n",
+			overrides(removed.VariantAssets))
+	}
 	if removed.Overrides > 0 {
 		fmt.Fprintf(&b, "\n%s said which environment it was for and nothing else, so it matched "+
 			"that environment and then applied nothing to it. An override with a later sibling the "+
-			"same environment could match stays, because the first match is the one applied, and so "+
-			"does one carrying variants: naming a variant is what makes an entry for it generated.\n",
+			"same environment could match stays, because the first match is the one applied. For a "+
+			"package released on GitHub a variant is part of which environment an override is for, "+
+			"since each libc's entry is generated from the asset names; for one downloaded by a URL, "+
+			"naming a variant is what makes an entry for it generated, and it stays.\n",
 			overrides(removed.Overrides))
 	}
 	b.WriteString("\nNothing generated changes.\n")

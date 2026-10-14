@@ -159,10 +159,10 @@ func correctedFormat(asset, format string) string {
 // old.
 //
 // What an override can say is where the executable sits inside the archive, how the build
-// is signed, and which asset it is. That last one is usually what the release's own asset
-// list says, so it is trimmed -- except where the condition is a variant, because nothing
-// in an asset's name says which libc it was built against. There the asset is the whole
-// of what the override is for.
+// is signed, and which asset it is. That last one is what the release's own asset list
+// says, so it is trimmed -- the musl build of claude-{{.OS}}-{{.Arch}}-musl.{{.Format}} says
+// musl in its name, which is all the generator reads it by. Only a variant's asset whose
+// name doesn't say its libc is kept, as the one thing the asset list can't be read for.
 func keepOverrides(overrides []*aquaregistry.Override, parentAsset string) []*aquaregistry.Override {
 	out := make([]*aquaregistry.Override, 0, len(overrides))
 	for _, ov := range overrides {
@@ -185,7 +185,14 @@ func saysSomething(ov *aquaregistry.Override) bool {
 		return true
 	}
 	// A variant's asset, which the release's asset list can't be read for.
-	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "")
+	return unreadableVariant(ov)
+}
+
+// unreadableVariant reports whether an override names the asset of a variant whose name
+// doesn't say the libc it is built against, so that nothing but the override says which
+// asset that build is.
+func unreadableVariant(ov *aquaregistry.Override) bool {
+	return len(ov.Variants) != 0 && (ov.Asset != "" || ov.URL != "") && aquaasset.LibcOf("linux", ov.Asset) == ""
 }
 
 func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquaregistry.Override {
@@ -212,9 +219,9 @@ func trimOverrideByRuntime(ov *aquaregistry.Override, parentAsset string) *aquar
 		AppendExt:    ov.AppendExt,
 		Vars:         ov.Vars,
 	}
-	if len(ov.Variants) != 0 {
+	if unreadableVariant(ov) {
 		// The one asset the release can't be read for: which libc a build was made
-		// against is in no asset name the parser knows how to read.
+		// against is in no part of its name the parser knows how to read.
 		out.Asset = ov.Asset
 		out.URL = ov.URL
 		if ov.Asset != "" {
