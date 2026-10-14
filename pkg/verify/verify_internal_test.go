@@ -12,8 +12,9 @@ import (
 )
 
 // newArchive writes the given paths as empty files and returns the directory, standing in
-// for an extracted archive. A path in executables is written as a file that can be run,
-// which is what an archive records for a command.
+// for an extracted archive. A path in executables is written as a file that can be run: a
+// script naming its interpreter, which is what is read to tell a command from a file named
+// after it.
 func newArchive(t *testing.T, paths []string, executables ...string) string {
 	t.Helper()
 	runnable := make(map[string]struct{}, len(executables))
@@ -26,11 +27,11 @@ func newArchive(t *testing.T, paths []string, executables ...string) string {
 		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		mode := os.FileMode(0o600)
+		var content []byte
 		if _, ok := runnable[p]; ok {
-			mode = 0o700
+			content = []byte("#!/bin/sh\n")
 		}
-		if err := os.WriteFile(full, nil, mode); err != nil {
+		if err := os.WriteFile(full, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -95,18 +96,20 @@ func resolvedCases() []resolveCase {
 			// pack everything under. The file is the same file under the same name, so
 			// recording where it is now says what the definition said and the pull
 			// request can merge on its own.
-			name:    "src moved",
-			archive: []string{"bin/gh"},
-			files:   []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
-			want:    []*generate.File{{Name: "gh", Src: "bin/gh"}},
+			name:        "src moved",
+			archive:     []string{"bin/gh"},
+			executables: []string{"bin/gh"},
+			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
+			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
 		},
 		{
 			// Windows executables carry an extension the registry's name doesn't.
-			name:    "src moved to a windows executable",
-			goos:    "windows",
-			archive: []string{"bin/gh.exe"},
-			files:   []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
-			want:    []*generate.File{{Name: "gh", Src: "bin/gh.exe"}},
+			name:        "src moved to a windows executable",
+			goos:        "windows",
+			archive:     []string{"bin/gh.exe"},
+			executables: []string{"bin/gh.exe"},
+			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_windows_amd64/bin/gh.exe"}},
+			want:        []*generate.File{{Name: "gh", Src: "bin/gh.exe"}},
 		},
 		{
 			// aqua resolves files[].src with the Windows extension added, and renames
@@ -130,11 +133,12 @@ func resolvedCases() []resolveCase {
 			// A release can ship a file of the command's name that isn't the command:
 			// git-bug's archive holds git-bug.exe beside a completion script called
 			// git-bug. On Windows the executable is the one with the extension.
-			name:    "a windows archive holds the name and the executable",
-			goos:    "windows",
-			archive: []string{"git-bug_0.11.0_windows_amd64/git-bug.exe", "git-bug_0.11.0_windows_amd64/completion/bash/git-bug"},
-			files:   []*generate.File{{Name: "git-bug", Src: "git-bug.exe"}},
-			want:    []*generate.File{{Name: "git-bug", Src: "git-bug_0.11.0_windows_amd64/git-bug.exe"}},
+			name:        "a windows archive holds the name and the executable",
+			goos:        "windows",
+			archive:     []string{"git-bug_0.11.0_windows_amd64/git-bug.exe", "git-bug_0.11.0_windows_amd64/completion/bash/git-bug"},
+			executables: []string{"git-bug_0.11.0_windows_amd64/git-bug.exe"},
+			files:       []*generate.File{{Name: "git-bug", Src: "git-bug.exe"}},
+			want:        []*generate.File{{Name: "git-bug", Src: "git-bug_0.11.0_windows_amd64/git-bug.exe"}},
 		},
 		{
 			// A raw asset has no src; the name alone locates it.
@@ -157,28 +161,48 @@ func resolvedCases() []resolveCase {
 	}
 }
 
-// guessedCases are the archives where resolving a file takes a guess, which is what a
-// human is asked to look at.
+// guessedCases are the archives the definition's files can't be read against, which leave the
+// environment out.
 func guessedCases() []resolveCase {
 	return []resolveCase{
 		{
-			// Two files of that name, and the name can't say which of them is the
-			// command. The shallower one is recorded, because that is where an archive
-			// normally puts it, and a human is asked whether it is the right one.
-			name:        "the archive holds the name twice",
+			// A file of the name that isn't an executable is a document about the
+			// command, and the one that is, is the command.
+			name:        "the archive holds the name twice, and one is the command",
 			archive:     []string{"share/doc/gh", "bin/gh"},
+			executables: []string{"bin/gh"},
 			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
 			want:        []*generate.File{{Name: "gh", Src: "bin/gh"}},
-			needsReview: true,
 		},
 		{
-			// The definition named a file the archive doesn't hold, and what was found
-			// is a file of another name. Whether that is the same command is a guess.
-			name:        "found under another name",
+			// The definition named a path the archive doesn't hold, and the executable of
+			// the name is elsewhere under a basename the definition's src didn't have. It
+			// is the command all the same: the name is the definition's, and it runs.
+			name:        "found under the name rather than the src",
 			archive:     []string{"gh"},
+			executables: []string{"gh"},
 			files:       []*generate.File{{Name: "gh", Src: "bin/gh-linux-amd64"}},
 			want:        []*generate.File{{Name: "gh", Src: "gh"}},
+		},
+		{
+			// Two executables of the name, and nothing to tell which is the command.
+			name:        "the archive holds two executables of the name",
+			archive:     []string{"bin/gh", "libexec/gh"},
+			executables: []string{"bin/gh", "libexec/gh"},
+			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
+			want:        []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
 			needsReview: true,
+			unresolved:  []string{"gh (several executables of this name: bin/gh, libexec/gh)"},
+		},
+		{
+			// A file of the name that can't be run is no command, whatever its mode: a zip
+			// written on Windows records no modes at all.
+			name:        "the name is only a document",
+			archive:     []string{"share/doc/gh"},
+			files:       []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
+			want:        []*generate.File{{Name: "gh", Src: "gh_2.1.0_linux_amd64/bin/gh"}},
+			needsReview: true,
+			unresolved:  []string{"gh"},
 		},
 		{
 			// Nothing in the archive carries the name, so there is nothing to guess.
@@ -219,7 +243,7 @@ func TestResolveFiles(t *testing.T) {
 
 // TestIndexByName checks that a name appearing twice keeps both paths, shallowest
 // first: the first one is where an archive normally puts the command rather than a copy
-// of it, and that there is a second one at all is what makes choosing it a guess.
+// of it.
 func TestIndexByName(t *testing.T) {
 	t.Parallel()
 	dir := newArchive(t, []string{"share/doc/gh", "bin/gh"}, "bin/gh")
@@ -227,9 +251,35 @@ func TestIndexByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []*found{{Path: "bin/gh", Executable: true}, {Path: "share/doc/gh"}}
+	want := []*found{{Path: "bin/gh"}, {Path: "share/doc/gh"}}
 	if diff := cmp.Diff(want, index["gh"]); diff != "" {
 		t.Errorf("indexByName is wrong (-want +got):\n%s", diff)
+	}
+}
+
+// An executable is told by how the file begins, whichever of the formats it is.
+func TestExecutableHeader(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"elf":    "\x7fELF\x02\x01",
+		"pe":     "MZ\x90\x00",
+		"macho":  "\xcf\xfa\xed\xfe",
+		"fat":    "\xca\xfe\xba\xbe",
+		"script": "#!/bin/sh\n",
+		"text":   "a man page",
+		"empty":  "",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]bool{
+		"elf": true, "pe": true, "macho": true, "fat": true, "script": true, "text": false, "empty": false,
+	} {
+		if got := executableHeader(filepath.Join(dir, name)); got != want {
+			t.Errorf("%s: got %v, want %v", name, got, want)
+		}
 	}
 }
 
