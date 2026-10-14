@@ -51,7 +51,7 @@ func TestGenerate_gitLab(t *testing.T) { //nolint:funlen,cyclop
 		SupportedEnvs: aquaregistry.SupportedEnvs{"darwin/arm64", "linux/amd64"},
 	}
 	g := New(nil, nil)
-	reg, _, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
+	generated, err := g.Generate(context.Background(), slog.New(slog.DiscardHandler), &Input{
 		PkgName: "gitlab.com/gitlab-org/cli",
 		Version: "v1.122.0",
 		Base:    base,
@@ -60,6 +60,7 @@ func TestGenerate_gitLab(t *testing.T) { //nolint:funlen,cyclop
 	if err != nil {
 		t.Fatal(err)
 	}
+	reg := generated.Registry
 	// released_at is what GitLab calls it.
 	if reg.PublishedAt == "" {
 		t.Fatal("wanted when the release was published")

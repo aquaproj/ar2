@@ -620,7 +620,7 @@ func (c *Controller) repos(def *definition, base *aquaregistry.PackageInfo) genr
 
 // generate builds registry.json for one package version and completes it.
 func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string) (*version, error) {
-	reg, left, err := c.generator.Generate(ctx, logger, &generate.Input{
+	generated, err := c.generator.Generate(ctx, logger, &generate.Input{
 		PkgName: pkgName,
 		Version: tag,
 		Base:    input.PkgInfos[pkgName],
@@ -630,12 +630,20 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)
 	}
+	reg, left := generated.Registry, generated.Left
 	// Before anything is checked or recorded on an entry: what is recorded is about this
 	// version, and the objects came from the definition every version shares.
 	generate.OwnSigning(reg)
 	filled, err := c.verifier.Complete(ctx, logger, pkgName, tag, reg, input.Verify)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
+	}
+	// After Fill too, because what is held to the checksum file is the digest Fill made
+	// sure every entry has.
+	if input.Verify {
+		if err := c.verifier.CheckChecksumFiles(ctx, logger, pkgName, tag, reg, generated.ChecksumFiles); err != nil {
+			return nil, err //nolint:wrapcheck // it names the checksum file and why
+		}
 	}
 	// After Fill, because an attestation is held against the artifact's digest and
 	// Fill is what makes sure every asset has one.

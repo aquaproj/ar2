@@ -60,16 +60,16 @@ func New(gh genrgst.RepositoriesService, httpClient *http.Client) *Generator {
 // renaming from breaking the registry. The definition supplies what a release can't say,
 // such as the executables inside the archive and how the assets are signed.
 //
-// What it returns besides the file are the environments the file leaves out, and why. They
-// say nothing about the environments that are in the file, which keep the version.
-func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *Input) (*Registry, []*Left, error) {
+// What it returns besides the file are the environments the file leaves out, and why, and
+// the signed checksum files of the release, which say what each asset should hash to.
+func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *Input) (*Generated, error) {
 	input, err := useConfig(logger, input)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	base, err := resolveBase(logger, input)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Only a release exposes an asset list to pick from. For every other type the
@@ -77,16 +77,19 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// definition is used as it is.
 	if base != nil && !inferable(base) {
 		reg, err := resolve(logger, input.PkgName, base, input.Version, nil)
-		return reg, nil, err
+		if err != nil {
+			return nil, err
+		}
+		return &Generated{Registry: reg}, nil
 	}
 
 	rel, err := g.release(ctx, input, base)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	reg, left, err := selectAssets(logger, input, base, rel)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// What the release says about itself, which the version string doesn't: a reader
 	// asking whether a version is old enough to install has nothing else to ask.
@@ -96,16 +99,29 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// another has the old one dropped and the new one read off the same asset list.
 	dropUnpublished(logger, reg, rel.names)
 	inferSLSA(reg, base, rel.names)
+	out := &Generated{Registry: reg, Left: left}
 	// What is inferred about signing is GitHub's: the identity it assumes is a
 	// workflow of the package's repository on github.com, which a release on an
 	// instance is not signed by. A definition naming cosign itself is left alone,
 	// which is the only way such a release says who signed it.
 	if !OnInstance(base) {
 		if err := g.inferSigning(ctx, logger, input, reg, rel.names); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
+		out.ChecksumFiles = g.signedChecksumFiles(ctx, logger, input, rel.names)
 	}
-	return reg, left, nil
+	return out, nil
+}
+
+// Generated is what generating a version comes to.
+type Generated struct {
+	// Registry is the file.
+	Registry *Registry
+	// Left are the environments the file leaves out, and why. They say nothing about the
+	// environments that are in the file, which keep the version.
+	Left []*Left
+	// ChecksumFiles are the release's checksum files that a signature vouches for.
+	ChecksumFiles []*ChecksumFile
 }
 
 // useConfig replaces the aqua-registry definition with aqua-registry-g2's own when

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/migrate"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/state"
+	"github.com/aquaproj/ar2/pkg/verify"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
@@ -180,7 +182,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		return err
 	}
 
-	reg, left, err := generate.New(gh.Repositories, httpClient).Generate(ctx, logger.Logger, &generate.Input{
+	generated, err := generate.New(gh.Repositories, httpClient).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,
@@ -189,7 +191,8 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	if err != nil {
 		return fmt.Errorf("generate registry.json: %w", err)
 	}
-	for _, l := range left {
+	reg := generated.Registry
+	for _, l := range generated.Left {
 		logger.Warn("the file leaves the environment out", "environment", l.Environment(), "reason", l.Reason)
 	}
 
@@ -199,9 +202,24 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	if err != nil {
 		return err
 	}
-	needsReview, unresolved, err := v.Fill(ctx, logger.Logger, pkgName, version, reg, args.Verify)
+	if err := complete(ctx, logger.Logger, v, pkgName, version, generated, args.Verify); err != nil {
+		return err
+	}
+	return write(args.Output, reg)
+}
+
+// complete fills in the generated file and checks it against the release's signed checksum
+// files, saying what a pull request would have to be left for review over.
+func complete(ctx context.Context, logger *slog.Logger, v *verify.Verifier, pkgName, version string, generated *generate.Generated, extract bool) error {
+	reg := generated.Registry
+	needsReview, unresolved, err := v.Fill(ctx, logger, pkgName, version, reg, extract)
 	if err != nil {
 		return fmt.Errorf("complete registry.json: %w", err)
+	}
+	if extract {
+		if err := v.CheckChecksumFiles(ctx, logger, pkgName, version, reg, generated.ChecksumFiles); err != nil {
+			return err //nolint:wrapcheck // it names the checksum file and why
+		}
 	}
 	for _, env := range unresolved {
 		logger.Warn("the archive holds no file of the name the definition gives", "environment", env)
@@ -210,8 +228,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		// The caller creating a pull request has to keep it out of auto-merge.
 		logger.Warn("registry.json needs review: files couldn't be found or the archive couldn't be checked")
 	}
-
-	return write(args.Output, reg)
+	return nil
 }
 
 // definition returns the definition to generate from, which is the same one the
