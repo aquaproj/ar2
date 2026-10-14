@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/aquaproj/ar2/pkg/cli/add"
+	"github.com/aquaproj/ar2/pkg/cli/closeissues"
 	"github.com/aquaproj/ar2/pkg/cli/consolidate"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	"github.com/aquaproj/ar2/pkg/cli/index"
@@ -68,6 +69,7 @@ See each subcommand's help with 'ar2 help <command>'.`,
 		validatedefinition.New(logger, gFlags),
 		validateindex.New(logger, gFlags),
 		versions.New(logger, gFlags),
+		closeissues.New(logger, gFlags),
 	)
 	return cobrautil.Command(env, cmd, nil)
 }

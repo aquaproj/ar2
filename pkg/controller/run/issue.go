@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/issuemark"
 	"github.com/aquaproj/ar2/pkg/verify"
 	gogithub "github.com/google/go-github/v92/github"
 )
@@ -162,7 +163,24 @@ func excludedBody(pkgName string, versions []*excludedVersion) (string, error) {
 	b.WriteString("```sh\nar2 test --os <os> --arch <arch> <the file>\n```\n\n")
 	b.WriteString("So the cause can be shown fixed from here. Putting the environment back into the " +
 		"registry is `ar2 regenerate " + pkgName + " <version>`, once it is.\n")
+	marker, err := issuemark.Marker(excludedRecord(pkgName, versions))
+	if err != nil {
+		return "", err //nolint:wrapcheck
+	}
+	b.WriteString("\nThis issue is closed once every environment above is in the registry again.\n\n" + marker + "\n")
 	return b.String(), nil
+}
+
+// excludedRecord is what an issue about environments left out is about, for ar2 close-issues to
+// read back.
+func excludedRecord(pkgName string, versions []*excludedVersion) *issuemark.Record {
+	r := &issuemark.Record{Kind: issuemark.KindMissingEnvironment, Package: pkgName, Versions: map[string][]string{}}
+	for _, v := range versions {
+		for _, e := range v.excluded {
+			r.Versions[v.version] = append(r.Versions[v.version], e.Environment())
+		}
+	}
+	return r
 }
 
 // marshalExcluded renders the entries that went as a registry.json, indented because this
@@ -219,7 +237,12 @@ func (c *Controller) reportTampered(ctx context.Context, logger *slog.Logger, in
 	if c.issues == nil || input.SkipPR || len(versions) == 0 {
 		return
 	}
-	if err := c.say(ctx, logger, pkgName, tamperedTitle(pkgName), TamperedLabel, tamperedBody(pkgName, versions)); err != nil {
+	body, err := tamperedBody(pkgName, versions)
+	if err != nil {
+		logger.Warn("failed to say which versions were stopped", "error", err.Error())
+		return
+	}
+	if err := c.say(ctx, logger, pkgName, tamperedTitle(pkgName), TamperedLabel, body); err != nil {
 		logger.Warn("failed to report the versions a check of integrity stopped",
 			"package", pkgName, "error", err.Error())
 	}
@@ -232,7 +255,7 @@ func tamperedTitle(pkgName string) string {
 }
 
 // tamperedBody says which versions were stopped and by what.
-func tamperedBody(pkgName string, versions []*tamperedVersion) string {
+func tamperedBody(pkgName string, versions []*tamperedVersion) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "These versions of `%s` were not published for any environment, because the release "+
 		"failed a check of its integrity:\n\n", pkgName)
@@ -250,5 +273,14 @@ func tamperedBody(pkgName string, versions []*tamperedVersion) string {
 		"them is published until it is.\n\n")
 	b.WriteString("Every run tries these versions again, since they are still missing. A definition fixed on " +
 		"the package's branch is what the next run generates them from.\n")
-	return b.String()
+	r := &issuemark.Record{Kind: issuemark.KindIntegrity, Package: pkgName, Versions: map[string][]string{}}
+	for _, v := range versions {
+		r.Versions[v.version] = nil
+	}
+	marker, err := issuemark.Marker(r)
+	if err != nil {
+		return "", err //nolint:wrapcheck
+	}
+	b.WriteString("\nThis issue is closed once every version above is in the registry.\n\n" + marker + "\n")
+	return b.String(), nil
 }
