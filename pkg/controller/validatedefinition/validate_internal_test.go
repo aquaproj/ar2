@@ -121,3 +121,32 @@ func TestValidate_noFile(t *testing.T) {
 		t.Errorf("the error is %v", err)
 	}
 }
+
+// An asset rule is read only when a version is generated, so what is wrong with one is
+// caught here instead.
+func TestValidate_assetRules(t *testing.T) {
+	t.Parallel()
+	const head = "name: koalaman/shellcheck\ntype: github_release\nasset_rules:\n"
+	for _, tc := range []struct {
+		name  string
+		rules string
+		want  error
+	}{
+		{name: "valid", rules: "  - envs: [windows/amd64]\n    filter: Asset endsWith \".zip\"\n"},
+		{name: "no envs", rules: "  - filter: Asset endsWith \".zip\"\n", want: errAssetRuleNoEnvs},
+		{name: "os only", rules: "  - envs: [windows]\n    filter: Asset endsWith \".zip\"\n", want: errAssetRuleEnv},
+		{name: "no filter", rules: "  - envs: [windows/amd64]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := Validate(io.Discard, at(t, head+tc.rules))
+			if !errors.Is(err, tc.want) {
+				t.Errorf("got %v, want %v", err, tc.want)
+			}
+		})
+	}
+	err := Validate(io.Discard, at(t, head+"  - envs: [windows/amd64]\n    filter: Asset endsWith\n"))
+	if err == nil || !strings.Contains(err.Error(), "compile") {
+		t.Errorf("a filter that isn't an expression should be refused: %v", err)
+	}
+}
