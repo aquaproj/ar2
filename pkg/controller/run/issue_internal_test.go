@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/issuemark"
 	"github.com/aquaproj/ar2/pkg/verify"
+	"github.com/google/go-cmp/cmp"
 	gogithub "github.com/google/go-github/v92/github"
 )
 
@@ -198,5 +200,31 @@ func checkTamperedIssue(t *testing.T, created gogithub.CreateIssueRequest) {
 		if !strings.Contains(created.GetBody(), want) {
 			t.Errorf("the issue doesn't say %q:\n%s", want, created.GetBody())
 		}
+	}
+}
+
+// What an issue is about is written into it, for ar2 close-issues to read back.
+func TestIssueRecords(t *testing.T) {
+	t.Parallel()
+	body, err := excludedBody("an/owner", []*excludedVersion{
+		{version: "v1.2.3", excluded: excludedVersions()[0].Excluded},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []*issuemark.Record{{
+		Kind: issuemark.KindMissingEnvironment, Package: "an/owner",
+		Versions: map[string][]string{"v1.2.3": {"windows/amd64"}},
+	}}
+	if diff := cmp.Diff(want, issuemark.Parse(body)); diff != "" {
+		t.Errorf("the issue about environments (-want +got):\n%s", diff)
+	}
+	body, err = tamperedBody("an/owner", []*tamperedVersion{{version: "v1.2.3", reason: "a digest"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []*issuemark.Record{{Kind: issuemark.KindIntegrity, Package: "an/owner", Versions: map[string][]string{"v1.2.3": nil}}}
+	if diff := cmp.Diff(want, issuemark.Parse(body)); diff != "" {
+		t.Errorf("the issue about integrity (-want +got):\n%s", diff)
 	}
 }
