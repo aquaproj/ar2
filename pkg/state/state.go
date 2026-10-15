@@ -186,6 +186,11 @@ type Package struct {
 	// version generated sets PutBack back to zero.
 	PutBack   int `json:"put_back,omitempty"`
 	WaitUntil int `json:"wait_until,omitempty"`
+	// Ties are the versions whose assets nothing told apart in any environment, each with
+	// the fingerprint of the definition they tied under. Generated again from the same
+	// definition they tie the same way, so they are passed over until it changes: a filter
+	// added to it is what settles them.
+	Ties map[string]string `json:"ties,omitempty"`
 }
 
 // Fingerprint reduces a sweep's versions to something worth storing for every

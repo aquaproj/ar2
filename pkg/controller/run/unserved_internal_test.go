@@ -2,6 +2,7 @@ package run
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -106,5 +107,47 @@ func TestEmptyRelease(t *testing.T) {
 				t.Errorf("recorded (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// A version that tied is passed over while the definition is the one it tied under, and
+// tried again once the definition changes: a filter added to it is what settles the tie.
+func TestSettled_tie(t *testing.T) {
+	t.Parallel()
+	cfg := &aquag2.Config{}
+	if err := yaml.Unmarshal([]byte(cmctl), cfg); err != nil {
+		t.Fatal(err)
+	}
+	def := &definition{config: cfg}
+	pkg := &state.Package{}
+	tied(pkg, def, "v1.14.4")
+	logger := slog.New(slog.DiscardHandler)
+	if _, ok := settled(logger, def, pkg, []string{"v1.14.4"}, nil)["v1.14.4"]; !ok {
+		t.Error("a version that tied under the same definition is tried again")
+	}
+	cfg.AllAssetsFilter = `not (Asset contains "bazel")`
+	if _, ok := settled(logger, def, pkg, []string{"v1.14.4"}, nil)["v1.14.4"]; ok {
+		t.Error("a version that tied under another definition isn't tried again")
+	}
+}
+
+// A tie in every environment is recorded and said as the environments it leaves out; any
+// other error isn't a tie.
+func TestController_tie(t *testing.T) {
+	t.Parallel()
+	c := &Controller{}
+	candidate := &Candidate{Name: "peripheryapp/periphery", Package: &state.Package{RepoOwner: "peripheryapp", RepoName: "periphery"}}
+	err := fmt.Errorf("generate registry.json: %w", &generate.TieError{Left: []*generate.Left{
+		{OS: "darwin", Arch: "arm64", Reason: "assets of an environment can't be told apart by their names: periphery-3.8.0.zip, periphery-bazel-3.8.0.zip"},
+	}})
+	v := c.tie(slog.New(slog.DiscardHandler), &definition{}, candidate, "3.8.0", err)
+	if v == nil || len(v.Excluded) != 1 || v.Excluded[0].Asset.RepoName != "periphery" {
+		t.Fatalf("got %+v, want darwin/arm64 left out", v)
+	}
+	if _, ok := candidate.Package.Ties["3.8.0"]; !ok {
+		t.Error("the tie wasn't recorded")
+	}
+	if c.tie(slog.New(slog.DiscardHandler), &definition{}, candidate, "3.7.4", errors.New("something else")) != nil {
+		t.Error("another error was taken for a tie")
 	}
 }

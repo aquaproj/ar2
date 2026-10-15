@@ -75,6 +75,44 @@ func (l *Left) Environment() string {
 	return l.OS + "/" + l.Arch
 }
 
+// tieLeft is an environment left out because its assets tie.
+func tieLeft(t *aquaasset.Tie) *Left {
+	return &Left{
+		OS: t.OS, Arch: t.Arch, Libc: t.Libc,
+		Reason: fmt.Sprintf("%s: %s", errTie.Error(), strings.Join(t.Names, ", ")),
+	}
+}
+
+// TieError is a release whose assets nothing tells apart in any environment, so nothing is
+// generated for it. Left says, for each environment, which assets tie.
+//
+// It is the definition's to settle, with a filter, and generating it again from the same
+// definition ties the same way.
+type TieError struct {
+	Left []*Left
+}
+
+func (e *TieError) Error() string {
+	ties := make([]string, len(e.Left))
+	for i, l := range e.Left {
+		ties[i] = l.Reason
+	}
+	return strings.Join(ties, "; ")
+}
+
+func (e *TieError) Unwrap() error {
+	return errTie
+}
+
+// tieError is the error of a release whose every environment ties.
+func tieError(ties []*aquaasset.Tie) error {
+	e := &TieError{Left: make([]*Left, len(ties))}
+	for i, t := range ties {
+		e.Left[i] = tieLeft(t)
+	}
+	return e
+}
+
 // leftOut is what the file leaves out: the environments whose assets nothing tells apart,
 // and the ones the definition's supported_envs names that nothing was picked for.
 func leftOut(sel *aquaasset.Selection, def *aquaregistry.PackageInfo) ([]*Left, error) {
@@ -85,10 +123,7 @@ func leftOut(sel *aquaasset.Selection, def *aquaregistry.PackageInfo) ([]*Left, 
 	}
 	for _, t := range sel.Ties {
 		covered[t.OS+"/"+t.Arch] = struct{}{}
-		left = append(left, &Left{
-			OS: t.OS, Arch: t.Arch, Libc: t.Libc,
-			Reason: fmt.Sprintf("%s: %s", errTie.Error(), strings.Join(t.Names, ", ")),
-		})
+		left = append(left, tieLeft(t))
 	}
 	if len(def.SupportedEnvs) == 0 {
 		return left, nil
@@ -131,11 +166,7 @@ func pick(logger *slog.Logger, input *Input, def *aquaregistry.PackageInfo, name
 		return sel, nil
 	}
 	if len(sel.Ties) != 0 {
-		ties := make([]string, len(sel.Ties))
-		for i, t := range sel.Ties {
-			ties[i] = t.String()
-		}
-		return nil, fmt.Errorf("%w: %s", errTie, strings.Join(ties, "; "))
+		return nil, tieError(sel.Ties)
 	}
 	return nil, errNoAsset
 }

@@ -32,7 +32,7 @@ func settled(logger *slog.Logger, def *definition, pkg *state.Package, versions 
 		if _, ok := out[v]; ok {
 			continue
 		}
-		if slices.Contains(pkg.EmptyReleases, v) || unserved(logger, def, v) {
+		if slices.Contains(pkg.EmptyReleases, v) || unserved(logger, def, v) || tiedUnder(pkg, def, v) {
 			out[v] = struct{}{}
 		}
 	}
@@ -64,4 +64,18 @@ func emptyRelease(pkg *state.Package, version string, err error, now time.Time) 
 		pkg.EmptyReleases = append(pkg.EmptyReleases, version)
 	}
 	return true
+}
+
+// tiedUnder says whether the version tied under the definition as it is now.
+func tiedUnder(pkg *state.Package, def *definition, version string) bool {
+	fp, ok := pkg.Ties[version]
+	return ok && fp == def.fingerprint()
+}
+
+// tied records a version whose every environment tied, under the definition it tied under.
+func tied(pkg *state.Package, def *definition, version string) {
+	if pkg.Ties == nil {
+		pkg.Ties = map[string]string{}
+	}
+	pkg.Ties[version] = def.fingerprint()
 }
