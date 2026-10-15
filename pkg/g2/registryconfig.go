@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
 
 	gogithub "github.com/google/go-github/v92/github"
 	"go.yaml.in/yaml/v3"
@@ -84,18 +85,30 @@ func (b *Breadth) GetAttempts() int {
 	return b.Attempts
 }
 
-// Ignored returns the names to leave alone, as a set.
-func (c *RegistryConfig) Ignored() map[string]struct{} {
+// Ignores says whether the registry leaves the package alone.
+//
+// A name in ignored_packages is a pattern as path.Match reads it, so one entry can leave
+// alone every package of an organization: aquasecurity/* for one whose IP allow list
+// refuses the API to the runners. * stops at a slash, as it does in a path, so it
+// doesn't reach aquasecurity/trivy/foo. A name with no wildcard is the package of that
+// name, which is all the list held before it took patterns. A pattern path.Match can't
+// read matches nothing but its own spelling, which is what it was before.
+func (c *RegistryConfig) Ignores(pkgName string) bool {
 	if c == nil {
-		return nil
+		return false
 	}
-	ignored := make(map[string]struct{}, len(c.IgnoredPackages))
 	for _, pkg := range c.IgnoredPackages {
-		if pkg != nil && pkg.Name != "" {
-			ignored[pkg.Name] = struct{}{}
+		if pkg == nil || pkg.Name == "" {
+			continue
+		}
+		if pkg.Name == pkgName {
+			return true
+		}
+		if ok, err := path.Match(pkg.Name, pkgName); err == nil && ok {
+			return true
 		}
 	}
-	return ignored
+	return false
 }
 
 // RegistryConfig returns the registry's configuration, or an empty one when the

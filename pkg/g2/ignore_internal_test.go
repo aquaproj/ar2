@@ -54,9 +54,8 @@ func TestIgnorePackage_parses(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(got), cfg); err != nil {
 		t.Fatal(err)
 	}
-	ignored := cfg.Ignored()
 	for _, name := range []string{"foo/bar", "scenarigo/scenarigo"} {
-		if _, ok := ignored[name]; !ok {
+		if !cfg.Ignores(name) {
 			t.Errorf("%s isn't ignored:\n%s", name, got)
 		}
 	}
