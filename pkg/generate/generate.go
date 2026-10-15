@@ -204,6 +204,8 @@ type release struct {
 	// publishedAt is when the release was published, as RFC 3339. A draft that was
 	// never published has no such moment, and then it is empty.
 	publishedAt string
+	// published is the same moment, as a time.
+	published time.Time
 }
 
 // release reads the release's asset list.
@@ -211,7 +213,8 @@ type release struct {
 // The list comes with the release rather than being fetched separately, which is one
 // request instead of two per version. Assets whose upload never completed are left
 // out: GitHub keeps them in the "starter" state, where they are hidden from the
-// release page and can't be downloaded.
+// release page and can't be downloaded. A release left with none is an
+// EmptyReleaseError.
 func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistry.PackageInfo) (*release, error) {
 	owner, name, err := repoOf(input, base)
 	if err != nil {
@@ -225,6 +228,7 @@ func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistr
 		digests:     map[string]string{},
 		names:       map[string]struct{}{},
 		publishedAt: publishedAt(rel.GetPublishedAt().Time),
+		published:   rel.GetPublishedAt().Time,
 	}
 	for _, asset := range rel.Assets {
 		if asset.GetState() != assetStateUploaded {
@@ -234,6 +238,9 @@ func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistr
 		if digest := asset.GetDigest(); digest != "" {
 			out.digests[asset.GetName()] = strings.TrimPrefix(digest, "sha256:")
 		}
+	}
+	if len(out.names) == 0 {
+		return nil, &EmptyReleaseError{PublishedAt: out.published}
 	}
 	return out, nil
 }

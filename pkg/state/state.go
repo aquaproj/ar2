@@ -172,6 +172,11 @@ type Package struct {
 	// what tells the two apart. A version leaves it once an attempt fails for anything else
 	// or doesn't fail.
 	TransientFailures map[string]int `json:"transient_failures,omitempty"`
+	// EmptyReleases are the versions whose release holds no asset at all, a while after it
+	// was published. They are passed over the way a version the registry holds is, so a
+	// project that stopped publishing builds and went on making releases doesn't spend a
+	// turn of every run finding that out again.
+	EmptyReleases []string `json:"empty_releases,omitempty"`
 }
 
 // Fingerprint reduces a sweep's versions to something worth storing for every
