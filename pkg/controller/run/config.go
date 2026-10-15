@@ -2,6 +2,8 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,6 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/state"
+	"go.yaml.in/yaml/v3"
 )
 
 // newConfig is the definition a run writes for a package aqua-registry-g2 hasn't
@@ -74,6 +77,20 @@ type definition struct {
 	// commit and nothing was converted.
 	held        bool
 	unconverted []string
+}
+
+// fingerprint is a digest of the definition: it changes when anything the definition says
+// does, and a definition there is none of has the empty one.
+func (d *definition) fingerprint() string {
+	if d == nil || d.config == nil {
+		return ""
+	}
+	b, err := yaml.Marshal(d.config)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 // prerelease says the definition asks for the package's prereleases.

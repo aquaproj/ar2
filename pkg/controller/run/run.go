@@ -540,8 +540,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	}
 	generated, stopped, attempted := c.generateVersions(ctx, logger, input, def, candidate, versions,
 		c.withInFlight(candidate.Name, versions, done, inFlight), share)
-	c.reportTampered(ctx, logger, input, candidate.Name, stopped.tampered)
-	c.reportKeepsFailing(ctx, logger, input, candidate.Name, stopped.keepsFailing)
+	c.reportStopped(ctx, logger, input, candidate.Name, stopped)
 	if len(generated) == 0 {
 		return 0, attempted, nil
 	}
@@ -730,6 +729,52 @@ func (c *Controller) tooSlow(logger *slog.Logger, candidate *Candidate, tag stri
 	return true
 }
 
+// endsTurn says whether the error ends the package's turn: a download that took too long,
+// or assets that tie in every environment. Either way the next version would fail the same.
+func (c *Controller) endsTurn(logger *slog.Logger, def *definition, candidate *Candidate, tag string, err error, out *stopped) bool {
+	if c.tooSlow(logger, candidate, tag, err) {
+		return true
+	}
+	if v := c.tie(logger, def, candidate, tag, err); v != nil {
+		out.tied = append(out.tied, v)
+		return true
+	}
+	return false
+}
+
+// tie records a version whose assets tie in every environment, and returns it as the
+// environments left out, for the issue that says so. It returns nil for any other error.
+//
+// The version is passed over until the definition changes, and the package's turn ends
+// here: its other versions are named the same way and would tie too, and each try would
+// have cost the turn one. peripheryapp/periphery and smallstep/cli spent five of a run's
+// twenty on that every run.
+func (c *Controller) tie(logger *slog.Logger, def *definition, candidate *Candidate, tag string, err error) *version {
+	e, ok := errors.AsType[*generate.TieError](err)
+	if !ok {
+		return nil
+	}
+	tied(candidate.Package, def, tag)
+	logger.Warn("the release's assets tie in every environment, so the version waits for a filter in the definition",
+		"package", candidate.Name, "version", tag, "error", err.Error())
+	c.problems = append(c.problems, &summary.Problem{Package: candidate.Name, Version: tag, Reason: err.Error()})
+	where := &generate.Registry{Assets: []*generate.Asset{{
+		Type:      aquaregistry.PkgInfoTypeGitHubRelease,
+		RepoOwner: candidate.Package.RepoOwner,
+		RepoName:  candidate.Package.RepoName,
+	}}}
+	return &version{Version: tag, Excluded: excludedOf(e.Left, where)}
+}
+
+// reportStopped says, as issues, what stopped the versions of a package's turn.
+func (c *Controller) reportStopped(ctx context.Context, logger *slog.Logger, input *Input, pkgName string, stopped *stopped) {
+	c.reportTampered(ctx, logger, input, pkgName, stopped.tampered)
+	c.reportKeepsFailing(ctx, logger, input, pkgName, stopped.keepsFailing)
+	if !input.SkipPR {
+		c.reportExcluded(ctx, logger, pkgName, stopped.tied)
+	}
+}
+
 // stopped is the versions a package's turn couldn't generate that are reported as an issue
 // rather than only logged.
 type stopped struct {
@@ -738,6 +783,8 @@ type stopped struct {
 	// keepsFailing are the ones that have now failed failuresBeforeIssue runs in a row for a
 	// reason that should pass on another try.
 	keepsFailing []*tamperedVersion
+	// tied are the ones whose assets nothing told apart in any environment.
+	tied []*version
 }
 
 // generateVersions generates the versions the repository is missing, newest first,
@@ -767,7 +814,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		if countFailure(candidate.Package, tag, err) {
 			out.keepsFailing = append(out.keepsFailing, &tamperedVersion{version: tag, reason: err.Error()})
 		}
-		if c.tooSlow(logger, candidate, tag, err) {
+		if c.endsTurn(logger, def, candidate, tag, err, out) {
 			return generated, out, attempted
 		}
 		if err != nil {
@@ -786,6 +833,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 			continue
 		}
 		candidate.Package.PutBack = 0
+		delete(candidate.Package.Ties, tag)
 		generated = append(generated, v)
 	}
 	return generated, out, attempted
