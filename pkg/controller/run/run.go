@@ -139,10 +139,11 @@ type GraphQL interface {
 	EnableAutoMerge(ctx context.Context, pullRequestID string) error
 	GetStars(ctx context.Context, repos []github.Repo) (map[string]int, map[string]string, error)
 	FillForbiddenStars(ctx context.Context, stars map[string]int, reasons map[string]string)
-	// Versions and Tags are the sweep: they say what each package's newest
-	// versions are, fifty packages to a request.
+	// Versions, Tags and ReleasesOrTags are the sweep: they say what each package's
+	// newest versions are, fifty packages to a request.
 	Versions(ctx context.Context, repos []github.Repo) (*github.Sweep, error)
 	Tags(ctx context.Context, repos []github.Repo) (*github.Sweep, error)
+	ReleasesOrTags(ctx context.Context, repos []github.Repo) (*github.Sweep, error)
 }
 
 // New creates a Controller.

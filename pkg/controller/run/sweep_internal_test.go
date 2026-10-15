@@ -109,23 +109,29 @@ func TestRecord(t *testing.T) {
 }
 
 // Packages versioned by their tags are asked for differently from those versioned
-// by their releases.
+// by their releases, and a package whose versions needn't be releases is asked for both.
 func TestSplitBySource(t *testing.T) {
 	t.Parallel()
 	candidates := []*Candidate{
 		{Name: "cli/cli", Package: &state.Package{RepoOwner: "cli", RepoName: "cli"}},
 		{Name: "flutter/flutter", Package: &state.Package{RepoOwner: "flutter", RepoName: "flutter"}},
+		{Name: "apache/spark", Package: &state.Package{RepoOwner: "apache", RepoName: "spark"}},
 		// Nothing to ask GitHub about.
 		{Name: "no/repo", Package: &state.Package{}},
 	}
-	releases, tags := splitBySource(candidates, map[string]*aquaregistry.PackageInfo{
-		"flutter/flutter": {VersionSource: versionSourceTag},
+	releases, tags, either := splitBySource(candidates, map[string]*aquaregistry.PackageInfo{
+		"cli/cli":         {Type: aquaregistry.PkgInfoTypeGitHubRelease},
+		"flutter/flutter": {Type: aquaregistry.PkgInfoTypeHTTP, VersionSource: versionSourceTag},
+		"apache/spark":    {Type: aquaregistry.PkgInfoTypeHTTP},
 	})
 	if diff := cmp.Diff([]github.Repo{{Owner: "cli", Name: "cli"}}, releases); diff != "" {
 		t.Errorf("the release packages are wrong (-want +got):\n%s", diff)
 	}
 	if diff := cmp.Diff([]github.Repo{{Owner: "flutter", Name: "flutter"}}, tags); diff != "" {
 		t.Errorf("the tag packages are wrong (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]github.Repo{{Owner: "apache", Name: "spark"}}, either); diff != "" {
+		t.Errorf("the packages read by releases or tags are wrong (-want +got):\n%s", diff)
 	}
 }
 

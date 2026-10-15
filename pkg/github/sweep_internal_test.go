@@ -40,6 +40,43 @@ func TestReleaseVersions_nothingAnswered(t *testing.T) {
 	}
 }
 
+// A repository with no release is read by its tags, leaving out the ones written as a
+// prerelease; one with releases is read by them, even when they are all prereleases.
+func TestReleasesOrTags(t *testing.T) {
+	t.Parallel()
+	for _, d := range []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "no release",
+			body: `{"releases":{"nodes":[]},"refs":{"nodes":[
+				{"name":"v4.3.0-rc2"},{"name":"v4.2.0"},{"name":"v4.1.1"},{"name":"stable"}
+			]}}`,
+			want: []string{"v4.2.0", "v4.1.1", "stable"},
+		},
+		{
+			name: "releases",
+			body: `{"releases":{"nodes":[
+				{"tagName":"v2.0.0-rc.1","isPrerelease":true}
+			]},"refs":{"nodes":[{"name":"v1.0.0"}]}}`,
+			want: []string{},
+		},
+	} {
+		t.Run(d.name, func(t *testing.T) {
+			t.Parallel()
+			r := &repository{}
+			if err := json.Unmarshal([]byte(d.body), r); err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(d.want, releasesOrTags(r)); diff != "" {
+				t.Errorf("the versions are wrong (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // The selections are written by hand, so a typo in them is a query GitHub rejects
 // for every repository at once.
 func TestSelections(t *testing.T) {
@@ -53,6 +90,15 @@ func TestSelections(t *testing.T) {
 	} {
 		if !strings.Contains(rel, want) {
 			t.Errorf("the releases selection is missing %q:\n%s", want, rel)
+		}
+	}
+	both := releasesAndTags("r2o", "r2n")
+	for _, want := range []string{
+		"releases(first: 10, orderBy: {field: CREATED_AT, direction: DESC})",
+		`refs(refPrefix: "refs/tags/", first: 10, orderBy: {field: TAG_COMMIT_DATE, direction: DESC})`,
+	} {
+		if !strings.Contains(both, want) {
+			t.Errorf("the releases and tags selection is missing %q:\n%s", want, both)
 		}
 	}
 	tag := tags("r1o", "r1n")

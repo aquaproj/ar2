@@ -100,6 +100,10 @@ func (starFetcher) Tags(_ context.Context, _ []github.Repo) (*github.Sweep, erro
 	return &github.Sweep{}, nil
 }
 
+func (starFetcher) ReleasesOrTags(_ context.Context, _ []github.Repo) (*github.Sweep, error) {
+	return &github.Sweep{}, nil
+}
+
 // TestSyncState_joinsTheCurrentLap checks that a package the registry has just gained
 // starts with the fewest turns anything in the order has: it waits for this lap's
 // turn rather than the next one.

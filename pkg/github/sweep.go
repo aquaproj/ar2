@@ -3,7 +3,10 @@ package github
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/hashicorp/go-version"
 )
 
 // SweepDepth is how many versions of each package a sweep looks at.
@@ -93,6 +96,38 @@ func tagNames(r *repository) []string {
 	return names
 }
 
+// ReleasesOrTags returns the newest versions of each repository from its releases, or from
+// its tags when it has no release at all, newest first.
+//
+// It is for the packages whose versions aren't necessarily releases: one installed with go
+// install, downloaded from its own site, or read out of the repository. apache/spark tags
+// its versions and publishes none on GitHub, and asked for releases alone it has no
+// version at all.
+//
+// A repository that has releases is read by them even when every one is a draft or a
+// prerelease, which says how the project marks a version. A tag carries no such mark, so
+// a tag that is written as a prerelease -- v4.3.0-rc2 -- is left out, which is the rule
+// releases follow.
+func (c *Client) ReleasesOrTags(ctx context.Context, repos []Repo) (*Sweep, error) {
+	return c.sweep(ctx, repos, releasesAndTags, releasesOrTags)
+}
+
+// releasesOrTags reads the versions out of a repository's releases, or out of its tags
+// when it has no release.
+func releasesOrTags(r *repository) []string {
+	if r.Releases != nil && len(r.Releases.Nodes) != 0 {
+		return releaseVersions(r)
+	}
+	return slices.DeleteFunc(tagNames(r), IsPrerelease)
+}
+
+// IsPrerelease says whether a tag is written as a prerelease of a version: v4.3.0-rc2.
+// A tag that isn't a version at all says nothing about it and isn't one.
+func IsPrerelease(tag string) bool {
+	v, err := version.NewSemver(tag)
+	return err == nil && v.Prerelease() != ""
+}
+
 // sweep asks the same thing about every repository, fifty at a time.
 func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read func(*repository) []string) (*Sweep, error) {
 	out := &Sweep{
@@ -129,6 +164,12 @@ func releases(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
 		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
 		ownerVar, nameVar, SweepDepth)
+}
+
+func releasesAndTags(ownerVar, nameVar string) string {
+	return fmt.Sprintf(
+		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
+		ownerVar, nameVar, SweepDepth, SweepDepth)
 }
 
 func tags(ownerVar, nameVar string) string {

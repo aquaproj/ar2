@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -11,6 +12,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/expr"
 	"github.com/aquaproj/ar2/pkg/forge"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/expr-lang/expr/vm"
 	gogithub "github.com/google/go-github/v92/github"
@@ -47,24 +49,31 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 		return c.instanceVersions(ctx, info)
 	}
 
-	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
 	if base != nil && base.VersionSource == versionSourceTag {
-		tags, _, err := c.gh.Repositories.ListTags(ctx, pkg.RepoOwner, pkg.RepoName, opts)
-		if err != nil {
-			return nil, fmt.Errorf("list tags: %w", err)
-		}
-		versions := make([]string, 0, len(tags))
-		for _, tag := range tags {
-			versions = append(versions, tag.GetName())
-		}
-		return versions, nil
+		return c.tagVersions(ctx, pkg)
 	}
 
+	return c.releaseVersions(ctx, pkg, base)
+}
+
+// releaseVersions reads the package's releases, newest first, or its tags when its
+// versions needn't be releases and it has none.
+func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo) ([]string, error) {
 	// One page is enough: a run works on the newest versions, and the older ones are
 	// reached by later runs as the newest ones get recorded.
+	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
 	releases, _, err := c.gh.Repositories.ListReleases(ctx, pkg.RepoOwner, pkg.RepoName, opts)
 	if err != nil {
 		return nil, fmt.Errorf("list releases: %w", err)
+	}
+	if len(releases) == 0 && mayBeTagged(base) {
+		// The same rule as the sweep's: a tag written as a prerelease is left out,
+		// as a release marked as one is.
+		tags, err := c.tagVersions(ctx, pkg)
+		if err != nil {
+			return nil, err
+		}
+		return slices.DeleteFunc(tags, github.IsPrerelease), nil
 	}
 	versions := make([]string, 0, len(releases))
 	for _, release := range releases {
@@ -72,6 +81,20 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 			continue
 		}
 		versions = append(versions, release.GetTagName())
+	}
+	return versions, nil
+}
+
+// tagVersions reads the package's tags, newest first.
+func (c *Controller) tagVersions(ctx context.Context, pkg *state.Package) ([]string, error) {
+	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
+	tags, _, err := c.gh.Repositories.ListTags(ctx, pkg.RepoOwner, pkg.RepoName, opts)
+	if err != nil {
+		return nil, fmt.Errorf("list tags: %w", err)
+	}
+	versions := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		versions = append(versions, tag.GetName())
 	}
 	return versions, nil
 }
