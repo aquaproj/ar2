@@ -108,6 +108,7 @@ func Config(pkgName string, base *aquaregistry.PackageInfo, scaffold *genrgst.Ra
 		}
 		cfg := &g2.Config{PackageInfo: pkgInfo}
 		applyScaffold(cfg, scaffold)
+		cfg.AssetRules = assetRulesFromTemplates(base)
 		return cfg, unreachable
 	}
 
@@ -135,6 +136,8 @@ func Config(pkgName string, base *aquaregistry.PackageInfo, scaffold *genrgst.Ra
 		// names out of pkgInfo.
 		cfg.AllAssetsFilter = assetsFilterFromTemplates(pkgName, base)
 	}
+	// From the definition as aqua-registry has it too, for the same reason.
+	cfg.AssetRules = assetRulesFromTemplates(base)
 	return cfg, unconverted
 }
 
