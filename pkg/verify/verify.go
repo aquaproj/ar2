@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -33,6 +34,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/aqua/v2/pkg/osexec"
@@ -48,6 +50,8 @@ type Verifier struct {
 	// optional: a run that only wants the files checked doesn't install cosign and
 	// the rest to do it.
 	signatures Signatures
+	// downloadLimit is how long one download may take.
+	downloadLimit time.Duration
 }
 
 // Signatures verifies an asset against the signatures its entry claims and reports
@@ -64,11 +68,20 @@ type Signatures interface {
 // and only one of them can open a dmg.
 func New(httpClient *http.Client, signatures Signatures) *Verifier {
 	return &Verifier{
-		httpClient: httpClient,
-		unarchiver: unarchive.New(osexec.New()),
-		signatures: signatures,
+		httpClient:    httpClient,
+		unarchiver:    unarchive.New(osexec.New()),
+		signatures:    signatures,
+		downloadLimit: defaultDownloadLimit,
 	}
 }
+
+// defaultDownloadLimit is how long one download may take before it is given up on.
+//
+// A server can serve slowly enough that a download goes on making progress for longer than
+// a run lasts. apache/spark's 400 MB archive comes from archive.apache.org, and the run
+// that reached it was stopped at its time limit before it saved what it had done, so the
+// next run started at apache/spark again.
+const defaultDownloadLimit = 5 * time.Minute
 
 // formatTools names the command a format is opened with, for the formats that need
 // one. Everything else is unpacked in process.
@@ -573,6 +586,17 @@ func escapePath(s string) string {
 // download writes the asset to path and returns its SHA256.
 // The hash is computed while streaming, so the asset isn't read twice.
 func (v *Verifier) download(ctx context.Context, url, path string) (string, error) {
+	limited, cancel := context.WithTimeout(ctx, v.downloadLimit)
+	defer cancel()
+	checksum, err := v.fetch(limited, url, path)
+	if err != nil && ctx.Err() == nil && errors.Is(limited.Err(), context.DeadlineExceeded) {
+		return "", &SlowError{URL: url, Limit: v.downloadLimit}
+	}
+	return checksum, err
+}
+
+// fetch writes the asset to path and returns its SHA256.
+func (v *Verifier) fetch(ctx context.Context, url, path string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("create a request for the asset: %w", err)

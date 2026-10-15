@@ -194,6 +194,9 @@ type Input struct {
 	Packages []string
 	// Limit bounds how many package versions are generated in one run.
 	Limit int
+	// Until is when the run stops starting work, so that it finishes and saves what it
+	// did within the time it is given. Zero is no limit.
+	Until time.Time
 	// OutputDir is where registry.json files are written. When it is empty the
 	// result goes into a pull request instead.
 	OutputDir string
@@ -249,13 +252,12 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 
 	generated, attempted := 0, 0
 	for _, candidate := range candidates {
-		if attempted >= input.Limit {
+		if stopStarting(logger, input, attempted) {
 			return generated, nil
 		}
-		// The run reached this package, so it goes behind the ones it hasn't. Not
-		// whether there was anything to do, and not whether it worked: a package
-		// that fails every time would otherwise take the same share of every run.
-		candidate.Package.Round++
+		if !takeTurn(logger, candidate) {
+			continue
+		}
 		todo, versions := c.todo(logger, candidate, inFlight, moved, swept, now)
 		if todo == workNone {
 			continue
@@ -277,6 +279,40 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		generated += n
 	}
 	return generated, nil
+}
+
+// stopStarting says whether the run has done what it may: generated as many versions as
+// its limit, or used the time it was given.
+func stopStarting(logger *slog.Logger, input *Input, attempted int) bool {
+	if attempted >= input.Limit {
+		return true
+	}
+	if timeUp(input) {
+		logger.Info("the run's time is up, so it starts nothing more", "until", input.Until)
+		return true
+	}
+	return false
+}
+
+// takeTurn gives the package its turn, and says whether it is to be worked on in it.
+//
+// The run reached the package, so it goes behind the ones it hasn't. Not whether there
+// was anything to do, and not whether it worked: a package that fails every time would
+// otherwise take the same share of every run. One whose download took too long last time
+// waits a few laps before it is tried again.
+func takeTurn(logger *slog.Logger, candidate *Candidate) bool {
+	candidate.Package.Round++
+	if candidate.Package.Round <= candidate.Package.WaitUntil {
+		logger.Debug("the package waits after a download took too long", "package", candidate.Name,
+			"turns", candidate.Package.Round, "until", candidate.Package.WaitUntil)
+		return false
+	}
+	return true
+}
+
+// timeUp says whether the run has used the time it was given.
+func timeUp(input *Input) bool {
+	return !input.Until.IsZero() && time.Now().After(input.Until)
 }
 
 // todo says what this package needs doing, and on which versions. workNone is
@@ -556,6 +592,12 @@ type share struct {
 	versions int
 }
 
+// spent says whether the turn is over: as many versions tried as it may, or as many
+// generated as it was for. The rest of the package's history is the next turn's.
+func (s *share) spent(attempted, generated int) bool {
+	return attempted >= s.attempts || s.versions > 0 && generated >= s.versions
+}
+
 // limitBudget limits how much of the run's remaining budget one package may take.
 //
 // A package that the registry holds few enough versions of gets enough of a turn to
@@ -643,6 +685,20 @@ func (c *Controller) withInFlight(pkgName string, versions []string, existing, i
 	return out
 }
 
+// tooSlow says whether the version's download took too long, and puts the package back
+// when it did. The server is slow enough that the next version would be too, so the
+// package's turn ends there and it waits before its next one.
+func (c *Controller) tooSlow(logger *slog.Logger, candidate *Candidate, tag string, err error) bool {
+	if !verify.Slow(err) {
+		return false
+	}
+	putBack(candidate.Package)
+	logger.Warn("a download took too long, so the package waits before it is tried again",
+		"package", candidate.Name, "version", tag, "laps", candidate.Package.PutBack, "error", err.Error())
+	c.problems = append(c.problems, &summary.Problem{Package: candidate.Name, Version: tag, Reason: err.Error()})
+	return true
+}
+
 // stopped is the versions a package's turn couldn't generate that are reported as an issue
 // rather than only logged.
 type stopped struct {
@@ -663,12 +719,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 	out := &stopped{}
 	attempted := 0
 	for _, tag := range versions {
-		if attempted >= budget.attempts {
-			return generated, out, attempted
-		}
-		if budget.versions > 0 && len(generated) >= budget.versions {
-			// The package has what this turn was for, and the rest of its history
-			// is what the next turn is for.
+		if budget.spent(attempted, len(generated)) || timeUp(input) {
 			return generated, out, attempted
 		}
 		if _, ok := existing[tag]; ok {
@@ -685,6 +736,9 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		if countFailure(candidate.Package, tag, err) {
 			out.keepsFailing = append(out.keepsFailing, &tamperedVersion{version: tag, reason: err.Error()})
 		}
+		if c.tooSlow(logger, candidate, tag, err) {
+			return generated, out, attempted
+		}
 		if err != nil {
 			// A single version failing is normal: a release can have no assets at
 			// all, a server can have a bad minute, and a signature that can't be
@@ -700,6 +754,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 			}
 			continue
 		}
+		candidate.Package.PutBack = 0
 		generated = append(generated, v)
 	}
 	return generated, out, attempted
