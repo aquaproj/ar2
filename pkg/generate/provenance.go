@@ -20,19 +20,22 @@ const (
 	// also what a provenance that couldn't be read is taken for, which is what was assumed
 	// of every one before they were read.
 	provenanceSLSA provenanceKind = iota
-	// provenanceAttestation is a GitHub artifact attestation: a Sigstore bundle a workflow
-	// signed with its GitHub Actions identity, as actions/attest-build-provenance makes.
-	// aqua verifies it with gh, which reads the same attestation from GitHub.
-	provenanceAttestation
-	// provenanceNone is a provenance that is neither, which nothing aqua runs verifies.
+	// provenanceBundle is a Sigstore bundle signed with an identity, such as the one
+	// actions/attest-build-provenance makes. cosign verify-blob reads the in-toto statement
+	// in it and checks the asset is among its subjects, so aqua verifies it as a cosign
+	// bundle, against the identity the certificate names: from the release alone, without
+	// asking GitHub for anything.
+	provenanceBundle
+	// provenanceNone is a provenance that is neither -- a DSSE envelope outside a bundle,
+	// or a bundle signed with a key nothing names -- which nothing aqua runs verifies.
 	provenanceNone
 )
 
 // provenance is what a provenance turned out to be.
 type provenanceInfo struct {
 	kind provenanceKind
-	// signerWorkflow is the workflow that signed an attestation, as owner/repo/.github/workflows/file.
-	signerWorkflow string
+	// signer is who signed a bundle.
+	signer *signer
 }
 
 // slsaGeneratorBuilder is how the builder ids of slsa-github-generator's workflows begin.
@@ -79,7 +82,7 @@ func (s *statement) builderID() string {
 // A provenance named .intoto.jsonl says nothing about who made it. slsa-github-generator
 // writes one, and so does a release workflow attesting its own build: awslabs/aidlc-workflows
 // publishes the Sigstore bundle actions/attest-build-provenance made, which slsa-verifier
-// doesn't trust and gh does. The first line is enough to tell: every line of the file is an
+// doesn't trust and cosign verifies. The first line is enough to tell: every line of the file is an
 // attestation of the same build.
 func readProvenance(b []byte) provenanceInfo {
 	line, _, _ := bytes.Cut(bytes.TrimSpace(b), []byte("\n"))
@@ -95,8 +98,8 @@ func readProvenance(b []byte) provenanceInfo {
 		return provenanceInfo{kind: provenanceSLSA}
 	}
 	if strings.HasPrefix(raw.MediaType, sigstoreBundleType) {
-		if wf := attestingWorkflow(line); wf != "" {
-			return provenanceInfo{kind: provenanceAttestation, signerWorkflow: wf}
+		if signer, err := parseSigner(line); err == nil && signer.Identity != "" {
+			return provenanceInfo{kind: provenanceBundle, signer: signer}
 		}
 	}
 	return provenanceInfo{kind: provenanceNone}
@@ -113,25 +116,6 @@ func builderOf(payload string) string {
 		return ""
 	}
 	return s.builderID()
-}
-
-// attestingWorkflow is the workflow a bundle's certificate names, when GitHub Actions
-// vouched for it: https://github.com/o/r/.github/workflows/release.yml@refs/tags/v1 is
-// o/r/.github/workflows/release.yml.
-func attestingWorkflow(bundle []byte) string {
-	s, err := parseSigner(bundle)
-	if err != nil || s.Issuer != githubOIDCIssuer {
-		return ""
-	}
-	path, ok := strings.CutPrefix(s.Identity, "https://github.com/")
-	if !ok {
-		return ""
-	}
-	path, _, _ = strings.Cut(path, "@")
-	if !strings.Contains(path, "/.github/workflows/") {
-		return ""
-	}
-	return path
 }
 
 // provenances reads what each provenance of a release is, once each.

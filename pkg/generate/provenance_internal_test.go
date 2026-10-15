@@ -34,9 +34,12 @@ func TestReadProvenance(t *testing.T) {
 		},
 		{
 			// awslabs/aidlc-workflows' release workflow attests its own build.
-			name: "an attestation of GitHub Actions",
+			name: "a bundle signed with an identity",
 			file: attestation,
-			want: provenanceInfo{kind: provenanceAttestation, signerWorkflow: "awslabs/aidlc-workflows/.github/workflows/release.yml"},
+			want: provenanceInfo{kind: provenanceBundle, signer: &signer{
+				Identity: "https://github.com/awslabs/aidlc-workflows/.github/workflows/release.yml@refs/tags/v2.11.0",
+				Issuer:   githubOIDCIssuer,
+			}},
 		},
 		{
 			name: "a builder nothing verifies",
@@ -52,34 +55,39 @@ func TestReadProvenance(t *testing.T) {
 	} {
 		t.Run(d.name, func(t *testing.T) {
 			t.Parallel()
-			if diff := cmp.Diff(d.want, readProvenance(d.file), cmp.AllowUnexported(provenanceInfo{})); diff != "" {
+			if diff := cmp.Diff(d.want, readProvenance(d.file), cmp.AllowUnexported(provenanceInfo{}, signer{})); diff != "" {
 				t.Errorf("(-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
-// An attestation becomes an entry's github_artifact_attestations rather than its
+// A bundle becomes the entry's cosign, held to who signed it, rather than its
 // slsa_provenance, and a provenance nothing verifies becomes neither.
 func TestInferSLSA_kinds(t *testing.T) {
 	t.Parallel()
 	reg := &Registry{Assets: []*Asset{
 		{OS: "darwin", Arch: "amd64", Type: "github_release", Asset: "aidlc-darwin-x64"},
 	}}
+	identity := "https://github.com/awslabs/aidlc-workflows/.github/workflows/release.yml@refs/tags/v2.11.0"
 	inferSLSA(reg, nil, names("aidlc-darwin-x64", "aidlc-release.intoto.jsonl"), func(string) provenanceInfo {
-		return provenanceInfo{kind: provenanceAttestation, signerWorkflow: "awslabs/aidlc-workflows/.github/workflows/release.yml"}
+		return provenanceInfo{kind: provenanceBundle, signer: &signer{Identity: identity, Issuer: githubOIDCIssuer}}
 	})
-	want := &aquaregistry.GitHubArtifactAttestations{SignerWorkflow2: "awslabs/aidlc-workflows/.github/workflows/release.yml"}
-	if diff := cmp.Diff(want, reg.Assets[0].GitHubArtifactAttestations); diff != "" {
+	bundle := "aidlc-release.intoto.jsonl"
+	want := &aquaregistry.Cosign{
+		Bundle: &aquaregistry.DownloadedFile{Type: "github_release", Asset: &bundle},
+		Opts:   []string{"--certificate-identity", identity, "--certificate-oidc-issuer", githubOIDCIssuer},
+	}
+	if diff := cmp.Diff(want, reg.Assets[0].Cosign); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
 	if reg.Assets[0].SLSAProvenance != nil {
-		t.Error("an attestation was taken for an SLSA provenance")
+		t.Error("a bundle was taken for an SLSA provenance")
 	}
 
 	reg = &Registry{Assets: []*Asset{{OS: "darwin", Arch: "amd64", Type: "github_release", Asset: "foo"}}}
 	inferSLSA(reg, nil, names("foo", "multiple.intoto.jsonl"), func(string) provenanceInfo { return provenanceInfo{kind: provenanceNone} })
-	if reg.Assets[0].SLSAProvenance != nil || reg.Assets[0].GitHubArtifactAttestations != nil {
+	if reg.Assets[0].SLSAProvenance != nil || reg.Assets[0].Cosign != nil {
 		t.Error("a provenance nothing verifies was given a way to verify it")
 	}
 }
