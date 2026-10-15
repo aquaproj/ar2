@@ -103,8 +103,10 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// Before the inference, so that a release which moved from one way of signing to
 	// another has the old one dropped and the new one read off the same asset list.
 	dropUnpublished(logger, reg, rel.names)
+	declared := signingKinds(reg)
 	inferSLSA(reg, base, rel.names)
 	out := &Generated{Registry: reg, Left: left}
+	defer func() { out.Inferred = inferredKinds(declared, reg) }()
 	// What is inferred about signing is GitHub's: the identity it assumes is a
 	// workflow of the package's repository on github.com, which a release on an
 	// instance is not signed by. A definition naming cosign itself is left alone,
@@ -127,6 +129,10 @@ type Generated struct {
 	Left []*Left
 	// ChecksumFiles are the release's checksum files that a signature vouches for.
 	ChecksumFiles []*ChecksumFile
+	// Inferred are the kinds of signing the entries carry because they were read off the
+	// release rather than written in the definition: "slsa_provenance", "cosign",
+	// "packslip".
+	Inferred map[string]bool
 }
 
 // useConfig replaces the aqua-registry definition with aqua-registry-g2's own when
