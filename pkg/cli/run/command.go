@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -23,6 +24,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/verify"
 	gogithub "github.com/google/go-github/v92/github"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"golang.org/x/oauth2"
 )
@@ -42,6 +44,7 @@ type Args struct {
 	RegistryRef string
 	Verify      bool
 	Limit       int
+	TimeBudget  time.Duration
 	OutputDir   string
 	StateFile   string
 	G2Owner     string
@@ -69,6 +72,11 @@ func (a *Args) Flags() *state.Flags {
 // run is around 5,100 calls an hour against a limit of 5,000. A run takes about nine
 // minutes at that size.
 const defaultLimit = 300
+
+// defaultTimeBudget is how long a run goes on starting work. It is less than the time the
+// workflow gives the job, so that the run gets to save what it did: a run stopped from
+// outside saves nothing, and the next one starts where it started.
+const defaultTimeBudget = 20 * time.Minute
 
 // New creates the 'ar2 run' command.
 func New(logger *slogutil.Logger, gFlags *flag.GlobalFlags) *cobra.Command {
@@ -119,12 +127,18 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 			return action(cmd.Context(), logger, args)
 		},
 	}
-	fs := cmd.Flags()
+	addFlags(cmd.Flags(), args)
+	return cmd
+}
+
+// addFlags defines the command's flags.
+func addFlags(fs *pflag.FlagSet, args *Args) {
 	fs.BoolVar(&args.SkipPR, "skip-pr", false, "generate registry.json without creating a branch, a commit, or a pull request")
 	fs.StringVar(&args.Output, "output", "", "write registry.json to this file instead of standard output")
 	fs.StringVar(&args.RegistryRef, "registry-ref", "main", "the aqua-registry ref the package definition is read from")
 	fs.BoolVar(&args.Verify, "verify", true, "download and extract every asset to check that files[].src matches the archive and to read which libc its executables need")
 	fs.IntVar(&args.Limit, "limit", defaultLimit, "how many package versions to generate in one run")
+	fs.DurationVar(&args.TimeBudget, "time-budget", defaultTimeBudget, "how long the run goes on starting work; zero for no limit")
 	fs.StringVar(&args.OutputDir, "output-dir", "", "write registry.json files under this directory")
 	fs.StringVar(&args.StateFile, "state", "", "read the state from this file instead of the container registry")
 	fs.StringVar(&args.Registry, "registry", "ghcr.io", "the container registry the state is read from")
@@ -133,7 +147,6 @@ $ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
 	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
 	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
 	fs.StringVar(&args.BaseBranch, "base-branch", "main", "the branch aqua-registry-g2's own configuration is read from")
-	return cmd
 }
 
 func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {

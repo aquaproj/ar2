@@ -61,3 +61,19 @@ func countFailure(pkg *state.Package, version string, err error) bool {
 	pkg.TransientFailures[version]++
 	return pkg.TransientFailures[version] == failuresBeforeIssue
 }
+
+// maxPutBack is the most laps a slow package waits.
+const maxPutBack = 32
+
+// putBackGrowth is how much longer a slow package waits each time it is slow again.
+const putBackGrowth = 2
+
+// putBack makes the package wait before it is tried again, twice as long as last time.
+//
+// A server slow enough for a download to run out of time is likely to be next run too, and
+// trying it every run would spend a share of each on waiting. It is still a transient
+// failure, counted as one, so a package that never gets past it is reported.
+func putBack(pkg *state.Package) {
+	pkg.PutBack = min(max(1, pkg.PutBack*putBackGrowth), maxPutBack)
+	pkg.WaitUntil = pkg.Round + pkg.PutBack
+}

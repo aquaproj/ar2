@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // StatusError is what a download the server refused comes back as.
@@ -43,6 +44,9 @@ func Refused(err error) bool {
 // error, a rate limit, or a connection that failed. The same download may well work on the
 // next run, so what it says about the release is nothing yet.
 func Transient(err error) bool {
+	if Slow(err) {
+		return true
+	}
 	if status, ok := errors.AsType[*StatusError](err); ok {
 		return status.Code == http.StatusTooManyRequests || status.Code >= http.StatusInternalServerError
 	}
@@ -50,5 +54,23 @@ func Transient(err error) bool {
 		return true
 	}
 	_, ok := errors.AsType[net.Error](err)
+	return ok
+}
+
+// SlowError is a download that didn't finish within the time one may take.
+type SlowError struct {
+	URL   string
+	Limit time.Duration
+}
+
+func (e *SlowError) Error() string {
+	return fmt.Sprintf("the download took longer than %s: %s", e.Limit, e.URL)
+}
+
+// Slow reports whether the error is a download that took too long. It is transient --
+// the server may be faster next time -- and it is also what a package is put back for,
+// so that a server that is always this slow doesn't hold up every run.
+func Slow(err error) bool {
+	_, ok := errors.AsType[*SlowError](err)
 	return ok
 }

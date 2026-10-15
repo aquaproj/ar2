@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/cli/identities"
@@ -53,6 +54,7 @@ func loop(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, htt
 	generated, err := c.Run(ctx, logger.Logger, &ctrl.Input{
 		Packages:    args.Packages,
 		Limit:       args.Limit,
+		Until:       until(args.TimeBudget),
 		OutputDir:   args.OutputDir,
 		SkipPR:      args.SkipPR,
 		Verify:      args.Verify,
@@ -162,4 +164,12 @@ func registryClient(gh *gogithub.Client, args *Args) (*g2.Client, error) {
 		return nil, err //nolint:wrapcheck // the error already names the token it is for
 	}
 	return g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version), nil
+}
+
+// until is when a run with the budget stops starting work, or the zero time for none.
+func until(budget time.Duration) time.Time {
+	if budget <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(budget)
 }

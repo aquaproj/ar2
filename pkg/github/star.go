@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const endpoint = "https://api.github.com/graphql"
@@ -42,6 +44,9 @@ type Client struct {
 	// running the test has left, and a test that depends on that fails for reasons
 	// that have nothing to do with the code.
 	anonymousEndpoint string
+	// retryWait is how long the first retry of a query waits, doubling after it. A test
+	// sets it to nothing.
+	retryWait time.Duration
 }
 
 // NewClient creates a Client. httpClient must attach the GitHub token.
@@ -50,8 +55,15 @@ func NewClient(httpClient *http.Client) *Client {
 		httpClient:        httpClient,
 		endpoint:          endpoint,
 		anonymousEndpoint: anonymousEndpoint,
+		retryWait:         defaultRetryWait,
 	}
 }
+
+// queryAttempts is how many times a query is sent before its failure is the run's.
+const queryAttempts = 3
+
+// defaultRetryWait is how long the first retry waits.
+const defaultRetryWait = 5 * time.Second
 
 // GetStars returns the stargazer count of each repository, and why any of them
 // couldn't be read.
@@ -249,6 +261,10 @@ func (c *Client) request(ctx context.Context, repos []Repo, sel selection) (*gra
 }
 
 // post sends one GraphQL query and reads the answer into out.
+//
+// A query GitHub answers with 502, 503 or 504 is sent again, a few seconds later and then
+// a few more. Those are GitHub having a bad minute, and reading the registry's definitions
+// is one query a run can't do without: one failure of it was a whole run lost.
 func (c *Client) post(ctx context.Context, query string, vars map[string]any, out any) error {
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
@@ -257,6 +273,23 @@ func (c *Client) post(ctx context.Context, query string, vars map[string]any, ou
 	if err != nil {
 		return fmt.Errorf("marshal a GraphQL request: %w", err)
 	}
+	wait := c.retryWait
+	for attempt := 1; ; attempt++ {
+		err := c.send(ctx, body, out)
+		if attempt == queryAttempts || !retryable(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+		wait *= 2
+	}
+}
+
+// send sends a GraphQL query once.
+func (c *Client) send(ctx context.Context, body []byte, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create a GraphQL request: %w", err)
@@ -268,12 +301,34 @@ func (c *Client) post(ctx context.Context, query string, vars map[string]any, ou
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("send a GraphQL request: status code %d", resp.StatusCode)
+		return fmt.Errorf("send a GraphQL request: %w", &statusError{code: resp.StatusCode})
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("read a GraphQL response as JSON: %w", err)
 	}
 	return nil
+}
+
+// statusError is a GraphQL request answered with a status other than 200.
+type statusError struct {
+	code int
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("status code %d", e.code)
+}
+
+// retryable says whether a failed query is worth sending again.
+func retryable(err error) bool {
+	e, ok := errors.AsType[*statusError](err)
+	if !ok {
+		return false
+	}
+	switch e.code {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 // limitedAliases returns the aliases that failed with RESOURCE_LIMITS_EXCEEDED.

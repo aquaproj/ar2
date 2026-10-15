@@ -181,6 +181,11 @@ type Package struct {
 	// it, since it decides which of a package's newest versions are new before the
 	// definition is read; a run that reads the definition writes it here.
 	Prerelease bool `json:"prerelease,omitempty"`
+	// PutBack is how many laps the package waited the last time a download of it took too
+	// long, doubling each time, and WaitUntil is the turn count it waits until. A
+	// version generated sets PutBack back to zero.
+	PutBack   int `json:"put_back,omitempty"`
+	WaitUntil int `json:"wait_until,omitempty"`
 }
 
 // Fingerprint reduces a sweep's versions to something worth storing for every
