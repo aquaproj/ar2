@@ -19,18 +19,18 @@ const provenanceSuffix = ".intoto.jsonl"
 // or the release's when it has none.
 //
 // What the provenance is decides how: kind reads it. One slsa-github-generator built is an
-// SLSA provenance. One a release workflow signed with its GitHub Actions identity is a
-// GitHub artifact attestation, which gh verifies and slsa-verifier doesn't --
-// awslabs/aidlc-workflows publishes one. Anything else nothing aqua runs can verify, so
-// the entry says nothing about it.
+// SLSA provenance. A Sigstore bundle signed with an identity is verified by cosign against
+// that identity, which slsa-verifier wouldn't -- awslabs/aidlc-workflows publishes one its
+// own release workflow signed. Anything else nothing aqua runs can verify, so the entry
+// says nothing about it.
 //
 // A definition saying anything about SLSA provenance wins, including one saying it is
-// disabled, and so does one saying anything about attestations.
+// disabled, and so does one saying anything about cosign.
 func inferSLSA(reg *Registry, base *aquaregistry.PackageInfo, names map[string]struct{}, kind func(asset string) provenanceInfo) {
 	if base != nil && base.SLSAProvenance != nil {
 		return
 	}
-	attestationsDeclared := base != nil && base.GitHubArtifactAttestations != nil
+	cosignDeclared := base != nil && base.Cosign != nil
 	release := releaseProvenance(names)
 	for _, asset := range reg.Assets {
 		// A provenance's type says where it is downloaded from, and what is read here is
@@ -42,7 +42,7 @@ func inferSLSA(reg *Registry, base *aquaregistry.PackageInfo, names map[string]s
 		if name == "" {
 			continue
 		}
-		applyProvenance(asset, name, kind(name), attestationsDeclared)
+		applyProvenance(asset, name, kind(name), cosignDeclared)
 	}
 }
 
@@ -57,16 +57,19 @@ func provenanceFor(asset *Asset, names map[string]struct{}, release string) stri
 }
 
 // applyProvenance records on the entry how its provenance is verified.
-func applyProvenance(asset *Asset, name string, p provenanceInfo, attestationsDeclared bool) {
+func applyProvenance(asset *Asset, name string, p provenanceInfo, cosignDeclared bool) {
 	switch p.kind {
 	case provenanceSLSA:
 		asset.SLSAProvenance = &aquaregistry.SLSAProvenance{
 			Type:  aquaregistry.PkgInfoTypeGitHubRelease,
 			Asset: &name,
 		}
-	case provenanceAttestation:
-		if !attestationsDeclared && asset.GitHubArtifactAttestations == nil {
-			asset.GitHubArtifactAttestations = &aquaregistry.GitHubArtifactAttestations{SignerWorkflow2: p.signerWorkflow}
+	case provenanceBundle:
+		if !cosignDeclared && asset.Cosign == nil {
+			asset.Cosign = &aquaregistry.Cosign{
+				Bundle: &aquaregistry.DownloadedFile{Type: aquaregistry.PkgInfoTypeGitHubRelease, Asset: &name},
+				Opts:   heldTo(nil, p.signer),
+			}
 		}
 	case provenanceNone:
 	}
