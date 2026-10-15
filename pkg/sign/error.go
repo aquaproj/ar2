@@ -26,3 +26,19 @@ var (
 // ErrUnverified says a signature the entry carries couldn't be shown to hold, either
 // because it doesn't or because the check couldn't be made.
 var ErrUnverified = errors.New("the asset can't be verified the way its entry says it can")
+
+// UnverifiedError is an asset a check of one kind of signing didn't hold for.
+type UnverifiedError struct {
+	// Kind is the kind of signing, as the check names it: "cosign", "slsa_provenance".
+	Kind string
+	Err  error
+}
+
+func (e *UnverifiedError) Error() string {
+	return ErrUnverified.Error() + ": " + e.Kind + ": " + e.Err.Error()
+}
+
+// Unwrap makes the error ErrUnverified, and the reason the check gave.
+func (e *UnverifiedError) Unwrap() []error {
+	return []error{ErrUnverified, e.Err}
+}

@@ -189,7 +189,7 @@ func (v *Verifier) Check(ctx context.Context, logger *slog.Logger, pkgName, vers
 	}
 
 	if failed.err != nil {
-		return fmt.Errorf("%w: %w", ErrUnverified, failed.err)
+		return failed.err
 	}
 	return nil
 }
@@ -202,7 +202,7 @@ type unverified struct {
 	pkgName string
 	version string
 	asset   *generate.Asset
-	err     error
+	err     *UnverifiedError
 }
 
 func (u *unverified) note(kind string, err error) {
@@ -210,7 +210,7 @@ func (u *unverified) note(kind string, err error) {
 		"package", u.pkgName, "version", u.version,
 		"os", u.asset.OS, "arch", u.asset.Arch, "kind", kind, "error", err.Error())
 	if u.err == nil {
-		u.err = fmt.Errorf("%s: %w", kind, err)
+		u.err = &UnverifiedError{Kind: kind, Err: err}
 	}
 }
 

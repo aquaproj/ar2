@@ -310,6 +310,37 @@ func takeTurn(logger *slog.Logger, candidate *Candidate) bool {
 	return true
 }
 
+// complete fills in the entries and checks them, taking off a kind of signing that was
+// read off the release and doesn't verify.
+//
+// A signature the definition names that doesn't verify is a release that isn't what it
+// says. One that was inferred is a guess about the release, and guesses are wrong:
+// awslabs/aidlc-workflows publishes an in-toto provenance its own release workflow made,
+// which slsa-verifier doesn't trust, and the guess that it was SLSA's had the version
+// reported as tampered with. The entries go without it, as they would have if nothing had
+// been guessed.
+func (c *Controller) complete(ctx context.Context, logger *slog.Logger, input *Input, pkgName, tag string, generated *generate.Generated) (*verify.Filled, error) {
+	return withoutFailedGuesses(logger, pkgName, tag, generated, func() (*verify.Filled, error) {
+		return c.verifier.Complete(ctx, logger, pkgName, tag, generated.Registry, input.Verify)
+	})
+}
+
+// withoutFailedGuesses completes the entries, again without a kind of signing that was
+// inferred and didn't verify, until what fails, if anything, is something else.
+func withoutFailedGuesses(logger *slog.Logger, pkgName, tag string, generated *generate.Generated, complete func() (*verify.Filled, error)) (*verify.Filled, error) {
+	for {
+		filled, err := complete()
+		e, ok := errors.AsType[*sign.UnverifiedError](err)
+		if !ok || !generated.Inferred[e.Kind] {
+			return filled, err
+		}
+		logger.Warn("a signature read off the release doesn't verify, so the entries go without it",
+			"package", pkgName, "version", tag, "kind", e.Kind, "error", e.Err.Error())
+		generate.DropSigning(generated.Registry, e.Kind)
+		delete(generated.Inferred, e.Kind)
+	}
+}
+
 // timeUp says whether the run has used the time it was given.
 func timeUp(input *Input) bool {
 	return !input.Until.IsZero() && time.Now().After(input.Until)
@@ -787,7 +818,7 @@ func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *I
 	// Before anything is checked or recorded on an entry: what is recorded is about this
 	// version, and the objects came from the definition every version shares.
 	generate.OwnSigning(reg)
-	filled, err := c.verifier.Complete(ctx, logger, pkgName, tag, reg, input.Verify)
+	filled, err := c.complete(ctx, logger, input, pkgName, tag, generated)
 	if err != nil {
 		return nil, fmt.Errorf("complete registry.json: %w", err)
 	}
