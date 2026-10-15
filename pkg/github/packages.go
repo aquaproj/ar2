@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strconv"
 	"strings"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // blobsPerQuery is how many files one request reads.
@@ -114,29 +118,34 @@ type subtreesResponse struct {
 // something the file doesn't say.
 func (r *Repository) Blobs(ctx context.Context, logger *slog.Logger, expressions []string) (map[string]string, error) {
 	out := make(map[string]string, len(expressions))
+	var mu sync.Mutex
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(queriesInFlight)
 	for start := 0; start < len(expressions); start += blobsPerQuery {
 		batch := expressions[start:min(start+blobsPerQuery, len(expressions))]
-		result := &blobsResponse{}
-		if err := r.c.post(ctx, blobsQuery(batch), r.vars(), result); err != nil {
-			return nil, err
-		}
-		if err := firstError(result.Errors); err != nil {
-			return nil, fmt.Errorf("read files: %w", err)
-		}
-		for i, expression := range batch {
-			blob := result.Data.Repository[blobAlias(i)]
-			if blob == nil {
-				continue
+		eg.Go(func() error {
+			texts, err := r.blobs(ctx, logger, batch)
+			if err != nil {
+				return err
 			}
-			if blob.IsTruncated {
-				logger.Warn("a file is too large to read in one answer", "expression", expression)
-				continue
-			}
-			out[expression] = blob.Text
-		}
+			mu.Lock()
+			defer mu.Unlock()
+			maps.Copy(out, texts)
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, err //nolint:wrapcheck // blobs says what it couldn't read
 	}
 	return out, nil
 }
+
+// queriesInFlight is how many queries Blobs sends at once.
+//
+// GitHub resolves each object of a query in turn, so a query of a hundred takes a few seconds
+// and the whole registry's definitions took most of a minute one query at a time. A few at
+// once is well inside what GitHub allows a client before it starts asking it to slow down.
+const queriesInFlight = 4
 
 func blobAlias(i int) string {
 	return "f" + strconv.Itoa(i)
@@ -342,4 +351,28 @@ type oidsResponse struct {
 // vars is what every query is asked about: the repository.
 func (r *Repository) vars() map[string]any {
 	return map[string]any{"owner": r.owner, "name": r.repo}
+}
+
+// blobs reads one query's worth of files.
+func (r *Repository) blobs(ctx context.Context, logger *slog.Logger, batch []string) (map[string]string, error) {
+	out := make(map[string]string, len(batch))
+	result := &blobsResponse{}
+	if err := r.c.post(ctx, blobsQuery(batch), r.vars(), result); err != nil {
+		return nil, err
+	}
+	if err := firstError(result.Errors); err != nil {
+		return nil, fmt.Errorf("read files: %w", err)
+	}
+	for i, expression := range batch {
+		blob := result.Data.Repository[blobAlias(i)]
+		if blob == nil {
+			continue
+		}
+		if blob.IsTruncated {
+			logger.Warn("a file is too large to read in one answer", "expression", expression)
+			continue
+		}
+		out[expression] = blob.Text
+	}
+	return out, nil
 }

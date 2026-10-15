@@ -334,13 +334,8 @@ func (c *Client) CreateVersionsPullRequest(ctx context.Context, logger *slog.Log
 	return c.CreatePullRequestFrom(ctx, logger, VersionsBranch, base, title, body)
 }
 
-// VersionsLists is what reading every package's list of versions asks of the repository.
-type VersionsLists interface {
-	// Subtrees is the directories two levels under the tree an expression names.
-	Subtrees(ctx context.Context, expression string) ([]string, error)
-	// OIDs is the sha of the object each expression names, keyed by the expression.
-	OIDs(ctx context.Context, expressions []string) (map[string]string, error)
-	// Blobs is the text of the file each expression names, keyed by the expression.
+// Blobs reads the text of files, keyed by the expression naming each.
+type Blobs interface {
 	Blobs(ctx context.Context, logger *slog.Logger, expressions []string) (map[string]string, error)
 }
 
@@ -350,42 +345,62 @@ type VersionsLists interface {
 // versions, and one whose list can't be read.
 //
 // It is asked of every package, from what the default branch holds rather than from what
-// changed, so nothing has to be remembered between runs: whichever runs next finds what
-// a run that didn't happen would have. Every package costs two objects, read a hundred to a
-// query, which is what reading the identities costs.
-func StaleVersionsLists(ctx context.Context, logger *slog.Logger, repo VersionsLists) ([]string, error) {
-	dirs, err := repo.Subtrees(ctx, DefaultBranch+":"+PackagesDir)
+// changed, so nothing has to be remembered between runs: whichever runs next finds what a
+// run that didn't happen would have.
+//
+// Which packages there are and what each versions directory is come from one read of the
+// tree under pkgs, and the lists from blobs, a hundred to a query.
+func (c *Client) StaleVersionsLists(ctx context.Context, logger *slog.Logger, blobs Blobs) ([]string, error) {
+	tree, _, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, DefaultBranch+":"+PackagesDir, true)
 	if err != nil {
-		return nil, fmt.Errorf("list the packages: %w", err)
+		return nil, fmt.Errorf("read the tree of the packages: %w", err)
 	}
-	ids := packageIDs(logger, dirs)
-	trees := make([]string, len(ids))
-	lists := make([]string, len(ids))
+	if tree.GetTruncated() {
+		// The limit is 100,000 entries, which the registry is far from. A part of the tree
+		// would leave packages unchecked without saying so.
+		return nil, fmt.Errorf("%w: %s", errTreeTruncated, PackagesDir)
+	}
+	ids, shas := packagesOfTree(logger, tree.Entries)
+	exprs := make([]string, len(ids))
 	for i, id := range ids {
-		dir := DefaultBranch + ":" + PackageDir(id)
-		trees[i] = dir + "/" + aquag2.VersionDir
-		lists[i] = dir + "/" + aquag2.VersionsFileName
+		exprs[i] = DefaultBranch + ":" + PackageDir(id) + "/" + aquag2.VersionsFileName
 	}
-	shas, err := repo.OIDs(ctx, trees)
-	if err != nil {
-		return nil, fmt.Errorf("read the versions directories: %w", err)
-	}
-	texts, err := repo.Blobs(ctx, logger, lists)
+	texts, err := blobs.Blobs(ctx, logger, exprs)
 	if err != nil {
 		return nil, fmt.Errorf("read the lists of versions: %w", err)
 	}
 	var stale []string
 	for i, id := range ids {
 		source := ""
-		if text, ok := texts[lists[i]]; ok {
+		if text, ok := texts[exprs[i]]; ok {
 			source = "unreadable"
 			if list := readList(text); list != nil {
 				source = list.Source
 			}
 		}
-		if shas[trees[i]] != source {
+		if shas[id] != source {
 			stale = append(stale, id)
 		}
 	}
 	return stale, nil
+}
+
+// packagesOfTree reads, from the entries of the tree under pkgs, the ids of the packages, in
+// order, and the sha of each one's versions directory.
+func packagesOfTree(logger *slog.Logger, entries []*gogithub.TreeEntry) ([]string, map[string]string) {
+	var dirs []string
+	shas := map[string]string{}
+	for _, entry := range entries {
+		if entry.GetType() != "tree" {
+			continue
+		}
+		parts := strings.Split(entry.GetPath(), "/")
+		switch {
+		case len(parts) == 2: //nolint:mnd // <shard>/<id>
+			dirs = append(dirs, entry.GetPath())
+		case len(parts) == 3 && parts[2] == aquag2.VersionDir: // <shard>/<id>/versions
+			shas[parts[1]] = entry.GetSHA()
+		}
+	}
+	return packageIDs(logger, dirs), shas
 }
