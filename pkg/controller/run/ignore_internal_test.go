@@ -20,7 +20,7 @@ func TestIgnore(t *testing.T) {
 	}
 	data := []struct {
 		name    string
-		ignored []string
+		ignored []*g2.IgnoredPackage
 		exp     []string
 	}{
 		{
@@ -29,32 +29,28 @@ func TestIgnore(t *testing.T) {
 		},
 		{
 			name:    "one ignored",
-			ignored: []string{"foo/bar"},
+			ignored: []*g2.IgnoredPackage{{Name: "foo/bar"}},
 			exp:     []string{"cli/cli", "baz/qux"},
 		},
 		{
 			name:    "a name nothing answers to",
-			ignored: []string{"not/here"},
+			ignored: []*g2.IgnoredPackage{{Name: "not/here"}},
 			exp:     []string{"cli/cli", "foo/bar", "baz/qux"},
 		},
 		{
-			name:    "a pattern",
-			ignored: []string{"baz/*"},
+			name:    "a regular expression",
+			ignored: []*g2.IgnoredPackage{{NameRegexp: "baz/.*"}},
 			exp:     []string{"cli/cli", "foo/bar"},
 		},
 		{
 			name:    "all of them",
-			ignored: []string{"cli/cli", "foo/bar", "baz/qux"},
+			ignored: []*g2.IgnoredPackage{{Name: "cli/cli"}, {Name: "foo/bar"}, {Name: "baz/qux"}},
 		},
 	}
 	for _, d := range data {
 		t.Run(d.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := &g2.RegistryConfig{}
-			for _, name := range d.ignored {
-				cfg.IgnoredPackages = append(cfg.IgnoredPackages, &g2.IgnoredPackage{Name: name})
-			}
-			got := ignore(slog.New(slog.DiscardHandler), candidates, cfg)
+			got := ignore(slog.New(slog.DiscardHandler), candidates, &g2.RegistryConfig{IgnoredPackages: d.ignored})
 			if len(got) != len(d.exp) {
 				t.Fatalf("ignore() kept %d, wanted %d", len(got), len(d.exp))
 			}

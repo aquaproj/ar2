@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"path"
 
 	gogithub "github.com/google/go-github/v92/github"
 	"go.yaml.in/yaml/v3"
@@ -85,30 +84,32 @@ func (b *Breadth) GetAttempts() int {
 	return b.Attempts
 }
 
-// Ignores says whether the registry leaves the package alone.
-//
-// A name in ignored_packages is a pattern as path.Match reads it, so one entry can leave
-// alone every package of an organization: aquasecurity/* for one whose IP allow list
-// refuses the API to the runners. * stops at a slash, as it does in a path, so it
-// doesn't reach aquasecurity/trivy/foo. A name with no wildcard is the package of that
-// name, which is all the list held before it took patterns. A pattern path.Match can't
-// read matches nothing but its own spelling, which is what it was before.
+// Ignores says whether the registry leaves the package alone: an entry names it, or its
+// name_regexp matches the whole name.
 func (c *RegistryConfig) Ignores(pkgName string) bool {
 	if c == nil {
 		return false
 	}
 	for _, pkg := range c.IgnoredPackages {
-		if pkg == nil || pkg.Name == "" {
-			continue
-		}
-		if pkg.Name == pkgName {
-			return true
-		}
-		if ok, err := path.Match(pkg.Name, pkgName); err == nil && ok {
+		if pkg != nil && pkg.matches(pkgName) {
 			return true
 		}
 	}
 	return false
+}
+
+// validate refuses an expression that doesn't compile. Passing over the entry instead
+// would quietly start generating every package it was written to leave alone.
+func (c *RegistryConfig) validate() error {
+	for _, pkg := range c.IgnoredPackages {
+		if pkg == nil {
+			continue
+		}
+		if err := pkg.compile(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RegistryConfig returns the registry's configuration, or an empty one when the
@@ -129,6 +130,9 @@ func (c *Client) RegistryConfig(ctx context.Context, ref string) (*RegistryConfi
 	cfg := &RegistryConfig{}
 	if err := yaml.Unmarshal([]byte(body), cfg); err != nil {
 		return nil, fmt.Errorf("read the registry configuration as YAML: %w", err)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

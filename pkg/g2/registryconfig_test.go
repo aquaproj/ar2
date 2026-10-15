@@ -31,25 +31,25 @@ ignored_packages:
 		},
 		{
 			// An organization whose IP allow list refuses the API to the runners: every
-			// package of it is left alone by one entry.
+			// package of it is left alone by one entry. The expression is anchored, so it
+			// is about where the name starts.
 			name: "every package of an organization",
 			content: `
 ignored_packages:
-  - name: aquasecurity/*
+  - name_regexp: aquasecurity/.*
 `,
-			ignored: []string{"aquasecurity/trivy", "aquasecurity/tfsec"},
-			kept:    []string{"aquasecurity/trivy/foo", "aquasecurity", "cli/cli"},
+			ignored: []string{"aquasecurity/trivy", "aquasecurity/trivy/foo"},
+			kept:    []string{"aquasecurity", "foo/aquasecurity/trivy", "cli/cli"},
 		},
 		{
-			// A pattern path.Match can't read still leaves alone the package of its
-			// own spelling, which is what it did before the list took patterns.
-			name: "a malformed pattern",
+			// A name is matched exactly, so its dots are dots.
+			name: "a name with dots",
 			content: `
 ignored_packages:
-  - name: foo/[bar
+  - name: golang.org/x/tools
 `,
-			ignored: []string{"foo/[bar"},
-			kept:    []string{"foo/bar"},
+			ignored: []string{"golang.org/x/tools"},
+			kept:    []string{"golangxorg/x/tools"},
 		},
 		{
 			name:    "nothing to leave alone",

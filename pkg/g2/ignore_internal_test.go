@@ -117,3 +117,17 @@ func TestIgnorePackage_keyInsideAReason(t *testing.T) {
 		t.Errorf("the entry went somewhere else:\n%s", got)
 	}
 }
+
+// An expression that doesn't compile is refused when the configuration is read. Passing
+// over it would start generating every package it was written to leave alone.
+func TestRegistryConfig_validate(t *testing.T) {
+	t.Parallel()
+	cfg := &RegistryConfig{IgnoredPackages: []*IgnoredPackage{{NameRegexp: "aquasecurity/["}}}
+	if err := cfg.validate(); err == nil {
+		t.Fatal("an expression that doesn't compile was accepted")
+	}
+	cfg = &RegistryConfig{IgnoredPackages: []*IgnoredPackage{{Name: "foo/bar"}, {NameRegexp: "aquasecurity/.*"}}}
+	if err := cfg.validate(); err != nil {
+		t.Fatal(err)
+	}
+}
