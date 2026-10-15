@@ -7,7 +7,7 @@ files:
 overrides:
   # The musl build's name doesn't say musl, so nothing but this says which build it is.
   - goos: linux
-    asset: pnpm-alpine-{{.Arch}}.{{.Format}}
+    asset: pnpm-linuxstatic-{{.Arch}}.{{.Format}}
     variants:
       - key: libc
         value: musl

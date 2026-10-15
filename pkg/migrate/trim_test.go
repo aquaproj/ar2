@@ -51,15 +51,21 @@ func TestConfig_replacementsAllKnown(t *testing.T) {
 // change nothing, so an override carrying only those says nothing here. aqua-registry
 // writes one first so that an aqua too old to know variants matches it and stays on the
 // asset it always had; nothing reading this registry is that old. A variant's asset whose
-// name says musl says nothing either: the generator reads the libc off the name.
+// name says musl, or Alpine Linux, which is built on musl, says nothing either: the
+// generator reads the libc off the name.
 func TestConfig_conditionOnlyOverride(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config("cli/cli", pnpm("pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}"), nil)
-	if len(cfg.VersionOverrides) == 0 {
-		t.Fatal("got no version_overrides")
-	}
-	if overrides := cfg.VersionOverrides[0].Overrides; len(overrides) != 0 {
-		t.Fatalf("got %d overrides, want none:\n%+v", len(overrides), overrides)
+	for _, asset := range []string{"pnpm-{{.OS}}-{{.Arch}}-musl.{{.Format}}", "pnpm-alpine-{{.Arch}}.{{.Format}}"} {
+		t.Run(asset, func(t *testing.T) {
+			t.Parallel()
+			cfg, _ := migrate.Config("cli/cli", pnpm(asset), nil)
+			if len(cfg.VersionOverrides) == 0 {
+				t.Fatal("got no version_overrides")
+			}
+			if overrides := cfg.VersionOverrides[0].Overrides; len(overrides) != 0 {
+				t.Fatalf("got %d overrides, want none:\n%+v", len(overrides), overrides)
+			}
+		})
 	}
 }
 
@@ -69,7 +75,7 @@ func TestConfig_conditionOnlyOverride(t *testing.T) {
 // asset named here.
 func TestConfig_unreadableVariant(t *testing.T) {
 	t.Parallel()
-	cfg, _ := migrate.Config("cli/cli", pnpm("pnpm-alpine-{{.Arch}}.{{.Format}}"), nil)
+	cfg, _ := migrate.Config("cli/cli", pnpm("pnpm-linuxstatic-{{.Arch}}.{{.Format}}"), nil)
 	if len(cfg.VersionOverrides) == 0 {
 		t.Fatal("got no version_overrides")
 	}
@@ -77,7 +83,7 @@ func TestConfig_unreadableVariant(t *testing.T) {
 	if len(overrides) != 1 {
 		t.Fatalf("got %d overrides, want the one that says something:\n%+v", len(overrides), overrides)
 	}
-	if got := overrides[0].Asset; got != "pnpm-alpine-{{.Arch}}.{{.Format}}" {
+	if got := overrides[0].Asset; got != "pnpm-linuxstatic-{{.Arch}}.{{.Format}}" {
 		t.Errorf("the asset is %q, want the musl one", got)
 	}
 	if got := overrides[0].Format; got != "tar.gz" {
