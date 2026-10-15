@@ -84,18 +84,32 @@ func (b *Breadth) GetAttempts() int {
 	return b.Attempts
 }
 
-// Ignored returns the names to leave alone, as a set.
-func (c *RegistryConfig) Ignored() map[string]struct{} {
+// Ignores says whether the registry leaves the package alone: an entry names it, or its
+// name_regexp matches the whole name.
+func (c *RegistryConfig) Ignores(pkgName string) bool {
 	if c == nil {
-		return nil
+		return false
 	}
-	ignored := make(map[string]struct{}, len(c.IgnoredPackages))
 	for _, pkg := range c.IgnoredPackages {
-		if pkg != nil && pkg.Name != "" {
-			ignored[pkg.Name] = struct{}{}
+		if pkg != nil && pkg.matches(pkgName) {
+			return true
 		}
 	}
-	return ignored
+	return false
+}
+
+// validate refuses an expression that doesn't compile. Passing over the entry instead
+// would quietly start generating every package it was written to leave alone.
+func (c *RegistryConfig) validate() error {
+	for _, pkg := range c.IgnoredPackages {
+		if pkg == nil {
+			continue
+		}
+		if err := pkg.compile(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RegistryConfig returns the registry's configuration, or an empty one when the
@@ -116,6 +130,9 @@ func (c *Client) RegistryConfig(ctx context.Context, ref string) (*RegistryConfi
 	cfg := &RegistryConfig{}
 	if err := yaml.Unmarshal([]byte(body), cfg); err != nil {
 		return nil, fmt.Errorf("read the registry configuration as YAML: %w", err)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }
