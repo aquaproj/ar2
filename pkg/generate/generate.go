@@ -104,7 +104,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// another has the old one dropped and the new one read off the same asset list.
 	dropUnpublished(logger, reg, rel.names)
 	declared := signingKinds(reg)
-	inferSLSA(reg, base, rel.names)
+	g.inferProvenance(ctx, logger, input, base, reg, rel.names)
 	out := &Generated{Registry: reg, Left: left}
 	defer func() { out.Inferred = inferredKinds(declared, reg) }()
 	// What is inferred about signing is GitHub's: the identity it assumes is a
@@ -118,6 +118,24 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		out.ChecksumFiles = g.signedChecksumFiles(ctx, logger, input, rel.names)
 	}
 	return out, nil
+}
+
+// inferProvenance records how the provenance the release publishes is verified, reading
+// what each one is. A release on an instance isn't read: a provenance there names no
+// builder GitHub's verifiers trust.
+func (g *Generator) inferProvenance(ctx context.Context, logger *slog.Logger, input *Input, base *aquaregistry.PackageInfo, reg *Registry, names map[string]struct{}) {
+	owner, name, err := repoOf(input, base)
+	if OnInstance(base) || err != nil {
+		inferSLSA(reg, base, names, slsaOnly)
+		return
+	}
+	inferSLSA(reg, base, names, g.newProvenances(ctx, logger, owner, name, input.Version).of)
+}
+
+// slsaOnly takes every provenance for SLSA's, which is what was assumed of them before they
+// were read.
+func slsaOnly(string) provenanceInfo {
+	return provenanceInfo{kind: provenanceSLSA}
 }
 
 // Generated is what generating a version comes to.

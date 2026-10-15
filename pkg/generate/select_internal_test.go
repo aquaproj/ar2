@@ -111,7 +111,7 @@ func TestInferSLSA(t *testing.T) {
 	}
 
 	reg := entries()
-	inferSLSA(reg, nil, names("foo-linux-amd64.tar.gz", "foo-linux-amd64.tar.gz.intoto.jsonl", "foo-darwin-arm64.tar.gz", "multiple.intoto.jsonl"))
+	inferSLSA(reg, nil, names("foo-linux-amd64.tar.gz", "foo-linux-amd64.tar.gz.intoto.jsonl", "foo-darwin-arm64.tar.gz", "multiple.intoto.jsonl"), slsaOnly)
 	want := map[string]string{
 		"linux/amd64":  "foo-linux-amd64.tar.gz.intoto.jsonl",
 		"darwin/arm64": "multiple.intoto.jsonl",
@@ -122,7 +122,7 @@ func TestInferSLSA(t *testing.T) {
 
 	reg = entries()
 	inferSLSA(reg, &aquaregistry.PackageInfo{SLSAProvenance: &aquaregistry.SLSAProvenance{Enabled: new(false)}},
-		names("foo-linux-amd64.tar.gz.intoto.jsonl", "multiple.intoto.jsonl"))
+		names("foo-linux-amd64.tar.gz.intoto.jsonl", "multiple.intoto.jsonl"), slsaOnly)
 	if got := provenances(reg); len(got) != 0 {
 		t.Errorf("the definition says the provenance can't be verified and the inference made a claim: %v", got)
 	}
