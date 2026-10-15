@@ -5,6 +5,7 @@ const (
 	KindSLSAProvenance = "slsa_provenance"
 	KindCosign         = "cosign"
 	KindPackslip       = "packslip"
+	KindAttestations   = "github_artifact_attestations"
 )
 
 // signingKinds is the kinds of signing some entry of the file carries.
@@ -19,6 +20,9 @@ func signingKinds(reg *Registry) map[string]bool {
 		}
 		if asset.Packslip != nil {
 			kinds[KindPackslip] = true
+		}
+		if asset.GitHubArtifactAttestations != nil {
+			kinds[KindAttestations] = true
 		}
 	}
 	return kinds
@@ -50,6 +54,8 @@ func DropSigning(reg *Registry, kind string) {
 			asset.Cosign = nil
 		case KindPackslip:
 			asset.Packslip = nil
+		case KindAttestations:
+			asset.GitHubArtifactAttestations = nil
 		}
 	}
 }

@@ -4,3 +4,7 @@ intoto = "intoto"
 typ = "typ"
 # A GitHub account name that appears in the package-name encoding examples.
 rin = "rin"
+
+[files]
+# A provenance published by a release, kept as it was published. Its base64 isn't prose.
+extend-exclude = ["pkg/generate/testdata/*.intoto.jsonl"]
