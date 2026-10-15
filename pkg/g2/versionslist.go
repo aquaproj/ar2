@@ -333,3 +333,59 @@ func (c *Client) VersionsPullRequest(ctx context.Context) (*gogithub.PullRequest
 func (c *Client) CreateVersionsPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error) {
 	return c.CreatePullRequestFrom(ctx, logger, VersionsBranch, base, title, body)
 }
+
+// VersionsLists is what reading every package's list of versions asks of the repository.
+type VersionsLists interface {
+	// Subtrees is the directories two levels under the tree an expression names.
+	Subtrees(ctx context.Context, expression string) ([]string, error)
+	// OIDs is the sha of the object each expression names, keyed by the expression.
+	OIDs(ctx context.Context, expressions []string) (map[string]string, error)
+	// Blobs is the text of the file each expression names, keyed by the expression.
+	Blobs(ctx context.Context, logger *slog.Logger, expressions []string) (map[string]string, error)
+}
+
+// StaleVersionsLists returns the ids of the packages whose versions.json on the default
+// branch isn't the list of what their versions directory holds: one whose source isn't the
+// directory's sha, which is also one with versions and no list, one with a list and no
+// versions, and one whose list can't be read.
+//
+// It is asked of every package, from what the default branch holds rather than from what
+// changed, so nothing has to be remembered between runs: whichever runs next finds what
+// a run that didn't happen would have. Every package costs two objects, read a hundred to a
+// query, which is what reading the identities costs.
+func StaleVersionsLists(ctx context.Context, logger *slog.Logger, repo VersionsLists) ([]string, error) {
+	dirs, err := repo.Subtrees(ctx, DefaultBranch+":"+PackagesDir)
+	if err != nil {
+		return nil, fmt.Errorf("list the packages: %w", err)
+	}
+	ids := packageIDs(logger, dirs)
+	trees := make([]string, len(ids))
+	lists := make([]string, len(ids))
+	for i, id := range ids {
+		dir := DefaultBranch + ":" + PackageDir(id)
+		trees[i] = dir + "/" + aquag2.VersionDir
+		lists[i] = dir + "/" + aquag2.VersionsFileName
+	}
+	shas, err := repo.OIDs(ctx, trees)
+	if err != nil {
+		return nil, fmt.Errorf("read the versions directories: %w", err)
+	}
+	texts, err := repo.Blobs(ctx, logger, lists)
+	if err != nil {
+		return nil, fmt.Errorf("read the lists of versions: %w", err)
+	}
+	var stale []string
+	for i, id := range ids {
+		source := ""
+		if text, ok := texts[lists[i]]; ok {
+			source = "unreadable"
+			if list := readList(text); list != nil {
+				source = list.Source
+			}
+		}
+		if shas[trees[i]] != source {
+			stale = append(stale, id)
+		}
+	}
+	return stale, nil
+}
