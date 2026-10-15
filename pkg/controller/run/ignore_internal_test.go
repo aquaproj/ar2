@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/state"
 )
 
@@ -19,7 +20,7 @@ func TestIgnore(t *testing.T) {
 	}
 	data := []struct {
 		name    string
-		ignored map[string]struct{}
+		ignored []*g2.IgnoredPackage
 		exp     []string
 	}{
 		{
@@ -28,23 +29,28 @@ func TestIgnore(t *testing.T) {
 		},
 		{
 			name:    "one ignored",
-			ignored: map[string]struct{}{"foo/bar": {}},
+			ignored: []*g2.IgnoredPackage{{Name: "foo/bar"}},
 			exp:     []string{"cli/cli", "baz/qux"},
 		},
 		{
 			name:    "a name nothing answers to",
-			ignored: map[string]struct{}{"not/here": {}},
+			ignored: []*g2.IgnoredPackage{{Name: "not/here"}},
 			exp:     []string{"cli/cli", "foo/bar", "baz/qux"},
 		},
 		{
+			name:    "a regular expression",
+			ignored: []*g2.IgnoredPackage{{NameRegexp: "baz/.*"}},
+			exp:     []string{"cli/cli", "foo/bar"},
+		},
+		{
 			name:    "all of them",
-			ignored: map[string]struct{}{"cli/cli": {}, "foo/bar": {}, "baz/qux": {}},
+			ignored: []*g2.IgnoredPackage{{Name: "cli/cli"}, {Name: "foo/bar"}, {Name: "baz/qux"}},
 		},
 	}
 	for _, d := range data {
 		t.Run(d.name, func(t *testing.T) {
 			t.Parallel()
-			got := ignore(slog.New(slog.DiscardHandler), candidates, d.ignored)
+			got := ignore(slog.New(slog.DiscardHandler), candidates, &g2.RegistryConfig{IgnoredPackages: d.ignored})
 			if len(got) != len(d.exp) {
 				t.Fatalf("ignore() kept %d, wanted %d", len(got), len(d.exp))
 			}

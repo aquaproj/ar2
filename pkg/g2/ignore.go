@@ -2,18 +2,57 @@ package g2
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
-// IgnoredPackage is a package a run doesn't look at.
+// IgnoredPackage is a package a run doesn't look at, or a set of them.
 type IgnoredPackage struct {
-	Name string `yaml:"name"`
+	// Name is the package's name, exactly.
+	Name string `yaml:"name,omitempty"`
+	// NameRegexp is a regular expression the whole name has to match, for leaving alone
+	// every package of an organization with one entry: aquasecurity/.* for one whose IP
+	// allow list refuses the API to the runners. A run adds the packages aqua-registry
+	// gains to the order, so an entry for each would need another every time the
+	// organization gains one.
+	//
+	// It is a field of its own rather than a way of reading Name: a name is full of dots,
+	// and read as a regular expression every one of them would match any character.
+	NameRegexp string `yaml:"name_regexp,omitempty"`
 	// Reason is why, in prose. The next person to wonder why a package isn't in the
 	// registry reads this file and nothing else, so an entry without one says only
 	// that somebody decided something.
 	Reason string `yaml:"reason,omitempty"`
+
+	nameRegexp *regexp.Regexp
+}
+
+// compile reads NameRegexp, anchored at both ends: aquasecurity/.* is every package whose
+// name starts with aquasecurity/, not every one with aquasecurity/ somewhere in it.
+func (p *IgnoredPackage) compile() error {
+	if p.NameRegexp == "" || p.nameRegexp != nil {
+		return nil
+	}
+	re, err := regexp.Compile(`^(?:` + p.NameRegexp + `)$`)
+	if err != nil {
+		return fmt.Errorf("read name_regexp %q of ignored_packages: %w", p.NameRegexp, err)
+	}
+	p.nameRegexp = re
+	return nil
+}
+
+// matches says whether the entry is for the package. An expression that doesn't compile
+// matches nothing; reading the configuration is what refuses it.
+func (p *IgnoredPackage) matches(pkgName string) bool {
+	if p.Name != "" && p.Name == pkgName {
+		return true
+	}
+	if p.compile() != nil || p.nameRegexp == nil {
+		return false
+	}
+	return p.nameRegexp.MatchString(pkgName)
 }
 
 // IgnorePackage returns the registry's configuration with the package added to

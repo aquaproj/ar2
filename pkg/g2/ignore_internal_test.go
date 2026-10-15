@@ -54,9 +54,8 @@ func TestIgnorePackage_parses(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(got), cfg); err != nil {
 		t.Fatal(err)
 	}
-	ignored := cfg.Ignored()
 	for _, name := range []string{"foo/bar", "scenarigo/scenarigo"} {
-		if _, ok := ignored[name]; !ok {
+		if !cfg.Ignores(name) {
 			t.Errorf("%s isn't ignored:\n%s", name, got)
 		}
 	}
@@ -116,5 +115,19 @@ func TestIgnorePackage_keyInsideAReason(t *testing.T) {
 	}
 	if !strings.Contains(got, "ignored_packages:\n  - name: foo/bar") {
 		t.Errorf("the entry went somewhere else:\n%s", got)
+	}
+}
+
+// An expression that doesn't compile is refused when the configuration is read. Passing
+// over it would start generating every package it was written to leave alone.
+func TestRegistryConfig_validate(t *testing.T) {
+	t.Parallel()
+	cfg := &RegistryConfig{IgnoredPackages: []*IgnoredPackage{{NameRegexp: "aquasecurity/["}}}
+	if err := cfg.validate(); err == nil {
+		t.Fatal("an expression that doesn't compile was accepted")
+	}
+	cfg = &RegistryConfig{IgnoredPackages: []*IgnoredPackage{{Name: "foo/bar"}, {NameRegexp: "aquasecurity/.*"}}}
+	if err := cfg.validate(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -311,7 +311,7 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 func (c *Controller) candidates(logger *slog.Logger, input *Input, cfg *g2.RegistryConfig) []*Candidate {
 	// Dropped before the sweep, so that a repository nobody expects to answer isn't
 	// asked about either.
-	candidates := rejoin(logger, ignore(logger, order(input.State), cfg.Ignored()))
+	candidates := rejoin(logger, ignore(logger, order(input.State), cfg))
 	return only(logger, candidates, input.Packages)
 }
 
@@ -390,13 +390,13 @@ func rejoin(logger *slog.Logger, candidates []*Candidate) []*Candidate {
 // They are dropped before anything asks GitHub about them: a package is usually on
 // this list because its repository isn't there any more, and the sweep would spend a
 // request finding that out every half hour.
-func ignore(logger *slog.Logger, candidates []*Candidate, ignored map[string]struct{}) []*Candidate {
-	if len(ignored) == 0 {
+func ignore(logger *slog.Logger, candidates []*Candidate, cfg *g2.RegistryConfig) []*Candidate {
+	if cfg == nil || len(cfg.IgnoredPackages) == 0 {
 		return candidates
 	}
 	out := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if _, ok := ignored[candidate.Name]; ok {
+		if cfg.Ignores(candidate.Name) {
 			logger.Debug("the registry says to leave this package alone", "package", candidate.Name)
 			continue
 		}
