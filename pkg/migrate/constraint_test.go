@@ -164,7 +164,7 @@ func TestReverseVersionOverrides_keepsOrderWhenUnreadable(t *testing.T) {
 	t.Parallel()
 	in := []string{
 		`semver("<= 2.0.19")`,
-		`semver("<= 2.0.23") || Version == "v2.0.25"`,
+		`semver("<= 2.0.32") && semver(">= 2.0.30")`,
 		`"true"`,
 	}
 	got, unconverted := migrate.ReverseVersionOverrides(overrides(in...))
@@ -173,5 +173,89 @@ func TestReverseVersionOverrides_keepsOrderWhenUnreadable(t *testing.T) {
 	}
 	if len(unconverted) == 0 {
 		t.Error("the constraint that couldn't be read wasn't reported")
+	}
+}
+
+// An upper bound or'ed with the versions it also answers for is split in two: the bound
+// joins the chain, and the versions are lifted out as an entry naming them is. Both keep
+// what the entry says. containers/conmon writes semver("<= 2.0.23") || Version == "v2.0.25".
+func TestReverseVersionOverrides_boundOrNames(t *testing.T) {
+	t.Parallel()
+	got, unconverted := migrate.ReverseVersionOverrides(overrides(
+		`semver("<= 2.0.19")`,
+		`semver("<= 2.0.23") || Version == "v2.0.25"`,
+		`"true"`,
+	))
+	want := []string{`Version == "v2.0.25"`, `semver("> 2.0.23")`, `semver("> 2.0.19")`, `semver("<= 2.0.19")`}
+	if diff := cmp.Diff(want, constraints(got)); diff != "" {
+		t.Errorf("the constraints are wrong (-want +got):\n%s", diff)
+	}
+	if len(unconverted) != 0 {
+		t.Errorf("got %v as unconverted, want none", unconverted)
+	}
+	// The lifted versions are answered by the entry they were written in.
+	if got[0].Asset != `semver("<= 2.0.23") || Version == "v2.0.25"` {
+		t.Errorf("the lifted entry says %q", got[0].Asset)
+	}
+}
+
+// A version named by an entry that one above it already answers for in v1 is that one's,
+// and lifting the names would take it, so the entry stays where it is.
+func TestReverseVersionOverrides_namesAnsweredAbove(t *testing.T) {
+	t.Parallel()
+	in := []string{
+		`semver("<= 3.0.0")`,
+		`semver("<= 4.0.0") || Version == "v2.0.0"`,
+		`"true"`,
+	}
+	got, unconverted := migrate.ReverseVersionOverrides(overrides(in...))
+	if diff := cmp.Diff(in, constraints(got)); diff != "" {
+		t.Errorf("the entries were reordered (-want +got):\n%s", diff)
+	}
+	if len(unconverted) == 0 {
+		t.Error("the constraint that couldn't be split wasn't reported")
+	}
+}
+
+// A list of versions names versions, as Version == does: k3d-io/k3d's
+// Version in ["v3.0.0-syntax.0", "v4.1.0-alpha.2"].
+func TestReverseVersionOverrides_versionIn(t *testing.T) {
+	t.Parallel()
+	got, unconverted := migrate.ReverseVersionOverrides(overrides(
+		`Version in ["v3.0.0-syntax.0", "v4.1.0-alpha.2"]`,
+		`semver("<= 4.0.0")`,
+		`"true"`,
+	))
+	want := []string{`Version in ["v3.0.0-syntax.0", "v4.1.0-alpha.2"]`, `semver("> 4.0.0")`, `semver("<= 4.0.0")`}
+	if diff := cmp.Diff(want, constraints(got)); diff != "" {
+		t.Errorf("the constraints are wrong (-want +got):\n%s", diff)
+	}
+	if len(unconverted) != 0 {
+		t.Errorf("got %v as unconverted, want none", unconverted)
+	}
+}
+
+// Floors written newest first are g2's order already, so they are kept as they are:
+// wasmerio/wasmer's semver(">= 7.2.0-alpha.2"), semver(">= 3.0.0-beta") and so on.
+func TestReverseVersionOverrides_descendingFloors(t *testing.T) {
+	t.Parallel()
+	in := []string{
+		`semver(">= 7.2.0-alpha.2")`,
+		`semver(">= 3.0.0-beta")`,
+		`Version == "v2.5.0"`,
+		`semver(">= 2.2.1")`,
+		`"true"`,
+	}
+	got, unconverted := migrate.ReverseVersionOverrides(overrides(in...))
+	if diff := cmp.Diff(in, constraints(got)); diff != "" {
+		t.Errorf("the entries were reordered (-want +got):\n%s", diff)
+	}
+	if len(unconverted) != 0 {
+		t.Errorf("got %v as unconverted, want none", unconverted)
+	}
+	// Floors out of order are not a list someone wrote newest first.
+	_, unconverted = migrate.ReverseVersionOverrides(overrides(`semver(">= 2.2.1")`, `semver(">= 3.0.0")`, `"true"`))
+	if len(unconverted) == 0 {
+		t.Error("floors out of order were taken for newest first")
 	}
 }
