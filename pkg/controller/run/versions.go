@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
+	"net/http"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -53,12 +53,15 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 		return c.tagVersions(ctx, pkg)
 	}
 
-	return c.releaseVersions(ctx, pkg, base)
+	return c.releaseVersions(ctx, pkg, base, def.prerelease())
 }
 
 // releaseVersions reads the package's releases, newest first, or its tags when its
 // versions needn't be releases and it has none.
-func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo) ([]string, error) {
+//
+// A draft is left out. A prerelease is kept when the definition asks for them or the
+// repository has published nothing else, the rule the sweep follows.
+func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo, prerelease bool) ([]string, error) {
 	// One page is enough: a run works on the newest versions, and the older ones are
 	// reached by later runs as the newest ones get recorded.
 	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
@@ -67,22 +70,66 @@ func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, ba
 		return nil, fmt.Errorf("list releases: %w", err)
 	}
 	if len(releases) == 0 && mayBeTagged(base) {
-		// The same rule as the sweep's: a tag written as a prerelease is left out,
-		// as a release marked as one is.
 		tags, err := c.tagVersions(ctx, pkg)
 		if err != nil {
 			return nil, err
 		}
-		return slices.DeleteFunc(tags, github.IsPrerelease), nil
+		return taggedVersions(tags, prerelease), nil
 	}
-	versions := make([]string, 0, len(releases))
+	found := foundReleases(releases)
+	if !found.Stable && len(releases) == versionsPerPage {
+		// A page of prereleases says nothing about the releases on the next one.
+		stable, err := c.hasStableRelease(ctx, pkg)
+		if err != nil {
+			return nil, err
+		}
+		found.Stable = stable
+	}
+	return found.Pick(prerelease), nil
+}
+
+// foundReleases reads the versions out of a page of releases, leaving out the drafts.
+func foundReleases(releases []*gogithub.RepositoryRelease) *github.Found {
+	found := &github.Found{Prereleases: map[string]struct{}{}}
 	for _, release := range releases {
-		if release.GetDraft() || release.GetPrerelease() {
+		if release.GetDraft() {
 			continue
 		}
-		versions = append(versions, release.GetTagName())
+		found.Versions = append(found.Versions, release.GetTagName())
+		if release.GetPrerelease() {
+			found.Prereleases[release.GetTagName()] = struct{}{}
+			continue
+		}
+		found.Stable = true
 	}
-	return versions, nil
+	return found
+}
+
+// hasStableRelease says whether the repository has published a release that is neither a
+// draft nor a prerelease, which is what GitHub calls its latest release.
+func (c *Controller) hasStableRelease(ctx context.Context, pkg *state.Package) (bool, error) {
+	_, resp, err := c.gh.Repositories.GetLatestRelease(ctx, pkg.RepoOwner, pkg.RepoName)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return false, nil
+		}
+		return false, fmt.Errorf("get the latest release: %w", err)
+	}
+	return true, nil
+}
+
+// taggedVersions is the tags of a package that has no release: a tag written as a
+// prerelease is left out unless the definition asks for them or every tag is one.
+func taggedVersions(tags []string, prerelease bool) []string {
+	found := &github.Found{Versions: tags, Prereleases: map[string]struct{}{}}
+	for _, tag := range tags {
+		if github.IsPrerelease(tag) {
+			found.Prereleases[tag] = struct{}{}
+			continue
+		}
+		found.Stable = true
+	}
+	return found.Pick(prerelease)
 }
 
 // tagVersions reads the package's tags, newest first.

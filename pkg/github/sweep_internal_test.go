@@ -10,12 +10,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// A draft isn't public and a prerelease isn't what a registry offers, which is the
-// same rule the REST path applies.
+// A draft isn't public, so it is no version. A prerelease is one, marked as one, and the
+// latest release says whether the repository has published anything else.
 func TestReleaseVersions(t *testing.T) {
 	t.Parallel()
 	r := &repository{}
-	if err := json.Unmarshal([]byte(`{"releases":{"nodes":[
+	if err := json.Unmarshal([]byte(`{"latestRelease":{"tagName":"v3.0.0"},"releases":{"nodes":[
 		{"tagName":"v3.0.0","isDraft":false,"isPrerelease":false},
 		{"tagName":"v3.0.0-rc.1","isDraft":false,"isPrerelease":true},
 		{"tagName":"v2.9.0","isDraft":true,"isPrerelease":false},
@@ -23,45 +23,106 @@ func TestReleaseVersions(t *testing.T) {
 	]}}`), r); err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff([]string{"v3.0.0", "v2.8.0"}, releaseVersions(r)); diff != "" {
+	want := &Found{
+		Versions:    []string{"v3.0.0", "v3.0.0-rc.1", "v2.8.0"},
+		Prereleases: map[string]struct{}{"v3.0.0-rc.1": {}},
+		Stable:      true,
+	}
+	if diff := cmp.Diff(want, releaseVersions(r)); diff != "" {
 		t.Errorf("the versions are wrong (-want +got):\n%s", diff)
 	}
 }
 
-// A repository whose alias wasn't answered has no releases to read, which is not
+// A repository whose alias wasn't answered has no versions to read, which is not
 // something to trip over.
 func TestReleaseVersions_nothingAnswered(t *testing.T) {
 	t.Parallel()
-	if got := releaseVersions(&repository{}); got != nil {
+	if got := releaseVersions(&repository{}).Versions; got != nil {
 		t.Errorf("got %v, want nothing", got)
 	}
-	if got := tagNames(&repository{}); got != nil {
+	if got := tagNames(&repository{}).Versions; got != nil {
 		t.Errorf("got %v, want nothing", got)
 	}
 }
 
-// A repository with no release is read by its tags, leaving out the ones written as a
-// prerelease; one with releases is read by them, even when they are all prereleases.
+// The prereleases are picked when the package asks for them or the repository has
+// published nothing else, and left out otherwise.
+func TestFound_Pick(t *testing.T) {
+	t.Parallel()
+	pre := map[string]struct{}{"v2.0.0-rc.1": {}}
+	for _, d := range []struct {
+		name       string
+		found      *Found
+		prerelease bool
+		want       []string
+	}{
+		{
+			name:  "a release beside them",
+			found: &Found{Versions: []string{"v2.0.0-rc.1", "v1.0.0"}, Prereleases: pre, Stable: true},
+			want:  []string{"v1.0.0"},
+		},
+		{
+			name:       "the package asks for them",
+			found:      &Found{Versions: []string{"v2.0.0-rc.1", "v1.0.0"}, Prereleases: pre, Stable: true},
+			prerelease: true,
+			want:       []string{"v2.0.0-rc.1", "v1.0.0"},
+		},
+		{
+			name:  "nothing but prereleases",
+			found: &Found{Versions: []string{"v2.0.0-rc.1"}, Prereleases: pre},
+			want:  []string{"v2.0.0-rc.1"},
+		},
+		{
+			// Not a repository with no version: one that wasn't read.
+			name: "nothing found",
+		},
+	} {
+		t.Run(d.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(d.want, d.found.Pick(d.prerelease)); diff != "" {
+				t.Errorf("(-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// A repository with no release is read by its tags, and one written as a prerelease is
+// marked as one; one with releases is read by them.
 func TestReleasesOrTags(t *testing.T) {
 	t.Parallel()
 	for _, d := range []struct {
 		name string
 		body string
-		want []string
+		want *Found
 	}{
 		{
 			name: "no release",
 			body: `{"releases":{"nodes":[]},"refs":{"nodes":[
-				{"name":"v4.3.0-rc2"},{"name":"v4.2.0"},{"name":"v4.1.1"},{"name":"stable"}
+				{"name":"v4.3.0-rc2"},{"name":"v4.2.0"},{"name":"stable"}
 			]}}`,
-			want: []string{"v4.2.0", "v4.1.1", "stable"},
+			want: &Found{
+				Versions:    []string{"v4.3.0-rc2", "v4.2.0", "stable"},
+				Prereleases: map[string]struct{}{"v4.3.0-rc2": {}},
+				Stable:      true,
+			},
+		},
+		{
+			name: "no release, and every tag a prerelease",
+			body: `{"releases":{"nodes":[]},"refs":{"nodes":[{"name":"v0.1.0-alpha"}]}}`,
+			want: &Found{
+				Versions:    []string{"v0.1.0-alpha"},
+				Prereleases: map[string]struct{}{"v0.1.0-alpha": {}},
+			},
 		},
 		{
 			name: "releases",
 			body: `{"releases":{"nodes":[
 				{"tagName":"v2.0.0-rc.1","isPrerelease":true}
 			]},"refs":{"nodes":[{"name":"v1.0.0"}]}}`,
-			want: []string{},
+			want: &Found{
+				Versions:    []string{"v2.0.0-rc.1"},
+				Prereleases: map[string]struct{}{"v2.0.0-rc.1": {}},
+			},
 		},
 	} {
 		t.Run(d.name, func(t *testing.T) {
@@ -86,6 +147,7 @@ func TestSelections(t *testing.T) {
 		"repository(owner: $r0o, name: $r0n)",
 		"releases(first: 10, orderBy: {field: CREATED_AT, direction: DESC})",
 		"nodes { tagName isDraft isPrerelease }",
+		"latestRelease { tagName }",
 		"nameWithOwner",
 	} {
 		if !strings.Contains(rel, want) {
@@ -137,10 +199,14 @@ func TestClient_Versions_renamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Keyed by the name that was asked for, throughout.
+	versions := map[string][]string{}
+	for repo, found := range got.Versions {
+		versions[repo] = found.Versions
+	}
 	if diff := cmp.Diff(map[string][]string{
 		"sst/opencode": {"v1.0.0"},
 		"cli/cli":      {"v2.1.0"},
-	}, got.Versions); diff != "" {
+	}, versions); diff != "" {
 		t.Errorf("the versions are wrong (-want +got):\n%s", diff)
 	}
 	// Only the one that answers to another name is named, so the caller has the list

@@ -25,8 +25,8 @@ const SweepDepth = 10
 // Sweep is what one look at the registry's repositories found, keyed throughout by the
 // name that was asked for.
 type Sweep struct {
-	// Versions is the newest versions of each repository, newest first.
-	Versions map[string][]string
+	// Versions is the newest versions of each repository.
+	Versions map[string]*Found
 	// Names is what each repository is called now. It differs from the key when the
 	// repository has been renamed or transferred since the registry recorded it:
 	// GitHub answers a query made with the old name and says which name it answered
@@ -38,6 +38,40 @@ type Sweep struct {
 	IDs map[string]int64
 	// Reasons says why a repository couldn't be read.
 	Reasons map[string]string
+}
+
+// Found is what a sweep read of one repository's versions.
+type Found struct {
+	// Versions are the newest versions, newest first, prereleases among them. A draft
+	// isn't public, so it is none of them.
+	Versions []string
+	// Prereleases are the ones among Versions that are prereleases: a release marked as
+	// one, or a tag written as one.
+	Prereleases map[string]struct{}
+	// Stable says the repository has published something other than a prerelease,
+	// whether or not it is among Versions.
+	Stable bool
+}
+
+// Pick is the versions a package is generated for: all of them when it asks for its
+// prereleases or has never published anything else, and the others when it hasn't.
+//
+// A project that publishes nothing but prereleases has nothing else to install, and
+// leaving them out left it with no version at all.
+func (f *Found) Pick(prerelease bool) []string {
+	if f == nil {
+		return nil
+	}
+	if prerelease || !f.Stable {
+		return slices.Clone(f.Versions)
+	}
+	out := make([]string, 0, len(f.Versions))
+	for _, v := range f.Versions {
+		if _, ok := f.Prereleases[v]; !ok {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Versions returns the newest versions of each repository, newest first, and why any
@@ -59,20 +93,24 @@ func (c *Client) Versions(ctx context.Context, repos []Repo) (*Sweep, error) {
 
 // releaseVersions reads the versions out of a repository's releases.
 //
-// A draft isn't public and a prerelease isn't what a registry offers, which is the
-// same rule the REST path applies.
-func releaseVersions(r *repository) []string {
+// Whether the repository has published anything but prereleases is its latest release:
+// GitHub's answer leaves out drafts and prereleases, and looks at every release rather
+// than at the ones a sweep reads.
+func releaseVersions(r *repository) *Found {
+	found := &Found{Prereleases: map[string]struct{}{}, Stable: r.LatestRelease != nil}
 	if r.Releases == nil {
-		return nil
+		return found
 	}
-	versions := make([]string, 0, len(r.Releases.Nodes))
 	for _, node := range r.Releases.Nodes {
-		if node.IsDraft || node.IsPrerelease {
+		if node.IsDraft {
 			continue
 		}
-		versions = append(versions, node.TagName)
+		found.Versions = append(found.Versions, node.TagName)
+		if node.IsPrerelease {
+			found.Prereleases[node.TagName] = struct{}{}
+		}
 	}
-	return versions
+	return found
 }
 
 // Tags returns the newest tags of each repository, newest first.
@@ -85,7 +123,15 @@ func (c *Client) Tags(ctx context.Context, repos []Repo) (*Sweep, error) {
 }
 
 // tagNames reads the names out of a repository's tags.
-func tagNames(r *repository) []string {
+//
+// A package whose versions aqua-registry says are its tags says which of them are versions
+// with its version_filter, so none of them is told apart as a prerelease here.
+func tagNames(r *repository) *Found {
+	return &Found{Versions: tagList(r), Stable: true}
+}
+
+// tagList is the names of a repository's tags, newest first.
+func tagList(r *repository) []string {
 	if r.Refs == nil {
 		return nil
 	}
@@ -113,12 +159,21 @@ func (c *Client) ReleasesOrTags(ctx context.Context, repos []Repo) (*Sweep, erro
 }
 
 // releasesOrTags reads the versions out of a repository's releases, or out of its tags
-// when it has no release.
-func releasesOrTags(r *repository) []string {
+// when it has no release. A tag is a prerelease when it is written as one, and the
+// repository has published something else when one of its tags isn't.
+func releasesOrTags(r *repository) *Found {
 	if r.Releases != nil && len(r.Releases.Nodes) != 0 {
 		return releaseVersions(r)
 	}
-	return slices.DeleteFunc(tagNames(r), IsPrerelease)
+	found := &Found{Versions: tagList(r), Prereleases: map[string]struct{}{}}
+	for _, tag := range found.Versions {
+		if IsPrerelease(tag) {
+			found.Prereleases[tag] = struct{}{}
+			continue
+		}
+		found.Stable = true
+	}
+	return found
 }
 
 // IsPrerelease says whether a tag is written as a prerelease of a version: v4.3.0-rc2.
@@ -129,9 +184,9 @@ func IsPrerelease(tag string) bool {
 }
 
 // sweep asks the same thing about every repository, fifty at a time.
-func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read func(*repository) []string) (*Sweep, error) {
+func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read func(*repository) *Found) (*Sweep, error) {
 	out := &Sweep{
-		Versions: make(map[string][]string, len(repos)),
+		Versions: make(map[string]*Found, len(repos)),
 		Names:    map[string]string{},
 		IDs:      make(map[string]int64, len(repos)),
 		Reasons:  map[string]string{},
@@ -162,13 +217,13 @@ func (c *Client) sweep(ctx context.Context, repos []Repo, sel selection, read fu
 
 func releases(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
-		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
+		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId latestRelease { tagName } releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } }",
 		ownerVar, nameVar, SweepDepth)
 }
 
 func releasesAndTags(ownerVar, nameVar string) string {
 	return fmt.Sprintf(
-		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
+		"repository(owner: $%s, name: $%s) { nameWithOwner databaseId latestRelease { tagName } releases(first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft isPrerelease } } refs(refPrefix: \"refs/tags/\", first: %d, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } }",
 		ownerVar, nameVar, SweepDepth, SweepDepth)
 }
 

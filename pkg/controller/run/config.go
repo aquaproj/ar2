@@ -76,6 +76,11 @@ type definition struct {
 	unconverted []string
 }
 
+// prerelease says the definition asks for the package's prereleases.
+func (d *definition) prerelease() bool {
+	return d != nil && d.config != nil && d.config.Prerelease
+}
+
 // resolveDefinition returns the definition to generate from: the one on the package's
 // branch, or the one converted from aqua-registry when the branch has none.
 //

@@ -281,7 +281,7 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 
 // todo says what this package needs doing, and on which versions. workNone is
 // everything the run passes over without asking anything about it.
-func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, moved map[string]struct{}, swept map[string][]string, now time.Time) (work, []string) {
+func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, moved map[string]struct{}, swept map[string]*github.Found, now time.Time) (work, []string) {
 	if _, ok := moved[candidate.Name]; ok {
 		// Its branch is under another name now, and so is what the state says about
 		// it. Generating here would generate under a name nothing holds.
@@ -297,7 +297,10 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 			return workNone, nil
 		}
 	}
-	versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName]
+	// The prereleases count only for a package that wants them, so a project tagging a
+	// release candidate doesn't make every package of it look as though it had
+	// something new.
+	versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName].Pick(candidate.Package.Prerelease)
 	todo := decide(candidate.Package, versions, now)
 	if todo == workNone {
 		// The newest versions upstream are the ones the registry holds, and its
@@ -448,6 +451,8 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if err := c.checkRepoID(def, pkg.RepoOwner+"/"+pkg.RepoName); err != nil {
 		return 0, 0, err
 	}
+	// Remembered for the sweep, which picks the versions before any definition is read.
+	pkg.Prerelease = def.prerelease()
 
 	versions, err := c.candidateVersions(ctx, logger, input, candidate, def, todo, swept)
 	if err != nil {
@@ -460,7 +465,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	// What the registry holds is the only thing that says a package is done with,
 	// and it is recorded after asking rather than after opening a pull request.
 	done := settled(logger, def, candidate.Package, versions, existing)
-	record(candidate.Package, versions, done, todo)
+	record(candidate.Package, swept, versions, done, todo)
 
 	share, ok := c.shareOf(logger, def, candidate.Name, limitBudget(budget, existing, breadth), inFlight)
 	if !ok {

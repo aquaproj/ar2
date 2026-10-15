@@ -187,6 +187,7 @@ func versionEntry(logger *slog.Logger, version, content string) *aquag2.Version 
 		return entry
 	}
 	entry.PublishedAt = reg.PublishedAt
+	entry.Prerelease = reg.Prerelease
 	return entry
 }
 
