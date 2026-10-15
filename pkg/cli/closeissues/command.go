@@ -43,7 +43,8 @@ time it writes what it is about into the issue, as a record the rendered issue d
 This reads those records and asks the registry about each:
 
 - an environment left out is resolved once the version's registry.json covers it again --
-  ar2 regenerate puts it back -- or the version is no longer served at all
+  ar2 regenerate puts it back. A version that isn't served -- its pull request hasn't merged,
+  or it was taken out -- resolves nothing.
 - a version a check of integrity stopped is resolved once it is served
 
 An issue whose every record is resolved is commented on, saying what was, and closed. One
