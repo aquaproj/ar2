@@ -98,7 +98,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, ids []stri
 	graphql := github.NewClient(httpClient)
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	if len(ids) == 0 {
-		stale, err := g2.StaleVersionsLists(ctx, logger.Logger, graphql.Repository(args.G2Owner, args.G2Repo))
+		stale, err := registry.StaleVersionsLists(ctx, logger.Logger, graphql.Repository(args.G2Owner, args.G2Repo))
 		if err != nil {
 			return err //nolint:wrapcheck // the error says what it couldn't read
 		}
