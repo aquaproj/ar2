@@ -11,6 +11,7 @@ import (
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	genrgst "github.com/aquaproj/aqua/v2/pkg/controller/generate-registry"
 	"github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/github"
 )
 
 // Input holds the parameters of a single generation.
@@ -80,6 +81,9 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		if err != nil {
 			return nil, err
 		}
+		// No release is read for these, so a version is a prerelease by how its tag is
+		// written.
+		reg.Prerelease = github.IsPrerelease(input.Version)
 		return &Generated{Registry: reg}, nil
 	}
 
@@ -94,6 +98,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 	// What the release says about itself, which the version string doesn't: a reader
 	// asking whether a version is old enough to install has nothing else to ask.
 	reg.PublishedAt = rel.publishedAt
+	reg.Prerelease = rel.prerelease
 	overrideSigning(reg, base)
 	// Before the inference, so that a release which moved from one way of signing to
 	// another has the old one dropped and the new one read off the same asset list.
@@ -206,6 +211,8 @@ type release struct {
 	publishedAt string
 	// published is the same moment, as a time.
 	published time.Time
+	// prerelease says the release is marked as a prerelease.
+	prerelease bool
 }
 
 // release reads the release's asset list.
@@ -229,6 +236,7 @@ func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistr
 		names:       map[string]struct{}{},
 		publishedAt: publishedAt(rel.GetPublishedAt().Time),
 		published:   rel.GetPublishedAt().Time,
+		prerelease:  rel.GetPrerelease(),
 	}
 	for _, asset := range rel.Assets {
 		if asset.GetState() != assetStateUploaded {

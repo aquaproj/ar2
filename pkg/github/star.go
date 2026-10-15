@@ -129,7 +129,12 @@ type repository struct {
 	NameWithOwner string `json:"nameWithOwner"`
 	// DatabaseID is the repository's numeric id, which REST calls id.
 	DatabaseID int64 `json:"databaseId"`
-	Releases   *struct {
+	// LatestRelease is the newest release that is neither a draft nor a prerelease, and
+	// nil when the repository has published none.
+	LatestRelease *struct {
+		TagName string `json:"tagName"`
+	} `json:"latestRelease"`
+	Releases *struct {
 		Nodes []struct {
 			TagName      string `json:"tagName"`
 			IsDraft      bool   `json:"isDraft"`

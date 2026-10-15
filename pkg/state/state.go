@@ -177,6 +177,10 @@ type Package struct {
 	// project that stopped publishing builds and went on making releases doesn't spend a
 	// turn of every run finding that out again.
 	EmptyReleases []string `json:"empty_releases,omitempty"`
+	// Prerelease says the package's definition asks for its prereleases. The sweep reads
+	// it, since it decides which of a package's newest versions are new before the
+	// definition is read; a run that reads the definition writes it here.
+	Prerelease bool `json:"prerelease,omitempty"`
 }
 
 // Fingerprint reduces a sweep's versions to something worth storing for every

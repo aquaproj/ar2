@@ -87,7 +87,7 @@ func TestRecord(t *testing.T) {
 	versions := []string{"v2.0.0", "v1.0.0"}
 
 	held := &state.Package{}
-	record(held, versions, map[string]struct{}{"v2.0.0": {}, "v1.0.0": {}}, workSweep)
+	record(held, nil, versions, map[string]struct{}{"v2.0.0": {}, "v1.0.0": {}}, workSweep)
 	if !held.CaughtUp {
 		t.Error("the registry held every version and the package isn't caught up")
 	}
@@ -99,12 +99,43 @@ func TestRecord(t *testing.T) {
 	}
 
 	missing := &state.Package{}
-	record(missing, versions, map[string]struct{}{"v1.0.0": {}}, workDeep)
+	record(missing, nil, versions, map[string]struct{}{"v1.0.0": {}}, workDeep)
 	if missing.CaughtUp {
 		t.Error("a version the registry doesn't hold left the package caught up")
 	}
 	if missing.LastDeepCheck.IsZero() {
 		t.Error("walking the history wasn't recorded")
+	}
+}
+
+// What is fingerprinted is what the sweep found, which is what the next run compares it
+// with, rather than what was left after the version_filter.
+func TestRecord_swept(t *testing.T) {
+	t.Parallel()
+	swept := []string{"v2.0.0", "v2.0.0-nightly", "v1.0.0"}
+	pkg := &state.Package{}
+	record(pkg, swept, []string{"v2.0.0", "v1.0.0"}, map[string]struct{}{"v2.0.0": {}, "v1.0.0": {}}, workSweep)
+	if pkg.Versions != state.Fingerprint(swept) {
+		t.Error("the fingerprint isn't the sweep's")
+	}
+	if !pkg.CaughtUp {
+		t.Error("the package isn't caught up")
+	}
+}
+
+// A package with no release is read by its tags. One written as a prerelease is left out,
+// unless the package asks for them or every tag is one.
+func TestTaggedVersions(t *testing.T) {
+	t.Parallel()
+	tags := []string{"v4.3.0-rc2", "v4.2.0"}
+	if diff := cmp.Diff([]string{"v4.2.0"}, taggedVersions(tags, false)); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(tags, taggedVersions(tags, true)); diff != "" {
+		t.Errorf("asked for prereleases (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"v0.1.0-alpha"}, taggedVersions([]string{"v0.1.0-alpha"}, false)); diff != "" {
+		t.Errorf("nothing but prereleases (-want +got):\n%s", diff)
 	}
 }
 

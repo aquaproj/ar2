@@ -34,8 +34,8 @@ const deepCheckAge = 7 * 24 * time.Hour
 // It is one query per fifty packages and costs a point each, against a budget the
 // generating doesn't touch, so the whole registry is looked at every run rather than
 // whatever fraction of it a run's rate limit allowed.
-func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates []*Candidate, pkgInfos map[string]*aquaregistry.PackageInfo) (map[string][]string, map[string]string) {
-	byRepo := make(map[string][]string, len(candidates))
+func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates []*Candidate, pkgInfos map[string]*aquaregistry.PackageInfo) (map[string]*github.Found, map[string]string) {
+	byRepo := make(map[string]*github.Found, len(candidates))
 	renamed := map[string]string{}
 	releases, tags, either := splitBySource(candidates, pkgInfos)
 
@@ -241,8 +241,17 @@ func (c *Controller) candidateVersions(ctx context.Context, logger *slog.Logger,
 
 // record writes down what the registry turned out to hold, so the next run can tell
 // whether there is anything to do without asking.
-func record(pkg *state.Package, versions []string, existing map[string]struct{}, todo work) {
+//
+// What is fingerprinted is what the sweep found, when it found anything, since that is
+// what the next run compares it with. The versions this run worked on are those less the
+// ones the definition's version_filter leaves out, and a fingerprint of them never
+// matched a sweep that found one of those: the package was worked on every run for
+// nothing.
+func record(pkg *state.Package, swept, versions []string, existing map[string]struct{}, todo work) {
 	pkg.Versions = state.Fingerprint(versions)
+	if swept != nil {
+		pkg.Versions = state.Fingerprint(swept)
+	}
 	pkg.CaughtUp = true
 	for _, v := range versions {
 		if _, ok := existing[v]; !ok {
