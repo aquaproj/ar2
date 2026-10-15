@@ -37,7 +37,7 @@ const deepCheckAge = 7 * 24 * time.Hour
 func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates []*Candidate, pkgInfos map[string]*aquaregistry.PackageInfo) (map[string][]string, map[string]string) {
 	byRepo := make(map[string][]string, len(candidates))
 	renamed := map[string]string{}
-	releases, tags := splitBySource(candidates, pkgInfos)
+	releases, tags, either := splitBySource(candidates, pkgInfos)
 
 	for _, q := range []struct {
 		name  string
@@ -46,6 +46,7 @@ func (c *Controller) sweep(ctx context.Context, logger *slog.Logger, candidates 
 	}{
 		{"releases", releases, c.graphql.Versions},
 		{"tags", tags, c.graphql.Tags},
+		{"releases or tags", either, c.graphql.ReleasesOrTags},
 	} {
 		if len(q.repos) == 0 {
 			continue
@@ -159,20 +160,40 @@ func rename(pkgName, repo, to string) (string, bool) {
 }
 
 // splitBySource divides the candidates by where their versions are published.
-func splitBySource(candidates []*Candidate, pkgInfos map[string]*aquaregistry.PackageInfo) (releases, tags []github.Repo) {
+func splitBySource(candidates []*Candidate, pkgInfos map[string]*aquaregistry.PackageInfo) (releases, tags, either []github.Repo) {
 	for _, candidate := range candidates {
 		pkg := candidate.Package
 		if pkg.RepoOwner == "" || pkg.RepoName == "" {
 			continue
 		}
 		repo := github.Repo{Owner: pkg.RepoOwner, Name: pkg.RepoName}
-		if base := pkgInfos[candidate.Name]; base != nil && base.VersionSource == versionSourceTag {
+		base := pkgInfos[candidate.Name]
+		switch {
+		case base != nil && base.VersionSource == versionSourceTag:
 			tags = append(tags, repo)
-			continue
+		case mayBeTagged(base):
+			either = append(either, repo)
+		default:
+			releases = append(releases, repo)
 		}
-		releases = append(releases, repo)
 	}
-	return releases, tags
+	return releases, tags, either
+}
+
+// mayBeTagged says whether the package's versions needn't be releases: what it installs
+// isn't a release asset, so a project can tag a version without publishing a release for
+// it. apache/spark downloads from archive.apache.org and has no release on GitHub at all.
+// Its versions are its releases when it has any, and its tags when it has none.
+func mayBeTagged(base *aquaregistry.PackageInfo) bool {
+	if base == nil {
+		return false
+	}
+	switch base.Type {
+	case aquaregistry.PkgInfoTypeHTTP, aquaregistry.PkgInfoTypeGoInstall, aquaregistry.PkgInfoTypeGoBuild,
+		aquaregistry.PkgInfoTypeGitHubContent, aquaregistry.PkgInfoTypeGitHubArchive:
+		return true
+	}
+	return false
 }
 
 // work says what a run has to do about one package.

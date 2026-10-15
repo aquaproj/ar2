@@ -158,6 +158,10 @@ func (failingAutoMerger) Tags(_ context.Context, _ []github.Repo) (*github.Sweep
 	return &github.Sweep{}, nil
 }
 
+func (failingAutoMerger) ReleasesOrTags(_ context.Context, _ []github.Repo) (*github.Sweep, error) {
+	return &github.Sweep{}, nil
+}
+
 // ghClient is a client that is never called: these tests don't reach anything that
 // makes a request. It is a real one because the controller builds what it needs out
 // of it when it is created.
