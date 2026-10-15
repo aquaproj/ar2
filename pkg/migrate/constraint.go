@@ -10,10 +10,13 @@ package migrate
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
+	"github.com/aquaproj/aqua/v2/pkg/expr"
+	"github.com/hashicorp/go-version"
 )
 
 // ReverseVersionOverrides returns the overrides in g2's order.
@@ -45,6 +48,11 @@ import (
 func ReverseVersionOverrides(overrides []*aquaregistry.VersionOverride) ([]*aquaregistry.VersionOverride, []string) {
 	if len(overrides) == 0 {
 		return nil, nil
+	}
+	if descendingFloors(overrides) {
+		// Newest first already: each entry answers from its floor up, and the first
+		// that matches wins. That is g2's order, so there is nothing to derive.
+		return inOriginalOrder(overrides), nil
 	}
 	pinned, bounded, unconverted := partition(overrides)
 	if len(unconverted) > 0 {
@@ -105,6 +113,11 @@ func partition(overrides []*aquaregistry.VersionOverride) (pinned, bounded []*aq
 			bounded = append(bounded, vo)
 			continue
 		}
+		if bound, names, ok := splitBoundAndNames(vo); ok && !answeredAbove(names.VersionConstraints, overrides[:i]) {
+			bounded = append(bounded, bound)
+			pinned = append(pinned, names)
+			continue
+		}
 		pinned = append(pinned, vo)
 		if !namesAVersion(vo.VersionConstraints) {
 			unconverted = append(unconverted, vo.VersionConstraints)
@@ -121,7 +134,10 @@ func partition(overrides []*aquaregistry.VersionOverride) (pinned, bounded []*aq
 // else answers for: whatever else matches that version, this was written for it.
 func namesAVersion(constraint string) bool {
 	s := strings.TrimSpace(constraint)
-	if strings.HasPrefix(s, "Version ==") || strings.HasPrefix(s, "Version==") {
+	if strings.HasPrefix(s, "Version==") {
+		return true
+	}
+	if _, ok := namedVersions(s); ok {
 		return true
 	}
 	inner, ok := strings.CutPrefix(s, "semver(")
@@ -132,6 +148,144 @@ func namesAVersion(constraint string) bool {
 	inner = strings.Trim(inner, `"`)
 	return strings.HasPrefix(strings.TrimSpace(inner), "=") &&
 		!strings.HasPrefix(strings.TrimSpace(inner), "==")
+}
+
+// splitBoundAndNames splits an entry whose constraint is an upper bound or'ed with the
+// versions it also answers for -- zizmorcore/zizmor's
+// semver("<= 1.8.0-rc2") || Version in ["v1.12.0", "v1.13.0"] -- into the bound, which
+// joins the chain, and the versions, which are lifted out as the entries naming versions
+// are. Both keep what the entry says about the package.
+func splitBoundAndNames(vo *aquaregistry.VersionOverride) (*aquaregistry.VersionOverride, *aquaregistry.VersionOverride, bool) {
+	parts := orParts(vo.VersionConstraints)
+	if len(parts) == 1 {
+		return nil, nil, false
+	}
+	var bound string
+	names := make([]string, 0, len(parts)-1)
+	for _, part := range parts {
+		if _, ok := lowerBound(part); ok && bound == "" {
+			bound = part
+			continue
+		}
+		if !namesAVersion(part) {
+			return nil, nil, false
+		}
+		names = append(names, part)
+	}
+	if bound == "" {
+		return nil, nil, false
+	}
+	b, n := *vo, *vo
+	b.VersionConstraints = bound
+	n.VersionConstraints = strings.Join(names, " || ")
+	return &b, &n, true
+}
+
+// answeredAbove says whether an entry above already answers for one of the versions a
+// constraint names. v1 reads its entries top down, so that entry is the one the version
+// gets, and lifting the names to the top would take the version from it.
+func answeredAbove(names string, above []*aquaregistry.VersionOverride) bool {
+	logger := slog.New(slog.DiscardHandler)
+	for _, part := range orParts(names) {
+		versions, _ := namedVersions(part)
+		if answers(logger, versions, above) {
+			return true
+		}
+	}
+	return false
+}
+
+// answers says whether one of the entries answers for one of the versions.
+func answers(logger *slog.Logger, versions []string, entries []*aquaregistry.VersionOverride) bool {
+	for _, v := range versions {
+		for _, vo := range entries {
+			if ok, err := expr.EvaluateVersionConstraints(logger, vo.VersionConstraints, v, v); err != nil || ok {
+				// One that can't be evaluated may be the one that answers.
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// orParts splits a constraint at the ors at its top level: not inside a call, a list or a
+// string.
+func orParts(constraint string) []string {
+	var parts []string
+	depth, quoted, start := 0, false, 0
+	for i := 0; i < len(constraint); i++ {
+		c := constraint[i]
+		if c == '"' {
+			quoted = !quoted
+		}
+		if quoted {
+			continue
+		}
+		depth += nesting(c)
+		if n := orAt(constraint[i:]); depth == 0 && n > 0 {
+			parts = append(parts, strings.TrimSpace(constraint[start:i]))
+			start = i + n
+			i += n - 1
+		}
+	}
+	return append(parts, strings.TrimSpace(constraint[start:]))
+}
+
+// nesting is how a byte changes how deep in calls and lists a constraint is.
+func nesting(c byte) int {
+	switch c {
+	case '(', '[':
+		return 1
+	case ')', ']':
+		return -1
+	}
+	return 0
+}
+
+// orAt is the length of the or s starts with, or zero when it starts with none.
+func orAt(s string) int {
+	for _, or := range []string{"||", " or "} {
+		if strings.HasPrefix(s, or) {
+			return len(or)
+		}
+	}
+	return 0
+}
+
+// descendingFloors says whether the entries are already newest first: every one but the
+// last, which v1 ends a list with, is a floor -- semver(">= 7.2.0-alpha.2") -- lower
+// than the one before it, or names versions. wasmerio/wasmer writes its list this way.
+func descendingFloors(overrides []*aquaregistry.VersionOverride) bool {
+	var previous *version.Version
+	for _, vo := range overrides[:len(overrides)-1] {
+		if namesAVersion(vo.VersionConstraints) {
+			continue
+		}
+		floor, ok := floorOf(vo.VersionConstraints)
+		if !ok || previous != nil && !floor.LessThan(previous) {
+			return false
+		}
+		previous = floor
+	}
+	return previous != nil
+}
+
+// floorOf is the version a constraint that is one ">=" or ">" comparison starts from.
+func floorOf(constraint string) (*version.Version, bool) {
+	inner, ok := semverArg(constraint)
+	if !ok || strings.Contains(inner, ",") {
+		return nil, false
+	}
+	for _, op := range []string{">=", ">"} {
+		if v, ok := strings.CutPrefix(inner, op); ok {
+			floor, err := version.NewVersion(strings.TrimSpace(v))
+			if err != nil {
+				return nil, false
+			}
+			return floor, true
+		}
+	}
+	return nil, false
 }
 
 // semverArg returns what a constraint that is one semver call asks for.

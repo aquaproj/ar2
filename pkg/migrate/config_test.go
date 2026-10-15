@@ -1,6 +1,7 @@
 package migrate_test
 
 import (
+	"fmt"
 	"log/slog"
 	"testing"
 
@@ -453,7 +454,7 @@ func TestConfig_noDuplicateFallback(t *testing.T) {
 		VersionConstraints: "false",
 		VersionOverrides: []*aquaregistry.VersionOverride{
 			{VersionConstraints: `Version == "v2.1.88"`, NoAsset: &noAsset},
-			{VersionConstraints: `semver("<= 2.1.117") or Version == "v2.1.126"`, Format: "raw"},
+			{VersionConstraints: `semver("<= 2.1.117") && semver(">= 2.1.0")`, Format: "raw"},
 			{VersionConstraints: "true", Type: "github_release", Format: "tar.gz"},
 		},
 	}, nil)
@@ -526,7 +527,8 @@ func TestConfig_collapsesTrailingEmpty(t *testing.T) {
 		RepoName:           "qdrant",
 		VersionConstraints: "false",
 		VersionOverrides: []*aquaregistry.VersionOverride{
-			{VersionConstraints: `semver("<= 1.1.3") || Version == "v1.3.1"`, NoAsset: &no},
+			// A range that can't be turned into a bound, so the entries keep their order.
+			{VersionConstraints: `(semver("<= 1.1.3") && semver(">= 1.0.0")) || Version == "v1.3.1"`, NoAsset: &no},
 			{VersionConstraints: `Version == "v1.3.0"`, Asset: "qdrant-{{.Version}}.tar.gz"},
 			{VersionConstraints: `semver("< 1.8.0")`, Asset: "qdrant-{{.Version}}.tar.gz"},
 			{VersionConstraints: "true", Asset: "qdrant-{{.Version}}.tar.gz"},
@@ -542,5 +544,41 @@ func TestConfig_collapsesTrailingEmpty(t *testing.T) {
 	}
 	if got := cfg.VersionOverrides[1].VersionConstraints; got != "true" {
 		t.Errorf("the last entry is %q, want the one everything matches", got)
+	}
+}
+
+// qdrant/qdrant's list converts now that an upper bound or'ed with a version is split:
+// v1.3.1 has no asset, 1.1.3 and older have none, and everything else is read off the
+// release.
+func TestConfig_qdrant(t *testing.T) {
+	t.Parallel()
+	no := true
+	cfg, unconverted := migrate.Config("cli/cli", &aquaregistry.PackageInfo{
+		Type:               "github_release",
+		RepoOwner:          "qdrant",
+		RepoName:           "qdrant",
+		VersionConstraints: "false",
+		VersionOverrides: []*aquaregistry.VersionOverride{
+			{VersionConstraints: `semver("<= 1.1.3") || Version == "v1.3.1"`, NoAsset: &no},
+			{VersionConstraints: `Version == "v1.3.0"`, Asset: "qdrant-{{.Version}}.tar.gz"},
+			{VersionConstraints: `semver("< 1.8.0")`, Asset: "qdrant-{{.Version}}.tar.gz"},
+			{VersionConstraints: "true", Asset: "qdrant-{{.Version}}.tar.gz"},
+		},
+	}, nil)
+	if len(unconverted) != 0 {
+		t.Errorf("got %v as unconverted, want none", unconverted)
+	}
+	got := make([]string, 0, len(cfg.VersionOverrides))
+	for _, vo := range cfg.VersionOverrides {
+		got = append(got, fmt.Sprintf("%s no_asset=%t", vo.VersionConstraints, vo.NoAsset != nil && *vo.NoAsset))
+	}
+	want := []string{
+		`Version == "v1.3.1" no_asset=true`,
+		`semver("> 1.1.3") no_asset=false`,
+		`semver("<= 1.1.3") no_asset=true`,
+		`true no_asset=false`,
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
