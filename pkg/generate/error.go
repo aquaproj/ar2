@@ -1,6 +1,9 @@
 package generate
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 var (
 	// errTie is returned when nothing in a release's asset names tells apart the assets of
@@ -24,3 +27,19 @@ var (
 	// signature to.
 	errCertificateNoIdentity = errors.New("the certificate names no identity")
 )
+
+// EmptyReleaseError says the release holds no asset at all: nothing that is uploaded, let
+// alone one for an environment. tokei stopped publishing builds at v13.0.0-alpha.8 and
+// went on making releases.
+//
+// It is told apart from a release whose assets name no environment, which a definition
+// can settle with asset_rules. Nothing settles this one, unless assets are still being
+// uploaded, which is why it carries when the release was published.
+type EmptyReleaseError struct {
+	// PublishedAt is when the release was published. Zero for one never published.
+	PublishedAt time.Time
+}
+
+func (e *EmptyReleaseError) Error() string {
+	return "the release has no assets"
+}

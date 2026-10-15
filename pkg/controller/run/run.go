@@ -458,14 +458,15 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	}
 	// What the registry holds is the only thing that says a package is done with,
 	// and it is recorded after asking rather than after opening a pull request.
-	record(candidate.Package, versions, existing, todo)
+	done := settled(logger, def, candidate.Package, versions, existing)
+	record(candidate.Package, versions, done, todo)
 
 	share, ok := c.shareOf(logger, def, candidate.Name, limitBudget(budget, existing, breadth), inFlight)
 	if !ok {
 		return 0, 0, nil
 	}
 	generated, stopped, attempted := c.generateVersions(ctx, logger, input, def, candidate, versions,
-		c.withInFlight(candidate.Name, versions, existing, inFlight), share)
+		c.withInFlight(candidate.Name, versions, done, inFlight), share)
 	c.reportTampered(ctx, logger, input, candidate.Name, stopped.tampered)
 	c.reportKeepsFailing(ctx, logger, input, candidate.Name, stopped.keepsFailing)
 	if len(generated) == 0 {
@@ -667,8 +668,14 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		if _, ok := existing[tag]; ok {
 			continue
 		}
-		attempted++
 		v, err := c.generate(ctx, logger, input, def, pkgName, tag)
+		if emptyRelease(candidate.Package, tag, err, time.Now()) {
+			// Not an attempt: there was nothing to generate, and there never will be.
+			logger.Info("the release has no assets, so the version is passed over from now on",
+				"package", pkgName, "version", tag)
+			continue
+		}
+		attempted++
 		if countFailure(candidate.Package, tag, err) {
 			out.keepsFailing = append(out.keepsFailing, &tamperedVersion{version: tag, reason: err.Error()})
 		}
