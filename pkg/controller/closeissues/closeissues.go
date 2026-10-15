@@ -55,10 +55,10 @@ const perPage = 100
 //
 // What an issue is about is read from the records ar2 wrote into it and into each comment it
 // added, and asked of what the default branch serves: an environment left out is resolved once
-// the version's file covers it again, or the version is no longer served at all, and a version
-// a check of integrity stopped, or one that kept failing, is resolved once it is served. An issue saying something nothing
-// has resolved yet stays open, and so does one holding no record, which is one written before
-// the records were.
+// the version's file covers it again, and a version a check of integrity stopped, or one that
+// kept failing, is resolved once it is served. An issue saying something nothing has resolved
+// yet stays open, and so does one holding no record, which is one written before the records
+// were.
 func (c *Controller) Close(ctx context.Context, logger *slog.Logger) error {
 	for _, label := range labels {
 		issues, err := c.open(ctx, label)
@@ -186,7 +186,11 @@ func judge(r *issuemark.Record, version string, reg *aquag2.Registry) ([]string,
 		return nil, []string{name + " is published"}
 	case issuemark.KindMissingEnvironment:
 		if reg == nil {
-			return nil, []string{name + " is no longer published"}
+			// Not served: the version's pull request hasn't merged yet, which is what
+			// an issue opened by the same run that opened it looks like, or the version
+			// was taken out. Neither puts the environment back, so neither resolves it;
+			// a version taken out is a person's to close the issue over.
+			return []string{name + " isn't published yet"}, nil
 		}
 		var pending, resolved []string
 		for _, env := range r.Versions[version] {

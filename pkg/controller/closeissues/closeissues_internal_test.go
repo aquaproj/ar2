@@ -90,12 +90,14 @@ func TestController_Close(t *testing.T) {
 	issues := &fakeIssues{
 		open: map[string][]*gogithub.Issue{
 			issuemark.KindMissingEnvironment: {
-				// Resolved: v1 covers windows again, and v2 is no longer served.
+				// Resolved: v1 covers windows again, and so does v2's linux/arm64.
 				issueOf(t, 1, missing(map[string][]string{"v1": {"windows/amd64"}})),
 				// v3, which a comment adds, still lacks darwin/arm64.
 				issueOf(t, 2, missing(map[string][]string{"v1": {"windows/amd64"}})),
 				// Written before the records were.
 				{Number: new(3), Body: new("prose only")},
+				// v4's pull request hasn't merged, which resolves nothing.
+				issueOf(t, 7, missing(map[string][]string{"v4": {"windows/amd64"}})),
 			},
 			issuemark.KindIntegrity: {
 				issueOf(t, 4, &issuemark.Record{Kind: issuemark.KindIntegrity, Package: "foo/foo", Versions: map[string][]string{"v1": nil}}),
@@ -112,6 +114,7 @@ func TestController_Close(t *testing.T) {
 	}
 	reg := fakeRegistry{
 		"kcp-dev/kcp v1": {"linux/amd64", "windows/amd64"},
+		"kcp-dev/kcp v2": {"linux/amd64", "linux/arm64"},
 		"kcp-dev/kcp v3": {"linux/amd64"},
 		"foo/foo v1":     {"linux/amd64"},
 	}
