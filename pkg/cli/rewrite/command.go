@@ -75,7 +75,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ts, err := token.GitHub(logger.Logger)
+	ts, err := token.API(logger.Logger)
 	if err != nil {
 		return err //nolint:wrapcheck // the error already says what failed
 	}
