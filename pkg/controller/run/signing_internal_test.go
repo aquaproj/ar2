@@ -166,18 +166,39 @@ func TestCheckSigning_nothingToCompare(t *testing.T) {
 	}
 }
 
-func TestBaselineVersion(t *testing.T) {
+// A version is compared with the nearest older one the registry holds or the run
+// generated, and the oldest of what is filled in has nothing before it.
+func TestBefore(t *testing.T) {
 	t.Parallel()
-	// The release list is newest first, so the first one the repository holds is the
-	// newest one it holds.
-	got := baselineVersion([]string{"v5", "v4", "v3", "v2"}, map[string]struct{}{
-		"v3": {}, "v2": {},
-	})
-	if got != "v3" {
-		t.Errorf("the baseline is %q, want v3", got)
+	versions := []string{"v3.0.0", "v2.0.0", "v1.0.8", "v1.0.7"}
+	existing := map[string]struct{}{"v2.0.0": {}}
+	generated := map[string]*version{"v3.0.0": {}, "v1.0.8": {}, "v1.0.7": {}}
+	for tag, want := range map[string]string{
+		"v3.0.0": "v2.0.0", // a new release, compared with the newest held
+		"v1.0.8": "v1.0.7", // filled in, compared with the one generated before it
+		"v1.0.7": "",       // the oldest: nothing before it
+	} {
+		if got := before(tag, versions, existing, generated); got != want {
+			t.Errorf("before(%s) = %q, want %q", tag, got, want)
+		}
 	}
-	if got := baselineVersion([]string{"v2", "v1"}, map[string]struct{}{}); got != "" {
-		t.Errorf("a package the repository holds nothing of has no baseline, got %q", got)
+}
+
+// Filling in a history, a version lacking a platform the package gained later isn't left
+// for review: volta-cli/volta's 1.0.8 had no linux/arm64 build.
+func TestReviewLostSigning_history(t *testing.T) {
+	t.Parallel()
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	generated := []*version{
+		{Version: "v1.0.8", Registry: registryOf(signed("linux", "amd64"))},
+		{Version: "v1.0.7", Registry: registryOf(signed("linux", "amd64"))},
+	}
+	c.reviewLostSigning(t.Context(), discardLogger(), "volta-cli/volta", generated,
+		[]string{"v2.0.0", "v1.0.8", "v1.0.7"}, map[string]struct{}{"v2.0.0": {}})
+	for _, v := range generated {
+		if v.NeedsReview {
+			t.Errorf("%s is left for review: lost %v, gained %v", v.Version, v.LostEnvironments, v.GainedEnvironments)
+		}
 	}
 }
 
