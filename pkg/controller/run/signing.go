@@ -95,10 +95,16 @@ func lostSigning(older, newer *aquag2.Registry) []string {
 // release that uses it.
 //
 // Gaining an environment is not a loss, and neither is a package that never had one.
+//
+// An entry that named no variant was the platform's, and an entry of the platform for any
+// variant still covers it. astral-sh/uv's 0.13.0 has one entry for linux/amd64, the musl
+// build, generated before the libc variants were read off the names; 0.13.1 has one for
+// glibc and one for musl, and read entry by entry it had lost linux/amd64.
 func lostEnvironments(older, newer *aquag2.Registry) []string {
-	now := make(map[string]struct{}, len(newer.Assets))
+	now := map[string]struct{}{}
 	for _, a := range newer.Assets {
 		now[assetKey(a)] = struct{}{}
+		now[a.OS+"/"+a.Arch] = struct{}{}
 	}
 	var lost []string
 	for _, a := range older.Assets {
