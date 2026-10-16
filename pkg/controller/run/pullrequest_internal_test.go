@@ -55,6 +55,10 @@ func (f *fakeRegistry) WaitingHeadBranch(string) (string, bool) {
 	return g2.WaitingHeadBranchName(fakeID), true
 }
 
+func (f *fakeRegistry) ReviewHeadBranch(string) (string, bool) {
+	return g2.ReviewHeadBranchName(fakeID), true
+}
+
 func (f *fakeRegistry) Versions(_ context.Context, _ *slog.Logger, _ string) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
