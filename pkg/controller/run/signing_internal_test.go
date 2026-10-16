@@ -396,6 +396,14 @@ func TestLostEnvironments(t *testing.T) {
 			want:  nil,
 		},
 		{
+			// uv's 0.13.0 has one entry for linux/amd64; 0.13.1 has one for glibc and one
+			// for musl.
+			name:  "the platform split into variants",
+			older: registryOf(signed("linux", "amd64")),
+			newer: withVariant(registryOf(signed("linux", "amd64")), "libc", "musl"),
+			want:  nil,
+		},
+		{
 			name:  "a variant is an environment of its own",
 			older: withVariant(registryOf(signed("linux", "amd64")), "libc", "musl"),
 			newer: registryOf(signed("linux", "amd64")),
