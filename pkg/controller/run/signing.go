@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 
@@ -162,36 +163,53 @@ func checkSigning(logger *slog.Logger, pkgName string, versions []*version, base
 		versions = versions[:len(versions)-1]
 	}
 	for _, v := range versions {
-		if lost := lostSigning(baseline, v.Registry); len(lost) > 0 {
-			logger.Warn("this version can be verified with less than the one before it",
-				"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
-			v.NeedsReview = true
-			v.LostSigning = lost
-		}
-		if lost := lostEnvironments(baseline, v.Registry); len(lost) > 0 {
-			logger.Warn("this version covers fewer environments than the one before it",
-				"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
-			v.NeedsReview = true
-			v.LostEnvironments = lost
-		}
-		if gained := gainedEnvironments(baseline, v.Registry); len(gained) > 0 {
-			logger.Warn("this version covers platforms the one before it didn't",
-				"package", pkgName, "version", v.Version, "gained", strings.Join(gained, ", "))
-			v.NeedsReview = true
-			v.GainedEnvironments = gained
-		}
+		compareWith(logger, pkgName, v, baseline)
 	}
 }
 
-// baselineVersion returns the newest version the repository already holds.
+// compareWith marks the version for review when it can be verified with less than the
+// version before it, covers fewer environments, or covers platforms that one didn't.
+func compareWith(logger *slog.Logger, pkgName string, v *version, before *aquag2.Registry) {
+	if lost := lostSigning(before, v.Registry); len(lost) > 0 {
+		logger.Warn("this version can be verified with less than the one before it",
+			"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
+		v.NeedsReview = true
+		v.LostSigning = lost
+	}
+	if lost := lostEnvironments(before, v.Registry); len(lost) > 0 {
+		logger.Warn("this version covers fewer environments than the one before it",
+			"package", pkgName, "version", v.Version, "lost", strings.Join(lost, ", "))
+		v.NeedsReview = true
+		v.LostEnvironments = lost
+	}
+	if gained := gainedEnvironments(before, v.Registry); len(gained) > 0 {
+		logger.Warn("this version covers platforms the one before it didn't",
+			"package", pkgName, "version", v.Version, "gained", strings.Join(gained, ", "))
+		v.NeedsReview = true
+		v.GainedEnvironments = gained
+	}
+}
+
+// before is the version a generated version is compared with: the nearest older one the
+// registry holds or this run generated, or "" when there is none.
 //
-// versions is the release list, newest first, so the first one the repository has is
-// the newest. Sorting isn't needed and neither is a request: the list was fetched to
-// decide what to generate.
-func baselineVersion(versions []string, existing map[string]struct{}) string {
-	for _, tag := range versions {
-		if _, ok := existing[tag]; ok {
-			return tag
+// The newest the registry holds is that for a new release, which is what the comparison
+// is for: a release that renamed an asset or stopped signing. A version older than it is
+// one a run fills the history in with, and compared with the newest it had lost what
+// the package gained later: volta-cli/volta's 1.0.8 had no linux/arm64 build, which came
+// after it. Compared with the version before it, it lost nothing. Versions this run
+// generated count, so that a history filled in newest first is compared step by step.
+func before(tag string, versions []string, existing map[string]struct{}, generated map[string]*version) string {
+	i := slices.Index(versions, tag)
+	if i < 0 {
+		return ""
+	}
+	for _, older := range versions[i+1:] {
+		if _, ok := existing[older]; ok {
+			return older
+		}
+		if _, ok := generated[older]; ok {
+			return older
 		}
 	}
 	return ""

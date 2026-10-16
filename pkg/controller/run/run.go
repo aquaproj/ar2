@@ -619,15 +619,43 @@ func replacesPublished(versions []*version, existing map[string]struct{}) bool {
 // The asset names and the checksums of a release an attacker published look no
 // different from any other; what is missing is the signature. Nothing else in the
 // generated file would say so.
+//
+// Each version is compared with the one before it: see before. A package the registry
+// holds nothing of yet has its oldest version in this run stand in for the ones before
+// the rest.
 func (c *Controller) reviewLostSigning(ctx context.Context, logger *slog.Logger, pkgName string, generated []*version, versions []string, existing map[string]struct{}) {
-	baseline, ok := c.signingBaseline(ctx, logger, pkgName, baselineVersion(versions, existing))
-	if !ok {
-		for _, v := range generated {
-			v.NeedsReview = true
-		}
+	if len(existing) == 0 {
+		checkSigning(logger, pkgName, generated, nil)
 		return
 	}
-	checkSigning(logger, pkgName, generated, baseline)
+	byTag := make(map[string]*version, len(generated))
+	for _, v := range generated {
+		byTag[v.Version] = v
+	}
+	held := map[string]*aquag2.Registry{}
+	for _, v := range generated {
+		tag := before(v.Version, versions, existing, byTag)
+		if tag == "" {
+			// The oldest of what is generated, older than anything the registry holds:
+			// there is nothing it came after.
+			continue
+		}
+		if g, ok := byTag[tag]; ok {
+			compareWith(logger, pkgName, v, g.Registry)
+			continue
+		}
+		reg, ok := held[tag]
+		if !ok {
+			r, readable := c.signingBaseline(ctx, logger, pkgName, tag)
+			if !readable {
+				v.NeedsReview = true
+				continue
+			}
+			reg = r
+			held[tag] = reg
+		}
+		compareWith(logger, pkgName, v, reg)
+	}
 }
 
 // share is how much of a run one package may take.
