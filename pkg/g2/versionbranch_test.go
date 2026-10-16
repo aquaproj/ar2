@@ -46,3 +46,22 @@ func TestWaitingHeadBranchName(t *testing.T) {
 		t.Error("a version's branch can be the waiting one")
 	}
 }
+
+// The branch of the versions left for review names the package, and no version's branch can
+// be it.
+func TestReviewHeadBranchName(t *testing.T) {
+	t.Parallel()
+	branch := g2.ReviewHeadBranchName("1790772767")
+	if branch != "ar2_1790772767__needs-review" {
+		t.Errorf("got %q", branch)
+	}
+	if g2.IsVersionHeadBranch("1790772767", branch) {
+		t.Error("the review branch reads as a version's")
+	}
+	if id, ok := g2.HeadBranchID(branch); !ok || id != "1790772767" {
+		t.Errorf("the review branch is %q's", id)
+	}
+	if branch == g2.VersionHeadBranchName("1790772767", "_needs-review") {
+		t.Error("a version's branch can be the review one")
+	}
+}

@@ -62,6 +62,12 @@ func (c *Client) VersionHeadBranch(pkgName, version string) (string, bool) {
 	return c.ids.VersionHeadBranch(pkgName, version)
 }
 
+// ReviewHeadBranch is the branch the pull request of the package's versions left for review
+// is opened from.
+func (c *Client) ReviewHeadBranch(pkgName string) (string, bool) {
+	return c.ids.ReviewHeadBranch(pkgName)
+}
+
 // WaitingHeadBranch is the branch the pull request of the package's versions waiting for a
 // definition is opened from.
 func (c *Client) WaitingHeadBranch(pkgName string) (string, bool) {

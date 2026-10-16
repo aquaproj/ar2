@@ -113,6 +113,7 @@ type Branches interface {
 	VersionHeadBranch(pkgName, version string) (string, bool)
 	IsVersionHeadBranch(pkgName, branch string) bool
 	WaitingHeadBranch(pkgName string) (string, bool)
+	ReviewHeadBranch(pkgName string) (string, bool)
 }
 
 // PullRequests is how a run puts what it generated to a person, and how it sees what is
@@ -525,13 +526,13 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	if err != nil {
 		return 0, 0, err
 	}
-	existing, err := c.g2.Versions(ctx, logger, candidate.Name)
+	existing, decided, err := c.known(ctx, logger, candidate.Name, inFlight)
 	if err != nil {
-		return 0, 0, fmt.Errorf("list the versions aqua-registry-g2 holds: %w", err)
+		return 0, 0, err
 	}
 	// What the registry holds is the only thing that says a package is done with,
 	// and it is recorded after asking rather than after opening a pull request.
-	done := settled(logger, def, candidate.Package, versions, existing)
+	done := settled(logger, def, candidate.Package, versions, decided)
 	record(candidate.Package, swept, versions, done, todo)
 
 	share, ok := c.shareOf(logger, def, candidate.Name, limitBudget(budget, existing, breadth), inFlight)
@@ -574,12 +575,18 @@ func (c *Controller) openPullRequests(ctx context.Context, logger *slog.Logger, 
 	// After the pull requests, so that what the issue says is in the registry is on its
 	// way there rather than only generated.
 	defer c.reportExcluded(ctx, logger, pkgName, sound)
+	toReview := make([]*version, 0, len(sound))
 	for _, v := range sound {
-		if err := c.openPullRequest(ctx, logger, def, pkgName, v, replacesPublished([]*version{v}, existing)); err != nil {
+		replaces := replacesPublished([]*version{v}, existing)
+		if def.held && v.NeedsReview && !replaces {
+			toReview = append(toReview, v)
+			continue
+		}
+		if err := c.openPullRequest(ctx, logger, def, pkgName, v, replaces); err != nil {
 			return err
 		}
 	}
-	return nil
+	return c.openReview(ctx, logger, def, pkgName, toReview, inFlight)
 }
 
 // replacesPublished says whether any of the versions is one the registry already serves.

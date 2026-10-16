@@ -268,6 +268,16 @@ func (i *Identities) WaitingHeadBranch(pkgName string) (string, bool) {
 	return WaitingHeadBranchName(id), true
 }
 
+// ReviewHeadBranch is the branch the pull request of the package's versions left for review
+// is opened from.
+func (i *Identities) ReviewHeadBranch(pkgName string) (string, bool) {
+	id, ok := i.ID(pkgName)
+	if !ok {
+		return "", false
+	}
+	return ReviewHeadBranchName(id), true
+}
+
 // RemoveBranch is the branch the pull request that stops serving the package is opened
 // from.
 func (i *Identities) RemoveBranch(pkgName string) (string, bool) {

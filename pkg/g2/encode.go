@@ -152,6 +152,21 @@ func WaitingHeadBranchName(id string) string {
 	return HeadBranchName(id) + "_" + waitingSuffix
 }
 
+// reviewSuffix ends the branch of the versions left for review. Like waitingSuffix, no
+// encoded version can end a branch this way.
+const reviewSuffix = "_needs-review"
+
+// ReviewHeadBranchName returns the branch the pull request of a package's versions left for
+// review is opened from.
+//
+// A version left for review is usually left for a reason its package's other versions share
+// -- assets the definition doesn't tell apart, an environment the release stopped building
+// -- so they are one pull request: one place to look, and one to close once the definition
+// is fixed. The versions that need nothing go on merging, each in a pull request of its own.
+func ReviewHeadBranchName(id string) string {
+	return HeadBranchName(id) + "_" + reviewSuffix
+}
+
 // IsVersionHeadBranch reports whether the branch is one of the package's version branches.
 //
 // A prefix match isn't enough, because one id can be the beginning of another: 1790772680
