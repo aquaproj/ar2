@@ -114,7 +114,13 @@ One package and version is generated on its own, without touching the repository
 It is the form used while working on a package.
 
 $ ar2 run cli/cli@v2.101.0 --skip-pr
-$ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json`,
+$ ar2 run cli/cli@v2.101.0 --skip-pr --output registry.json
+
+GitHub's API is asked with AR2_API_TOKEN when it is set, and otherwise with
+GITHUB_TOKEN, or ghtkn when that isn't set either. The state is always read and
+written with GITHUB_TOKEN, which is what reaches the container registry. A scheduled
+run sets AR2_API_TOKEN to an installation token of the registry's app: the Actions
+token's budget of a thousand requests an hour is the whole repository's.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, positional []string) error {
 			// A version can only be asked for one package at a time, and asking for
@@ -153,7 +159,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args) error {
 	if err := logger.SetLevel(args.LogLevel); err != nil {
 		return fmt.Errorf("set log level: %w", err)
 	}
-	ts, err := token.GitHub(logger.Logger)
+	ts, err := token.API(logger.Logger)
 	if err != nil {
 		return err //nolint:wrapcheck // the error already says what failed
 	}

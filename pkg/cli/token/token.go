@@ -43,6 +43,25 @@ func GitHub(logger *slog.Logger) (oauth2.TokenSource, error) {
 	return client.TokenSource(logger, &ghtkn.InputGet{}), nil
 }
 
+// APIEnv holds the token GitHub's API is asked with, when it isn't GITHUB_TOKEN.
+//
+// GITHUB_TOKEN is what the state is read and written with, in the container registry, which
+// a GitHub App installation token can't reach. As the token of the API it is the repository's
+// Actions token, which allows a thousand requests an hour, shared with every workflow of the
+// repository: a chain of runs used it up, and the next run failed before it started, while
+// installing ar2. An installation token of the registry's app has a budget of its own, five
+// times that at least.
+const APIEnv = "AR2_API_TOKEN"
+
+// API returns the token source the client of GitHub's API uses: APIEnv's token when it is
+// set, and otherwise what GitHub returns.
+func API(logger *slog.Logger) (oauth2.TokenSource, error) {
+	if t := os.Getenv(APIEnv); t != "" {
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: t}), nil
+	}
+	return GitHub(logger)
+}
+
 // PREnv holds the token that commits to the head branches and opens the pull
 // requests.
 //
