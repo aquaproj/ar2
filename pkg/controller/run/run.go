@@ -258,7 +258,7 @@ func (c *Controller) Run(ctx context.Context, logger *slog.Logger, input *Input)
 		if !takeTurn(logger, candidate) {
 			continue
 		}
-		todo, versions := c.todo(logger, candidate, inFlight, moved, swept, now)
+		todo, versions := c.todo(logger, candidate, inFlight, moved, swept, now, len(input.Packages) != 0)
 		if todo == workNone {
 			continue
 		}
@@ -348,7 +348,14 @@ func timeUp(input *Input) bool {
 
 // todo says what this package needs doing, and on which versions. workNone is
 // everything the run passes over without asking anything about it.
-func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, moved map[string]struct{}, swept map[string]*github.Found, now time.Time) (work, []string) {
+//
+// A package the run was asked for by name has its history walked whatever the state says. It
+// is named because somebody wants it looked at, often because versions older than the newest
+// a sweep reads are missing: anomalyco/opencode's v1.18.4 to v1.18.22, generated again after
+// its definition was fixed, were further down than the sweep reaches the next day. A walk
+// still reads one page of releases, the newest hundred, and the run's limit still bounds what
+// is generated.
+func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, moved map[string]struct{}, swept map[string]*github.Found, now time.Time, named bool) (work, []string) {
 	if _, ok := moved[candidate.Name]; ok {
 		// Its branch is under another name now, and so is what the state says about
 		// it. Generating here would generate under a name nothing holds.
@@ -369,6 +376,9 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 	// something new.
 	versions := swept[candidate.Package.RepoOwner+"/"+candidate.Package.RepoName].Pick(candidate.Package.Prerelease)
 	todo := decide(candidate.Package, versions, now)
+	if named {
+		todo = workDeep
+	}
 	if todo == workNone {
 		// The newest versions upstream are the ones the registry holds, and its
 		// history was checked recently enough. Nothing is asked about it.
