@@ -11,7 +11,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	"github.com/aquaproj/ar2/pkg/migrate"
 	"github.com/expr-lang/expr/vm"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"golang.org/x/oauth2"
 )
 

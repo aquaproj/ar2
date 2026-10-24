@@ -15,7 +15,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/expr-lang/expr/vm"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // versionsPerPage is how many versions are looked at per package in one run.

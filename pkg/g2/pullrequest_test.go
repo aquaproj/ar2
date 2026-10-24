@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // The pull request waiting for a definition is found by the package's name, which the

@@ -24,7 +24,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/aquaproj/ar2/pkg/summary"
 	"github.com/aquaproj/ar2/pkg/verify"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
 

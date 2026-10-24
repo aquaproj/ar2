@@ -15,7 +15,7 @@ import (
 
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/tidy"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"github.com/suzuki-shunsuke/slog-error/slogerr"
 )
 

@@ -14,7 +14,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/google/go-cmp/cmp"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 type fakeRegistry struct {
