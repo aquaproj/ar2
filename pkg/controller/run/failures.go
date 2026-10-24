@@ -6,7 +6,7 @@ import (
 
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/aquaproj/ar2/pkg/verify"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // failuresBeforeIssue is how many runs in a row a version may fail for a reason that should

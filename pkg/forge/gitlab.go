@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // gitLabMaxPerPage is the largest page GitLab answers with.

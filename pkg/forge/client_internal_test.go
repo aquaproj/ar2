@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // The instance answers what GitHub answers, in its own words: the translation is what

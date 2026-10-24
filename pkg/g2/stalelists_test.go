@@ -10,7 +10,7 @@ import (
 
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/google/go-cmp/cmp"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // fakeBlobs answers for the lists, by expression.
