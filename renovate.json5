@@ -6,4 +6,15 @@
     "github>aquaproj/aqua-renovate-config#2.13.0",
     "github>aquaproj/aqua-renovate-config:file#2.13.0(aqua/imports/.*\\.ya?ml)",
   ],
+  packageRules: [
+    {
+      // ar2 depends on a commit of aqua's feat-lock branch, which isn't released yet.
+      // Renovate treats the pseudo-version as older than the latest release and updates it to a release,
+      // but releases lack packages ar2 needs (pkg/g2, pkg/lockfile, pkg/resolve, ...).
+      // Remove this rule once feat-lock is released.
+      matchManagers: ["gomod"],
+      matchPackageNames: ["github.com/aquaproj/aqua/v2"],
+      enabled: false,
+    },
+  ],
 }
