@@ -3,7 +3,7 @@ module github.com/aquaproj/ar2
 go 1.27.3
 
 require (
-	github.com/aquaproj/aqua/v2 v2.64.1-0.20261015151050-f2cde6c2b8a6
+	github.com/aquaproj/aqua/v2 v2.64.1-0.20261025043519-56640f80ea27
 	github.com/expr-lang/expr v1.17.8
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-cmp v0.7.0
@@ -44,7 +44,6 @@ require (
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.9.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
-	github.com/google/go-github/v92 v92.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
