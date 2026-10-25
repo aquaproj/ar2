@@ -5,7 +5,7 @@ import (
 
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/google/go-cmp/cmp"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // Each package lands in its directory as the objects its branch holds, with the mode and type

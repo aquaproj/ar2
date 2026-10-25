@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/aquaproj/ar2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // Registry is what the move reads and writes.

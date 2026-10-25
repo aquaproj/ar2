@@ -3,7 +3,7 @@ package g2
 import (
 	"testing"
 
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 func TestVersionOf(t *testing.T) {

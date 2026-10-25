@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // commitVersionsList writes versions.json onto a commit holding versions it doesn't list

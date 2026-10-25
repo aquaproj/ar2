@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"go.yaml.in/yaml/v3"
 )
 

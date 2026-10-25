@@ -18,7 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/verify"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"golang.org/x/oauth2"

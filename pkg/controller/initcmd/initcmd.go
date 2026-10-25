@@ -17,7 +17,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/github"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/state"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"golang.org/x/oauth2"
 )
 
