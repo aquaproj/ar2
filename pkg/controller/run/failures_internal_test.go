@@ -8,7 +8,7 @@ import (
 
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/aquaproj/ar2/pkg/verify"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // A server error, a rate limit or a failed connection is the moment, whether downloading an

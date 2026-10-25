@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // IndexFileName is the catalogue on the default branch.

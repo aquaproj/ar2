@@ -3,11 +3,11 @@ module github.com/aquaproj/ar2
 go 1.27.3
 
 require (
-	github.com/aquaproj/aqua/v2 v2.64.1-0.20261015151050-f2cde6c2b8a6
+	github.com/aquaproj/aqua/v2 v2.64.1-0.20261025043519-56640f80ea27
 	github.com/expr-lang/expr v1.17.8
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-cmp v0.7.0
-	github.com/google/go-github/v92 v92.0.0
+	github.com/google/go-github/v93 v93.0.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/spf13/cobra v1.10.2

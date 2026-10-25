@@ -10,7 +10,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/issuemark"
 	"github.com/aquaproj/ar2/pkg/verify"
 	"github.com/google/go-cmp/cmp"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
 // fakeIssues stands in for the registry's issues.

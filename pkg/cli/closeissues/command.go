@@ -11,7 +11,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/closeissues"
 	"github.com/aquaproj/ar2/pkg/g2"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"golang.org/x/oauth2"

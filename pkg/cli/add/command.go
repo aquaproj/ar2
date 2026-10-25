@@ -13,7 +13,7 @@ import (
 	ctrl "github.com/aquaproj/ar2/pkg/controller/add"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/state"
-	gogithub "github.com/google/go-github/v92/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
 	"golang.org/x/oauth2"
