@@ -81,28 +81,28 @@
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.8.1/hk-aarch64-apple-darwin.tar.gz",
-      "checksum": "87D5288C1D19ACD45885E35722F655A1E1498A1CB92F42C1490E7F1623AEDDDD",
+      "id": "github_release/github.com/jdx/hk/v2.9.0/hk-aarch64-apple-darwin.tar.gz",
+      "checksum": "C7C4D85FD44E88D54B2BF8F9FC38165E278983F54210C095A3E3E8C593E4B720",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.8.1/hk-aarch64-pc-windows-msvc.zip",
-      "checksum": "A0A5A16EE48F1098896CEA2CB1920E82AFD4540F19EF224A1854E47D55605D42",
+      "id": "github_release/github.com/jdx/hk/v2.9.0/hk-aarch64-pc-windows-msvc.zip",
+      "checksum": "122546FC46DE7A9B0A29B287DB2998A6CF29A94C0ED225B32282248D3B8714B6",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.8.1/hk-aarch64-unknown-linux-gnu.tar.gz",
-      "checksum": "50D7B26988CE8AFF77697188A2E1E9D01162DE203E7B9ACE7EC0D42365C4EA61",
+      "id": "github_release/github.com/jdx/hk/v2.9.0/hk-aarch64-unknown-linux-gnu.tar.gz",
+      "checksum": "1ED0259505FAB94BC4F90B42F36E38B61B316C20F2F6F7589D0B090CC42068D3",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.8.1/hk-x86_64-pc-windows-msvc.zip",
-      "checksum": "411CBE34D53764162DD36D69FE5BF7EC39CCD2A8166890C92C3531284355487D",
+      "id": "github_release/github.com/jdx/hk/v2.9.0/hk-x86_64-pc-windows-msvc.zip",
+      "checksum": "F0B6F181EECD9C784901122A3D4BE15BB13156A839B36021A173B366756804DD",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.8.1/hk-x86_64-unknown-linux-gnu.tar.gz",
-      "checksum": "8033CA42AAF88412E789C281F7E2766526E60E12F95A16C03574AEB0A2C7A657",
+      "id": "github_release/github.com/jdx/hk/v2.9.0/hk-x86_64-unknown-linux-gnu.tar.gz",
+      "checksum": "DB1021A8920B71C161E26BEF246C5B00A3EA6AA480B6CB837EE098FFEB8C41A1",
       "algorithm": "sha256"
     },
     {
