@@ -81,28 +81,28 @@
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.11.0/hk-aarch64-apple-darwin.tar.gz",
-      "checksum": "65CC3490E93522B55ABE8AE42C2B5FFE452F9FE58282455AD59D10BC0DEAB272",
+      "id": "github_release/github.com/jdx/hk/v2.11.1/hk-aarch64-apple-darwin.tar.gz",
+      "checksum": "95F89E6EEF60E0C690B0D439B30E3B8558F47235A1A45CBFF7B5351D294E4322",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.11.0/hk-aarch64-pc-windows-msvc.zip",
-      "checksum": "0A4DBDF75984786E9661FFAC69C0B75734E6711F3A1B82850CE54DCC86601519",
+      "id": "github_release/github.com/jdx/hk/v2.11.1/hk-aarch64-pc-windows-msvc.zip",
+      "checksum": "D080DF635A59590E19AC7062E0A975B520E5A8D35DC4E9217CEA6784302F9AC0",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.11.0/hk-aarch64-unknown-linux-gnu.tar.gz",
-      "checksum": "49CBBA44159C17A760319CCFCCA0FE4A07FA716F217C157EA734923160B8ACB9",
+      "id": "github_release/github.com/jdx/hk/v2.11.1/hk-aarch64-unknown-linux-gnu.tar.gz",
+      "checksum": "B94D3B405A9E392D0286491693FD22386D3C5BE086BF4B8698DF33623BFE91A9",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.11.0/hk-x86_64-pc-windows-msvc.zip",
-      "checksum": "CB62DE9FFB3D8265C513F194769C7B5575671F7BBFAD3FAB9529DB54A0A32E14",
+      "id": "github_release/github.com/jdx/hk/v2.11.1/hk-x86_64-pc-windows-msvc.zip",
+      "checksum": "60B925D9734CD6BEC5FAB78B9C825B39B2AD9B1C9D9F03B685423C2D21AE9A8C",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/jdx/hk/v2.11.0/hk-x86_64-unknown-linux-gnu.tar.gz",
-      "checksum": "A461EB97DF8E60C4447D1FDAA74A3D31598D7ABA0D7A68CEEBAD0FF0405C3B5B",
+      "id": "github_release/github.com/jdx/hk/v2.11.1/hk-x86_64-unknown-linux-gnu.tar.gz",
+      "checksum": "B9330BD4B9326C3E1AEFD757FF923FDF6D1B060074BCB4E54E16EC0A81FDE7EC",
       "algorithm": "sha256"
     },
     {
