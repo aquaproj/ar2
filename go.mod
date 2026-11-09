@@ -11,7 +11,7 @@ require (
 	github.com/hashicorp/go-version v1.9.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/suzuki-shunsuke/cobra-util v0.0.5
 	github.com/suzuki-shunsuke/ghtkn-go-sdk v0.6.1
 	github.com/suzuki-shunsuke/go-osenv v0.1.0
