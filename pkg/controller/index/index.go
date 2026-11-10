@@ -18,7 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/g2"
 	gogithub "github.com/google/go-github/v93/github"
 	"github.com/suzuki-shunsuke/slog-error/slogerr"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Registry is what the catalogue is built from and written to.

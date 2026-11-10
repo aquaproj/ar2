@@ -11,7 +11,7 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // RenamePackage puts the package's definition under the name its repository has now, in a

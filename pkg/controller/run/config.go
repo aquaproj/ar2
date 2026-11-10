@@ -18,7 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/state"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // newConfig is the definition a run writes for a package aqua-registry-g2 hasn't

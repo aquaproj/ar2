@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // IgnoredPackage is a package a run doesn't look at, or a set of them.

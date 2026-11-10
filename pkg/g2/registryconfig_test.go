@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/g2"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // The file says what ar2 should do differently for this registry. A registry that

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Widths the reports lay their columns out with.

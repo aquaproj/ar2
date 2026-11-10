@@ -8,7 +8,7 @@ import (
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	gogithub "github.com/google/go-github/v93/github"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // ConfigFileName is the definition in a package's directory, the file registry.json is

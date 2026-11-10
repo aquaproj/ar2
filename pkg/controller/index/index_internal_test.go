@@ -13,7 +13,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/google/go-cmp/cmp"
 	gogithub "github.com/google/go-github/v93/github"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // fakeRegistry stands in for aqua-registry-g2 and records what was written to it.

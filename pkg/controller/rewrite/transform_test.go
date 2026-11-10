@@ -8,7 +8,7 @@ import (
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/controller/rewrite"
 	"github.com/google/go-cmp/cmp"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func read(t *testing.T, path string) string {

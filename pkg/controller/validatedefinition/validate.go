@@ -18,7 +18,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/expr"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Validate reads the definition at path and reports what is wrong with it.
