@@ -13,7 +13,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
 	github.com/suzuki-shunsuke/cobra-util v0.0.5
-	github.com/suzuki-shunsuke/ghtkn-go-sdk v0.6.1
+	github.com/suzuki-shunsuke/ghtkn-go-sdk v0.6.2
 	github.com/suzuki-shunsuke/go-osenv v0.1.0
 	github.com/suzuki-shunsuke/slog-error v0.2.2
 	github.com/suzuki-shunsuke/slog-util v0.3.2
@@ -84,7 +84,7 @@ require (
 	github.com/stangelandcl/ppmd v0.1.1 // indirect
 	github.com/suzuki-shunsuke/go-error-with-exit-code v1.0.0 // indirect
 	github.com/suzuki-shunsuke/go-findconfig v1.2.0 // indirect
-	github.com/suzuki-shunsuke/go-github-device-flow v0.0.2 // indirect
+	github.com/suzuki-shunsuke/go-github-device-flow v0.0.3 // indirect
 	github.com/suzuki-shunsuke/go-retryablehttp v0.7.8-2 // indirect
 	github.com/suzuki-shunsuke/go-revoke-github-access-token v0.0.2 // indirect
 	github.com/suzuki-shunsuke/urfave-cli-v3-util v0.2.4 // indirect
@@ -94,7 +94,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
