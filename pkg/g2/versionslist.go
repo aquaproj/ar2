@@ -340,10 +340,16 @@ type Blobs interface {
 	Blobs(ctx context.Context, logger *slog.Logger, expressions []string) (map[string]string, error)
 }
 
-// StaleVersionsLists returns the ids of the packages whose versions.json on the default
-// branch isn't the list of what their versions directory holds: one whose source isn't the
-// directory's sha, which is also one with versions and no list, one with a list and no
-// versions, and one whose list can't be read.
+// StaleVersionsLists returns the ids of the packages whose versions.json on listRef isn't
+// the list of what their versions directory on the default branch holds: one whose source
+// isn't the directory's sha, which is also one with versions and no list, one with a list
+// and no versions, and one whose list can't be read.
+//
+// listRef is the default branch, or the branch of the open pull request updating the lists.
+// A list that pull request already brings up to date is in step there and behind on the
+// default branch, and making it again only to find the pull request holds it cost a REST
+// call per version for every such package on every run: with a pull request whose
+// auto-merge was off holding 186 of them, a run that changed nothing cost about 1,770 calls.
 //
 // It is asked of every package, from what the default branch holds rather than from what
 // changed, so nothing has to be remembered between runs: whichever runs next finds what a
@@ -351,7 +357,7 @@ type Blobs interface {
 //
 // Which packages there are and what each versions directory is come from one read of the
 // tree under pkgs, and the lists from blobs, a hundred to a query.
-func (c *Client) StaleVersionsLists(ctx context.Context, logger *slog.Logger, blobs Blobs) ([]string, error) {
+func (c *Client) StaleVersionsLists(ctx context.Context, logger *slog.Logger, blobs Blobs, listRef string) ([]string, error) {
 	tree, _, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, DefaultBranch+":"+PackagesDir, true)
 	if err != nil {
 		return nil, fmt.Errorf("read the tree of the packages: %w", err)
@@ -364,7 +370,7 @@ func (c *Client) StaleVersionsLists(ctx context.Context, logger *slog.Logger, bl
 	ids, shas := packagesOfTree(logger, tree.Entries)
 	exprs := make([]string, len(ids))
 	for i, id := range ids {
-		exprs[i] = DefaultBranch + ":" + PackageDir(id) + "/" + aquag2.VersionsFileName
+		exprs[i] = listRef + ":" + PackageDir(id) + "/" + aquag2.VersionsFileName
 	}
 	texts, err := blobs.Blobs(ctx, logger, exprs)
 	if err != nil {

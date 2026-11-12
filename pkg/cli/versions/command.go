@@ -44,9 +44,11 @@ each package's directory holds on the base branch.
 $ ar2 update-versions
 
 Which lists are behind is asked of every package, from what the base branch holds: a list
-whose source isn't the sha of its versions directory. Nothing is remembered between runs, so
-a run that didn't happen -- cancelled, or never raised by its push -- is caught by the next.
-It costs two objects a package, read a hundred to a query.
+whose source isn't the sha of its versions directory. With the pull request from
+ar2_versions open, the lists are read from its branch instead, so a list it already brings
+up to date isn't made again. Nothing is remembered between runs, so a run that didn't
+happen -- cancelled, or never raised by its push -- is caught by the next. It costs two
+objects a package, read a hundred to a query.
 
 Packages named by their ids are made again without asking the rest:
 
@@ -56,7 +58,8 @@ Only the versions a list lacks are read, and the ones gone are taken out. A list
 already in step with its directory is left alone.
 
 The update goes into one pull request from ar2_versions, which merges itself once its
-checks pass. A run finding one already open adds to it rather than opening another.
+checks pass. A run finding one already open adds to it rather than opening another, and
+turns its auto-merge back on if it is off.
 
 The GitHub access token is read from the GITHUB_TOKEN environment variable, or from
 ghtkn when it isn't set. AR2_PR_TOKEN commits and opens the pull request.`,
@@ -97,18 +100,7 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, ids []stri
 	// app just opened, not the app.
 	graphql := github.NewClient(httpClient)
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
-	if len(ids) == 0 {
-		stale, err := registry.StaleVersionsLists(ctx, logger.Logger, graphql.Repository(args.G2Owner, args.G2Repo))
-		if err != nil {
-			return err //nolint:wrapcheck // the error says what it couldn't read
-		}
-		if len(stale) == 0 {
-			logger.Info("every list of versions is up to date")
-			return nil
-		}
-		ids = stale
-	}
-	c := ctrl.New(registry, graphql, args.BaseBranch)
+	c := ctrl.New(registry, graphql, graphql.Repository(args.G2Owner, args.G2Repo), args.BaseBranch)
 	if args.DryRun {
 		c.DryRun()
 	}
