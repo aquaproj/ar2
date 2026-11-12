@@ -15,7 +15,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/verify"
 	"github.com/spf13/cobra"
 	"github.com/suzuki-shunsuke/slog-util/slogutil"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Args holds the command's flags.

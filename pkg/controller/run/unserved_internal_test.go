@@ -11,7 +11,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/state"
 	"github.com/google/go-cmp/cmp"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // cmctl's definition: the versions after v1.14.4 moved to another repository, and the

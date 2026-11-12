@@ -9,7 +9,7 @@ import (
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/migrate"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // one shows both resolutions of a single package at a single version.

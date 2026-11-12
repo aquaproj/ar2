@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	gogithub "github.com/google/go-github/v93/github"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // RegistryConfigFileName is the registry's own configuration, on the default branch.

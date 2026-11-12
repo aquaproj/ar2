@@ -11,7 +11,7 @@ import (
 	"time"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Identities is the id each package is kept under.
