@@ -21,6 +21,7 @@ type Registry interface {
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	VersionsPullRequest(ctx context.Context) (*gogithub.PullRequest, error)
 	CreateVersionsPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error)
+	StaleVersionsLists(ctx context.Context, logger *slog.Logger, blobs g2.Blobs, listRef string) ([]string, error)
 }
 
 // AutoMerger turns on auto-merge for a pull request.
@@ -32,6 +33,7 @@ type AutoMerger interface {
 type Controller struct {
 	g2         Registry
 	automerge  AutoMerger
+	blobs      g2.Blobs
 	baseBranch string
 	dryRun     bool
 }
@@ -42,9 +44,9 @@ func (c *Controller) DryRun() {
 }
 
 // New creates a Controller. automerge may be nil, and then the pull request waits for
-// somebody.
-func New(registry Registry, automerge AutoMerger, baseBranch string) *Controller {
-	return &Controller{g2: registry, automerge: automerge, baseBranch: baseBranch}
+// somebody. blobs reads the lists when no ids are given, to find the ones behind.
+func New(registry Registry, automerge AutoMerger, blobs g2.Blobs, baseBranch string) *Controller {
+	return &Controller{g2: registry, automerge: automerge, blobs: blobs, baseBranch: baseBranch}
 }
 
 var errNotID = errors.New("not a package id")
@@ -59,17 +61,21 @@ var errNotID = errors.New("not a package id")
 // Each list is made from the base branch, and committed onto the open pull request when
 // there is one, which only ever changes lists: what it holds of an older base is replaced by
 // what the base holds now, and nothing else the base gained since is touched.
+//
+// No ids means every package whose list is behind. With a pull request open, behind is
+// asked of the lists it holds rather than of the base branch's, since a list it already
+// brings up to date has nothing left to do.
 func (c *Controller) Update(ctx context.Context, logger *slog.Logger, ids []string) error {
 	if err := checkIDs(ids); err != nil {
 		return err
 	}
-	pr, err := c.g2.VersionsPullRequest(ctx)
+	pr, ref, err := c.pullRequest(ctx, logger)
 	if err != nil {
-		return fmt.Errorf("look for an open pull request: %w", err)
+		return err
 	}
-	ref := c.baseBranch
-	if pr != nil {
-		ref = g2.VersionsBranch
+	ids, err = c.behind(ctx, logger, ref, ids)
+	if err != nil {
+		return err
 	}
 	files, err := c.files(ctx, logger, ref, ids)
 	if err != nil {
@@ -154,6 +160,46 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, n
 		slogerr.WithError(logger, err).Warn("failed to turn on auto-merge", "number", pr.GetNumber())
 	}
 	return nil
+}
+
+// pullRequest returns the open pull request updating the lists, or nil, and the ref the lists
+// are read from and committed onto: its branch, or the base branch when there is none.
+func (c *Controller) pullRequest(ctx context.Context, logger *slog.Logger) (*gogithub.PullRequest, string, error) {
+	pr, err := c.g2.VersionsPullRequest(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("look for an open pull request: %w", err)
+	}
+	if pr == nil {
+		return nil, c.baseBranch, nil
+	}
+	c.ensureAutoMerge(ctx, logger, pr)
+	return pr, g2.VersionsBranch, nil
+}
+
+// behind is the ids given, or when there are none, the packages whose list on ref is behind
+// its versions directory on the base branch.
+func (c *Controller) behind(ctx context.Context, logger *slog.Logger, ref string, ids []string) ([]string, error) {
+	if len(ids) != 0 {
+		return ids, nil
+	}
+	return c.g2.StaleVersionsLists(ctx, logger, c.blobs, ref) //nolint:wrapcheck // the error says what it couldn't read
+}
+
+// ensureAutoMerge turns auto-merge on for the open pull request when it is off.
+//
+// Commits added to the pull request don't turn it on, so a pull request GitHub turned it off
+// for waited for nobody: #2967 sat open for four weeks while the lists it held fell further
+// behind on the base branch. A list is made from files the registry already serves, so there
+// is nothing for a person to decide, the same as when the pull request was opened.
+func (c *Controller) ensureAutoMerge(ctx context.Context, logger *slog.Logger, pr *gogithub.PullRequest) {
+	if c.dryRun || c.automerge == nil || pr.GetAutoMerge() != nil {
+		return
+	}
+	if err := c.automerge.EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
+		slogerr.WithError(logger, err).Warn("failed to turn on auto-merge", "number", pr.GetNumber())
+		return
+	}
+	logger.Info("turned auto-merge on for the open pull request", "number", pr.GetNumber())
 }
 
 // message is the commit message and the pull request's title.

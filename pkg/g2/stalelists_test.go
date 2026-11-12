@@ -66,11 +66,30 @@ func TestClient_StaleVersionsLists(t *testing.T) {
 		list("1790000005"): `{broken`,
 		// 1790000006 has neither, which is in step.
 	}
-	got, err := g2.New(gh, nil, "aquaproj", "aqua-registry-g2", "").StaleVersionsLists(context.Background(), slog.New(slog.DiscardHandler), blobs)
+	client := g2.New(gh, nil, "aquaproj", "aqua-registry-g2", "")
+	got, err := client.StaleVersionsLists(context.Background(), slog.New(slog.DiscardHandler), blobs, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff([]string{"1790000002", "1790000003", "1790000004", "1790000005"}, got); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
+	}
+
+	// The lists are read from the ref given, against the default branch's directories: a
+	// list the open pull request brings up to date is in step there.
+	onBranch := func(id string) string { return g2.VersionsBranch + ":" + g2.PackageDir(id) + "/versions.json" }
+	branchBlobs := fakeBlobs{
+		onBranch("1790000001"): `{"source":"a","versions":[]}`,
+		onBranch("1790000002"): `{"source":"b","versions":[]}`, // brought up to date
+		onBranch("1790000003"): `{"source":"c","versions":[]}`, // brought up to date
+		onBranch("1790000004"): `{"source":"d","versions":[]}`,
+		onBranch("1790000005"): `{"source":"old","versions":[]}`,
+	}
+	got, err = client.StaleVersionsLists(context.Background(), slog.New(slog.DiscardHandler), branchBlobs, g2.VersionsBranch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"1790000004", "1790000005"}, got); diff != "" {
+		t.Errorf("against the pull request's branch (-want +got):\n%s", diff)
 	}
 }

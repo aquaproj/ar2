@@ -19,6 +19,13 @@ type fakeRegistry struct {
 	branch    string
 	parent    string
 	opened    int
+	stale     []string
+	listRef   string
+}
+
+func (f *fakeRegistry) StaleVersionsLists(_ context.Context, _ *slog.Logger, _ g2.Blobs, listRef string) ([]string, error) {
+	f.listRef = listRef
+	return f.stale, nil
 }
 
 func (f *fakeRegistry) VersionsListFile(_ context.Context, _ *slog.Logger, _, id string) (*g2.File, error) {
@@ -74,7 +81,7 @@ func TestController_Update(t *testing.T) {
 		"1790772767": {Path: "pkgs/67/1790772767/versions.json", Content: "new"},
 	}}
 	merger := &recordingAutoMerger{}
-	if err := New(reg, merger, "main").Update(context.Background(), discardLogger(), []string{"1790772767", "1791650998"}); err != nil {
+	if err := New(reg, merger, nil, "main").Update(context.Background(), discardLogger(), []string{"1790772767", "1791650998"}); err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff([]string{"pkgs/67/1790772767/versions.json"}, paths(reg.committed)); diff != "" {
@@ -100,7 +107,7 @@ func TestController_Update_openPullRequest(t *testing.T) {
 		held: map[string]string{g2.VersionsBranch + ":pkgs/98/1791650998/versions.json": "same"},
 		pr:   &gogithub.PullRequest{},
 	}
-	if err := New(reg, nil, "main").Update(context.Background(), discardLogger(), []string{"1790772767", "1791650998"}); err != nil {
+	if err := New(reg, nil, nil, "main").Update(context.Background(), discardLogger(), []string{"1790772767", "1791650998"}); err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff([]string{"pkgs/67/1790772767/versions.json"}, paths(reg.committed)); diff != "" {
@@ -115,14 +122,14 @@ func TestController_Update_openPullRequest(t *testing.T) {
 func TestController_Update_nothingToDo(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{}
-	if err := New(reg, nil, "main").Update(context.Background(), discardLogger(), []string{"1790772767"}); err != nil {
+	if err := New(reg, nil, nil, "main").Update(context.Background(), discardLogger(), []string{"1790772767"}); err != nil {
 		t.Fatal(err)
 	}
 	if reg.committed != nil || reg.opened != 0 {
 		t.Errorf("committed %v, opened %d", reg.committed, reg.opened)
 	}
 	dry := &fakeRegistry{lists: map[string]*g2.File{"1790772767": {Path: "pkgs/67/1790772767/versions.json", Content: "new"}}}
-	c := New(dry, nil, "main")
+	c := New(dry, nil, nil, "main")
 	c.DryRun()
 	if err := c.Update(context.Background(), discardLogger(), []string{"1790772767"}); err != nil {
 		t.Fatal(err)
@@ -130,7 +137,52 @@ func TestController_Update_nothingToDo(t *testing.T) {
 	if dry.committed != nil || dry.opened != 0 {
 		t.Errorf("a dry run committed %v, opened %d", dry.committed, dry.opened)
 	}
-	if err := New(reg, nil, "main").Update(context.Background(), discardLogger(), []string{"cli/cli"}); err == nil {
+	if err := New(reg, nil, nil, "main").Update(context.Background(), discardLogger(), []string{"cli/cli"}); err == nil {
 		t.Error("a package name was taken for an id")
+	}
+}
+
+// No ids means the lists that are behind, asked of the base branch when no pull request is
+// open.
+func TestController_Update_stale(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{
+		stale: []string{"1790772767"},
+		lists: map[string]*g2.File{"1790772767": {Path: "pkgs/67/1790772767/versions.json", Content: "new"}},
+	}
+	if err := New(reg, &recordingAutoMerger{}, nil, "main").Update(context.Background(), discardLogger(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if reg.listRef != "main" {
+		t.Errorf("behind was asked of %s", reg.listRef)
+	}
+	if diff := cmp.Diff([]string{"pkgs/67/1790772767/versions.json"}, paths(reg.committed)); diff != "" {
+		t.Errorf("what was committed (-want +got):\n%s", diff)
+	}
+}
+
+// With a pull request open, behind is asked of the lists it holds, and its auto-merge is
+// turned on when it is off, even with nothing to add.
+func TestController_Update_staleOnOpenPullRequest(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{pr: &gogithub.PullRequest{}}
+	merger := &recordingAutoMerger{}
+	if err := New(reg, merger, nil, "main").Update(context.Background(), discardLogger(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if reg.listRef != g2.VersionsBranch {
+		t.Errorf("behind was asked of %s", reg.listRef)
+	}
+	if reg.committed != nil || merger.enabled != 1 {
+		t.Errorf("committed %v, auto-merge turned on %d times", reg.committed, merger.enabled)
+	}
+
+	on := &fakeRegistry{pr: &gogithub.PullRequest{AutoMerge: &gogithub.PullRequestAutoMerge{}}}
+	onMerger := &recordingAutoMerger{}
+	if err := New(on, onMerger, nil, "main").Update(context.Background(), discardLogger(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if onMerger.enabled != 0 {
+		t.Errorf("auto-merge already on was turned on %d times", onMerger.enabled)
 	}
 }
