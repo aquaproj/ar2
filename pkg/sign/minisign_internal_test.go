@@ -16,7 +16,8 @@ func TestMinisignUnrunnable(t *testing.T) {
 	}{
 		{goos: "linux", goarch: "amd64", want: false},
 		{goos: "darwin", goarch: "arm64", want: false},
-		{goos: "linux", goarch: "arm64", want: true},
+		{goos: "linux", goarch: "arm64", want: false},
+		{goos: "darwin", goarch: "amd64", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos+"/"+tt.goarch, func(t *testing.T) {
