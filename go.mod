@@ -1,6 +1,6 @@
 module github.com/aquaproj/ar2
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/aquaproj/aqua/v2 v2.64.1-0.20261025043519-56640f80ea27
