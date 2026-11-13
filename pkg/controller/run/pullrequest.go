@@ -86,6 +86,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, d
 		// Something the version says is in doubt, and merging it without anyone
 		// looking is what the checks exist to prevent.
 		logger.Warn("leaving the pull request for review", "number", pr.GetNumber())
+		c.g2.Label(ctx, logger, pr.GetNumber(), g2.NeedsReviewLabel)
 		return nil
 	}
 	if err := c.autoMerger().EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {

@@ -441,3 +441,23 @@ func TestOpenPullRequest_replacesPublished(t *testing.T) {
 		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
 	}
 }
+
+// A version something is in doubt about is labelled needs-review and left for a person, so the
+// pull requests waiting for one can be listed by the label.
+func TestOpenPullRequest_needsReview(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	merger := &countingAutoMerger{}
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
+	c.UseAutoMerger(merger)
+	v := &version{Version: "v2.1.0", Registry: &generate.Registry{}, NeedsReview: true}
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{config: &aquag2.Config{}, held: true}, "cli/cli", v, false); err != nil {
+		t.Fatal(err)
+	}
+	if merger.calls != 0 {
+		t.Errorf("auto-merge was enabled %d times", merger.calls)
+	}
+	if diff := cmp.Diff([]string{g2.NeedsReviewLabel}, reg.labels); diff != "" {
+		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
+	}
+}
