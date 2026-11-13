@@ -2,7 +2,6 @@ package verify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -168,9 +167,10 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 		filled.Unresolved = append(filled.Unresolved, reason)
 		filled.exclude(asset, reason)
 		return false, true, nil
-	case err != nil && (Refused(err) || errors.Is(err, errNotArm64)):
-		// What the release has for arm64 is a 32-bit ARM build, which is the release
-		// having nothing for the environment as much as a 404 is.
+	case err != nil && (Refused(err) || errWrongArch(err)):
+		// What the release has for the arch is a build for another -- 32-bit ARM for
+		// arm64, arm64 alone for amd64 -- which is the release having nothing for the
+		// environment as much as a 404 is.
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
 		filled.exclude(asset, err.Error())
