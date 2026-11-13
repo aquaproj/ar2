@@ -86,3 +86,68 @@ func TestCheckArm64(t *testing.T) {
 		})
 	}
 }
+
+// machoHeader is the smallest 64-bit Mach-O file debug/macho reads: a header with no load
+// commands.
+func machoHeader(cpu uint32) []byte {
+	b := make([]byte, 32)
+	binary.LittleEndian.PutUint32(b[0:], 0xfeedfacf)
+	binary.LittleEndian.PutUint32(b[4:], cpu)
+	binary.LittleEndian.PutUint32(b[12:], 2) // MH_EXECUTE
+	return b
+}
+
+// fatMacho is a universal Mach-O file holding a thin one for each CPU.
+func fatMacho(cpus ...uint32) []byte {
+	const align = 12 // 4096
+	header := 8 + 20*len(cpus)
+	offset := (header + 1<<align - 1) &^ (1<<align - 1)
+	b := make([]byte, offset+len(cpus)<<align)
+	binary.BigEndian.PutUint32(b[0:], 0xcafebabe)
+	binary.BigEndian.PutUint32(b[4:], uint32(len(cpus))) //nolint:gosec
+	for i, cpu := range cpus {
+		at := offset + i<<align
+		arch := b[8+20*i:]
+		binary.BigEndian.PutUint32(arch[0:], cpu)
+		binary.BigEndian.PutUint32(arch[8:], uint32(at)) //nolint:gosec
+		binary.BigEndian.PutUint32(arch[12:], 32)
+		binary.BigEndian.PutUint32(arch[16:], align)
+		copy(b[at:], machoHeader(cpu))
+	}
+	return b
+}
+
+// AOMediaCodec/libavif's macOS-artifacts.zip names no arch and holds arm64 executables,
+// which an Intel Mac can't run.
+func TestCheckAmd64(t *testing.T) {
+	t.Parallel()
+	const (
+		emX8664, emAArch64 = 62, 183
+		cpuAmd64, cpuArm64 = 0x01000007, 0x0100000c
+	)
+	for _, tt := range []struct {
+		name string
+		arch string
+		bin  []byte
+		want error
+	}{
+		{name: "arm64 Mach-O", arch: "amd64", bin: machoHeader(cpuArm64), want: errNotAmd64},
+		{name: "x86_64 Mach-O", arch: "amd64", bin: machoHeader(cpuAmd64)},
+		{name: "universal", arch: "amd64", bin: fatMacho(cpuArm64, cpuAmd64)},
+		{name: "universal of arm64 alone", arch: "amd64", bin: fatMacho(cpuArm64), want: errNotAmd64},
+		{name: "aarch64 ELF", arch: "amd64", bin: elfHeader(t, true, emAArch64), want: errNotAmd64},
+		{name: "x86-64 ELF", arch: "amd64", bin: elfHeader(t, true, emX8664)},
+		{name: "not an amd64 entry", arch: "arm64", bin: machoHeader(cpuArm64)},
+		{name: "a script", arch: "amd64", bin: []byte("#!/bin/sh\n")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeFile(t, dir, "tool", tt.bin)
+			err := checkAmd64(dir, &generate.Asset{OS: "darwin", Arch: tt.arch, Asset: "macOS-artifacts.zip"}, []*generate.File{{Name: "tool"}})
+			if !errors.Is(err, tt.want) {
+				t.Errorf("got %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
