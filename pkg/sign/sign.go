@@ -300,7 +300,8 @@ func (v *Verifier) attestation(ctx context.Context, logger *slog.Logger, asset *
 // minisignUnrunnable says minisign can't run on this machine, and nothing when it can.
 //
 // The tool runs on the host rather than on the environment the entry is for, and it isn't
-// built for every host aqua supports: on linux/arm64 there is no minisign to install.
+// built for every host aqua supports: on darwin/amd64 there is no minisign to install, and
+// until aqua installed a newer minisign there was none on linux/arm64 either.
 // ziglang/zig publishes minisign signatures, so every entry it has said so, and the check
 // that reads the entry on a Linux arm64 machine called that a registry not holding up to
 // its release. aqua says the same thing about the same package and installs it anyway.
