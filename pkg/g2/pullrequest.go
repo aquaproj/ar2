@@ -116,6 +116,12 @@ func (c *Client) label(ctx context.Context, logger *slog.Logger, number int) {
 // merge itself, and a maintainer who has half an hour for the registry wants the list.
 const NeedsDefinitionLabel = "needs-definition"
 
+// NeedsReviewLabel marks the pull requests left open because something a version says is in
+// doubt: an environment the version before had and this one hasn't, one it gained, a check
+// that couldn't run. Like needs-definition, it is there so that the list of what is waiting
+// for a person can be read in one place rather than found by reading every open pull request.
+const NeedsReviewLabel = "needs-review"
+
 // Label puts a label on a pull request, making it first when the repository hasn't got it.
 //
 // Said rather than failed for, like the label of the release: what the pull request carries
