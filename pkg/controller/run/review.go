@@ -64,6 +64,7 @@ func (c *Controller) openReview(ctx context.Context, logger *slog.Logger, def *d
 	inFlight[branch] = struct{}{}
 	logger.Info("opened a pull request of the versions left for review",
 		"package", pkgName, "num_of_versions", len(versions), "number", pr.GetNumber())
+	c.g2.Label(ctx, logger, pr.GetNumber(), g2.NeedsReviewLabel)
 	return c.summarize(logger, pkgName, versions)
 }
 

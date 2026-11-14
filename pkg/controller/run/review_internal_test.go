@@ -6,6 +6,7 @@ import (
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/google/go-cmp/cmp"
 )
 
 // The versions left for review go to one pull request of the package's, and a version that
@@ -31,6 +32,9 @@ func TestOpenPullRequests_review(t *testing.T) {
 	}
 	if len(reg.committed) != 2 {
 		t.Errorf("committed %d files to the review branch, want both versions left for review", len(reg.committed))
+	}
+	if diff := cmp.Diff([]string{g2.NeedsReviewLabel}, reg.labels); diff != "" {
+		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
 	}
 }
 
