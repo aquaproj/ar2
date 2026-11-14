@@ -110,3 +110,41 @@ func TestAddFormerNames_alreadyThere(t *testing.T) {
 		t.Errorf("the aliases are %+v, want the one that was there", cfg.Aliases)
 	}
 }
+
+// A package renamed upstream finds aqua-registry's definition under the name it had:
+// docker/docker-agent is docker/cagent there. Looking only under the new name found nothing,
+// and its first versions were published without a definition.
+func TestFormerDefinition(t *testing.T) {
+	t.Parallel()
+	cagent := &aquaregistry.PackageInfo{RepoOwner: "docker", RepoName: "cagent"}
+	input := &Input{
+		State: &state.State{Renamed: map[string]string{
+			"docker/cagent":  "docker/docker-agent",
+			"mgechev/revive": "revive-lint/revive",
+		}},
+		PkgInfos: map[string]*aquaregistry.PackageInfo{"docker/cagent": cagent},
+	}
+	former, base := formerDefinition(input, "docker/docker-agent")
+	if former != "docker/cagent" || base != cagent {
+		t.Errorf("found %q (%v), want docker/cagent's definition", former, base)
+	}
+	if former, base := formerDefinition(input, "revive-lint/revive"); base != nil {
+		t.Errorf("found %q for a package whose former name aqua-registry doesn't have", former)
+	}
+	if former, base := formerDefinition(input, "cli/cli"); base != nil {
+		t.Errorf("found %q for a package that was never renamed", former)
+	}
+}
+
+// A definition converted under the former name points at the repository the package has now.
+func TestCurrentRepo(t *testing.T) {
+	t.Parallel()
+	cfg := &aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{RepoOwner: "docker", RepoName: "cagent"}}
+	s := &state.State{Packages: map[string]*state.Package{
+		"docker/docker-agent": {RepoOwner: "docker", RepoName: "docker-agent"},
+	}}
+	currentRepo(cfg, "docker/docker-agent", s)
+	if cfg.RepoOwner != "docker" || cfg.RepoName != "docker-agent" {
+		t.Errorf("the repository is %s/%s, want docker/docker-agent", cfg.RepoOwner, cfg.RepoName)
+	}
+}
