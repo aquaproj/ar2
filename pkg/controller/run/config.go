@@ -119,6 +119,14 @@ func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger,
 	// been.
 
 	base := input.PkgInfos[pkgName]
+	source := pkgName
+	if base == nil {
+		// A repository renamed upstream is held under its new name, while aqua-registry
+		// may still have the definition under the old one: docker/docker-agent is
+		// docker/cagent there. Looking only under the new name found nothing, and the
+		// package's first versions were published without a definition.
+		source, base = formerDefinition(input, pkgName)
+	}
 	if base == nil {
 		// aqua-registry doesn't have the package, so there is nothing to convert.
 		// What is generated comes from the release alone, and the definition is
@@ -127,7 +135,7 @@ func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger,
 		return &definition{}, nil
 	}
 
-	scaffold, err := registry.FetchScaffold(ctx, c.gh, input.RegistryRef, pkgName)
+	scaffold, err := registry.FetchScaffold(ctx, c.gh, input.RegistryRef, source)
 	if err != nil {
 		// The filters are what a release can't be read for, so losing them would
 		// produce a definition that quietly resolves differently. Better to leave
@@ -136,12 +144,47 @@ func (c *Controller) resolveDefinition(ctx context.Context, logger *slog.Logger,
 	}
 
 	converted, unconverted := migrate.Config(pkgName, base, scaffold)
+	if source != pkgName {
+		logger.Info("converting the definition aqua-registry has under the package's former name",
+			"package", pkgName, "former_name", source)
+		currentRepo(converted, pkgName, input.State)
+	}
 	for _, constraint := range unconverted {
 		logger.Warn("a version_constraint couldn't be turned into a boundary",
 			"package", pkgName, "version_constraint", constraint)
 	}
 	addFormerNames(logger, converted, pkgName, input.State)
 	return &definition{config: converted, unconverted: unconverted}, nil
+}
+
+// formerDefinition returns aqua-registry's definition of the package under a name the
+// package had before, and that name, or "" and nil when it has none under any.
+func formerDefinition(input *Input, pkgName string) (string, *aquaregistry.PackageInfo) {
+	if input.State == nil {
+		return "", nil
+	}
+	for _, former := range slices.Sorted(maps.Keys(input.State.Renamed)) {
+		if input.State.Renamed[former] != pkgName {
+			continue
+		}
+		if base := input.PkgInfos[former]; base != nil {
+			return former, base
+		}
+	}
+	return "", nil
+}
+
+// currentRepo points a definition converted under a former name at the repository the
+// package has now, which the state recorded when it followed the rename.
+func currentRepo(cfg *aquag2.Config, pkgName string, s *state.State) {
+	if cfg == nil || cfg.PackageInfo == nil || s == nil {
+		return
+	}
+	pkg := s.Packages[pkgName]
+	if pkg == nil || pkg.RepoOwner == "" || pkg.RepoName == "" {
+		return
+	}
+	cfg.RepoOwner, cfg.RepoName = pkg.RepoOwner, pkg.RepoName
 }
 
 // addFormerNames makes the definition say which names the package used to answer to.

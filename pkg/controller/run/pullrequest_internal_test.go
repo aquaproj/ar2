@@ -461,3 +461,23 @@ func TestOpenPullRequest_needsReview(t *testing.T) {
 		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
 	}
 }
+
+// Versions of a package with no definition to commit are left for review: merged, they
+// would leave the package not taken over, and the next run would take it over again.
+func TestOpenPullRequest_noDefinition(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{}
+	merger := &countingAutoMerger{}
+	c := New(ghClient(t), nil, nil, reg, failingAutoMerger{}, nil, nil)
+	c.UseAutoMerger(merger)
+	v := &version{Version: "v1.161.0", Registry: &generate.Registry{}}
+	if err := c.openPullRequest(t.Context(), discardLogger(), &definition{}, "docker/docker-agent", v, false); err != nil {
+		t.Fatal(err)
+	}
+	if merger.calls != 0 {
+		t.Errorf("auto-merge was enabled %d times", merger.calls)
+	}
+	if diff := cmp.Diff([]string{g2.NeedsReviewLabel}, reg.labels); diff != "" {
+		t.Errorf("the labels are wrong (-want +got):\n%s", diff)
+	}
+}

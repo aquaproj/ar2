@@ -131,6 +131,14 @@ func (c *Controller) filesToCommit(logger *slog.Logger, def *definition, pkgName
 		out.needsReview = out.needsReview || cfg.needsReview
 		out.unconverted = cfg.unconverted
 	}
+	if !def.held && def.config == nil {
+		// Nothing to convert, so the pull request carries versions and no definition.
+		// It can't merge itself: without a definition the package isn't taken over, and
+		// the next run would take it over again under a new id.
+		logger.Warn("the package has no definition to commit; the pull request is left for review",
+			"package", pkgName)
+		out.needsReview = true
+	}
 
 	for _, v := range versions {
 		content, err := marshal(v.Registry)
