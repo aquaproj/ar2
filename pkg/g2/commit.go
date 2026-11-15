@@ -202,6 +202,18 @@ func (c *Client) moveBranch(ctx context.Context, branch, commit string) error {
 	if err != nil {
 		return err
 	}
+	if sha != "" && strings.HasPrefix(branch, HeadBranchPrefix) {
+		leftover, err := c.leftover(ctx, branch)
+		if err != nil {
+			return err
+		}
+		if leftover {
+			if _, err := c.prGH.Git.DeleteRef(ctx, c.owner, c.repo, "heads/"+branch); err != nil {
+				return fmt.Errorf("delete the head branch no pull request is open for: %w", err)
+			}
+			sha = ""
+		}
+	}
 	if sha == "" {
 		_, _, err = c.prGH.Git.CreateRef(ctx, c.owner, c.repo, gogithub.CreateRef{
 			Ref: "refs/heads/" + branch,
@@ -220,4 +232,23 @@ func (c *Client) moveBranch(ctx context.Context, branch, commit string) error {
 		return fmt.Errorf("update the branch: %w", err)
 	}
 	return nil
+}
+
+// leftover says whether a head branch is one no pull request is open for: what a pull request
+// that was closed without merging, or merged before head branches were deleted on merge, left
+// behind.
+//
+// Such a branch is created again rather than moved. Moving it is a force-push from wherever
+// the pull request left it, and rust-lang/rustup's was 9,719 commits behind the default
+// branch: GitHub answered 502 and 504 to moving it, every time, and the package couldn't be
+// generated again at all. Nothing is lost by deleting it, since nothing is open on it. A
+// branch a pull request is open on is moved, as before.
+func (c *Client) leftover(ctx context.Context, branch string) (bool, error) {
+	opts := &gogithub.PullRequestListOptions{State: stateOpen, Head: c.owner + ":" + branch}
+	opts.PerPage = 1
+	prs, _, err := c.gh.PullRequests.List(ctx, c.owner, c.repo, opts)
+	if err != nil {
+		return false, fmt.Errorf("list the pull requests open on the head branch: %w", err)
+	}
+	return len(prs) == 0, nil
 }
