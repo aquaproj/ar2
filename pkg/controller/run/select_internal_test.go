@@ -2,6 +2,7 @@ package run
 
 import (
 	"testing"
+	"time"
 
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/state"
@@ -224,5 +225,35 @@ func TestOnly_unreachable(t *testing.T) {
 	got := only(discardLogger(), []*Candidate{{Name: "cli/cli"}}, []string{"nobody/nothing"})
 	if len(got) != 0 {
 		t.Errorf("got %d candidates, want none", len(got))
+	}
+}
+
+// TestOrder_fresh checks that a package whose history was never walked comes before the
+// ones that were, whatever its stars and turns: the registry serves nothing of it yet. One
+// that is a lap ahead of the rest -- its turn came and it is still not walked, because it
+// fails -- waits for the rest like any other, so that it can't take every run.
+func TestOrder_fresh(t *testing.T) {
+	t.Parallel()
+	walked := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	s := &state.State{
+		Packages: map[string]*state.Package{
+			// Walked, popular, and with the fewest turns of the walked ones.
+			"a/popular": {RepoOwner: "a", RepoName: "popular", Stars: 100, Round: 44, LastDeepCheck: walked},
+			// Walked, and already had its turn in this lap.
+			"b/ahead": {RepoOwner: "b", RepoName: "ahead", Stars: 90, Round: 45, LastDeepCheck: walked},
+			// Never walked and in this lap: fresh, so first, stars deciding between them.
+			"c/new":  {RepoOwner: "c", RepoName: "new", Stars: 1, Round: 44},
+			"d/new2": {RepoOwner: "d", RepoName: "new2", Stars: 5, Round: 44},
+			// Never walked, but had its turn in this lap and is still not walked.
+			"e/failing": {RepoOwner: "e", RepoName: "failing", Stars: 1000, Round: 45},
+		},
+	}
+	got := make([]string, 0, len(s.Packages))
+	for _, c := range order(s) {
+		got = append(got, c.Name)
+	}
+	want := []string{"d/new2", "c/new", "a/popular", "e/failing", "b/ahead"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("order is wrong (-want +got):\n%s", diff)
 	}
 }
