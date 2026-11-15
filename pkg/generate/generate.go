@@ -115,7 +115,7 @@ func (g *Generator) Generate(ctx context.Context, logger *slog.Logger, input *In
 		if err := g.inferSigning(ctx, logger, input, reg, rel.names); err != nil {
 			return nil, err
 		}
-		out.ChecksumFiles = g.signedChecksumFiles(ctx, logger, input, rel.names)
+		out.ChecksumFiles = g.checksumFiles(ctx, logger, input, base, rel.names)
 	}
 	return out, nil
 }

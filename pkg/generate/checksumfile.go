@@ -21,6 +21,16 @@ type ChecksumFile struct {
 	Cosign *aquaregistry.Cosign
 }
 
+// checksumFiles returns the signed checksum files of the release to hold the entries to, or
+// none when the definition turns their signature off: see checksumSigningOff.
+func (g *Generator) checksumFiles(ctx context.Context, logger *slog.Logger, input *Input, base *aquaregistry.PackageInfo, names map[string]struct{}) []*ChecksumFile {
+	if checksumSigningOff(base) {
+		logger.Warn("the definition turns off the signature of the release's checksum files, so they aren't checked")
+		return nil
+	}
+	return g.signedChecksumFiles(ctx, logger, input, names)
+}
+
 // signedChecksumFiles returns the checksum files of the release that cosign signs.
 //
 // A checksum file is how a release vouches for its assets as a whole: goreleaser publishes
@@ -54,4 +64,20 @@ func (g *Generator) signedChecksumFiles(ctx context.Context, logger *slog.Logger
 		out = append(out, &ChecksumFile{Asset: file, Algorithm: cfg.Algorithm, Cosign: cosign})
 	}
 	return out
+}
+
+// checksumSigningOff is checksum.cosign.enabled: false, which the definition says for a version
+// whose checksum files are signed in a way that can't be checked any more.
+//
+// charmbracelet/skate's v0.1.4 to v0.2.0 sign checksums.txt with a certificate from the
+// Sigstore of 2022, which the trusted root cosign verifies against today no longer vouches
+// for: "leaf certificate verification failed". Nothing about the release is wrong, and
+// nothing a definition can say makes the signature check out, so the versions were never
+// published. A person who has looked says so, for those versions, and each entry is still
+// held to the digest GitHub reports for its asset.
+func checksumSigningOff(base *aquaregistry.PackageInfo) bool {
+	if base == nil || base.Checksum == nil || base.Checksum.Cosign == nil {
+		return false
+	}
+	return base.Checksum.Cosign.Enabled != nil && !*base.Checksum.Cosign.Enabled
 }
