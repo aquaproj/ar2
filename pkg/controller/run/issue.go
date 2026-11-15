@@ -53,10 +53,11 @@ func (c *Controller) reportExcluded(ctx context.Context, logger *slog.Logger, pk
 	}
 	excluded := make([]*excludedVersion, 0, len(versions))
 	for _, v := range versions {
-		if len(v.Excluded) == 0 {
+		left := fixable(v.Excluded)
+		if len(left) == 0 {
 			continue
 		}
-		excluded = append(excluded, &excludedVersion{version: v.Version, excluded: v.Excluded})
+		excluded = append(excluded, &excludedVersion{version: v.Version, excluded: left})
 	}
 	if len(excluded) == 0 {
 		return
@@ -72,6 +73,24 @@ func (c *Controller) reportExcluded(ctx context.Context, logger *slog.Logger, pk
 		logger.Warn("failed to report the environments that were left out",
 			"package", pkgName, "error", err.Error())
 	}
+}
+
+// fixable is the exclusions a person can do something about, which leaves out the
+// environments the release has nothing for.
+//
+// A release without an arm64 build, whose arm64 slot the generator filled with the 32-bit
+// ARM one, is the release's answer, and so is a 404. The issues were most of what the
+// label held -- every version of such a package said it again -- and none of them could be
+// closed, since only the environment coming back closes one. The run's log still says
+// each of them.
+func fixable(excluded []*verify.Excluded) []*verify.Excluded {
+	out := make([]*verify.Excluded, 0, len(excluded))
+	for _, e := range excluded {
+		if !e.Absent {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // excludedVersion is one version and the environments it isn't offered for.
