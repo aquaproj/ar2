@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -462,7 +461,7 @@ func rejoin(logger *slog.Logger, candidates []*Candidate) []*Candidate {
 	}
 	if rejoined {
 		// The counts decide the order, so changing one changes it.
-		slices.SortFunc(candidates, compare)
+		sortCandidates(candidates)
 	}
 	return candidates
 }
