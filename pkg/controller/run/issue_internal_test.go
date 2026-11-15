@@ -245,3 +245,38 @@ func TestKeepsFailingBody(t *testing.T) {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
+
+// An environment the release has nothing for opens no issue: no definition gives it back,
+// so the issue could never be closed. What else the version left out is still said.
+func TestController_reportExcluded_absent(t *testing.T) {
+	t.Parallel()
+	absent := excludedVersions()
+	for _, e := range absent[0].Excluded {
+		e.Absent = true
+	}
+	issues := &fakeIssues{}
+	c := New(ghClient(t), nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+	c.UseIssues(issues, "aquaproj", "aqua-registry-g2")
+	c.reportExcluded(context.Background(), discardLogger(), "an/owner", absent)
+	if len(issues.created) != 0 || len(issues.comments) != 0 {
+		t.Fatalf("%d opened, %d commented", len(issues.created), len(issues.comments))
+	}
+
+	mixed := excludedVersions()
+	mixed[0].Excluded = append(mixed[0].Excluded, &verify.Excluded{
+		Asset:  &generate.Asset{OS: "linux", Arch: "arm64", Asset: "a_linux_arm.tar.gz"},
+		Reason: "the executables are built for 32-bit ARM, not arm64",
+		Absent: true,
+	})
+	c.reportExcluded(context.Background(), discardLogger(), "an/owner", mixed)
+	if len(issues.created) != 1 {
+		t.Fatalf("%d opened", len(issues.created))
+	}
+	body := issues.created[0].GetBody()
+	if !strings.Contains(body, "windows/amd64") {
+		t.Errorf("the fixable environment isn't said:\n%s", body)
+	}
+	if strings.Contains(body, "linux/arm64") {
+		t.Errorf("the absent environment is said:\n%s", body)
+	}
+}
