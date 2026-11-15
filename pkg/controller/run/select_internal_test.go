@@ -74,14 +74,14 @@ func TestLimitBudget(t *testing.T) {
 		existing int
 		want     *share
 	}{
-		{name: "nothing generated yet", budget: 300, existing: 0, want: &share{attempts: 5, versions: 5}},
-		{name: "partly generated", budget: 300, existing: 3, want: &share{attempts: 2, versions: 2}},
+		{name: "nothing generated yet", budget: 300, existing: 0, want: &share{attempts: 10, versions: 10}},
+		{name: "partly generated", budget: 300, existing: 3, want: &share{attempts: 7, versions: 7}},
 		{
-			// Past the breadth there is nothing left to reach, so the package takes
-			// what the run has left and the versions bound doesn't apply.
-			name: "past the breadth", budget: 300, existing: 5, want: &share{attempts: 300},
+			// Past the breadth the package gets the step, which defaults to the
+			// breadth, rather than what the run has left.
+			name: "past the breadth", budget: 300, existing: 10, want: &share{attempts: 10, versions: 10},
 		},
-		{name: "the run is nearly spent", budget: 2, existing: 0, want: &share{attempts: 2, versions: 5}},
+		{name: "the run is nearly spent", budget: 2, existing: 0, want: &share{attempts: 2, versions: 10}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,6 +126,17 @@ func TestLimitBudget_configured(t *testing.T) {
 			name: "only the versions are set, partly generated", existing: 8,
 			breadth: &g2.Breadth{Versions: 10},
 			want:    &share{attempts: 2, versions: 2},
+		},
+		{
+			// Past the breadth, a step of its own is how many more a turn gets.
+			name: "past the breadth with a step", existing: 30,
+			breadth: &g2.Breadth{Versions: 10, Step: 20},
+			want:    &share{attempts: 20, versions: 20},
+		},
+		{
+			name: "past the breadth with a step and attempts", existing: 30,
+			breadth: &g2.Breadth{Versions: 10, Step: 20, Attempts: 25},
+			want:    &share{attempts: 25, versions: 20},
 		},
 	}
 	for _, tt := range tests {

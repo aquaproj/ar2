@@ -676,7 +676,8 @@ func (s *share) spent(attempted, generated int) bool {
 //
 // A package that the registry holds few enough versions of gets enough of a turn to
 // reach the breadth, so the run moves on instead of finishing this one. A package
-// already past it takes whatever is left.
+// already past it gets the breadth's step: as many more each lap, so that the history
+// of every package deepens together instead of the first ones taking the whole run.
 //
 // The two bounds are separate because the versions likeliest to fail are the newest,
 // which are the ones a turn starts from: a release with no assets, or one whose
@@ -689,7 +690,7 @@ func (s *share) spent(attempted, generated int) bool {
 func limitBudget(budget int, existing map[string]struct{}, breadth *g2.Breadth) *share {
 	want := breadth.GetVersions() - len(existing)
 	if want <= 0 {
-		return &share{attempts: budget}
+		want = breadth.GetStep()
 	}
 	attempts := want
 	if a := breadth.GetAttempts(); a > 0 {
