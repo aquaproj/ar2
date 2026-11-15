@@ -57,8 +57,8 @@ type Excluded struct {
 	Asset *generate.Asset
 	// Reason is what happened, in a line.
 	Reason string
-	// Absent is the release having nothing for the environment: the asset is a 404, or
-	// what it has for the arch is a build for another. No definition gives the
+	// Absent is the release having nothing for the environment: a GitHub release's asset
+	// is a 404, or what it has for the arch is a build for another. No definition gives the
 	// environment back, so there is nothing for a person to do about it.
 	Absent bool
 }
@@ -131,7 +131,7 @@ func (v *Verifier) fill(ctx context.Context, logger *slog.Logger, pkgName, versi
 		// reason for the ones it does to go without the version.
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
-		filled.absent(asset, err.Error())
+		filled.refused(asset, err.Error())
 		return false, nil
 	}
 	return true, nil
@@ -177,7 +177,11 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 		// environment as much as a 404 is.
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
-		filled.absent(asset, err.Error())
+		if errWrongArch(err) {
+			filled.absent(asset, err.Error())
+		} else {
+			filled.refused(asset, err.Error())
+		}
 		return false, true, nil
 	case err != nil:
 		// The entry isn't mergeable as it stands, but it is most of the way
@@ -224,7 +228,7 @@ func (v *Verifier) signedOnly(ctx context.Context, logger *slog.Logger, pkgName,
 	case err != nil && Refused(err):
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
-		filled.absent(asset, err.Error())
+		filled.refused(asset, err.Error())
 		return false, true, nil
 	case err != nil:
 		logger.Warn("failed to check the signatures of an asset that can't be opened here",
@@ -245,6 +249,20 @@ func (f *Filled) exclude(asset *generate.Asset, reason string) {
 // absent records an environment the release has nothing for: see Excluded.Absent.
 func (f *Filled) absent(asset *generate.Asset, reason string) {
 	f.Excluded = append(f.Excluded, &Excluded{Asset: asset, Reason: reason, Absent: true})
+}
+
+// refused records an environment whose asset the server refused.
+//
+// For a GitHub release that is the release not having it: the asset's name was read from
+// the release. Any other type builds its URL from the definition's template, so a 404 may
+// be the definition being wrong for the version -- tailscale, vault, and racket's
+// downloads were -- and that is a person's to fix.
+func (f *Filled) refused(asset *generate.Asset, reason string) {
+	if asset.Type == "github_release" {
+		f.absent(asset, reason)
+		return
+	}
+	f.exclude(asset, reason)
 }
 
 // fillByExtracting extracts the asset, resolves its files, and records the checksum. It

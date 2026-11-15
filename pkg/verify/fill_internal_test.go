@@ -244,3 +244,25 @@ func TestComplete_stopsOnAServerError(t *testing.T) {
 		t.Fatalf("got %v, want an error the next run tries again", err)
 	}
 }
+
+// A refused asset of a GitHub release is the release not having it; any other type's URL is
+// the definition's, so a 404 there is left for a person to look at.
+func TestFilled_refused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		typ    string
+		absent bool
+	}{
+		{typ: "github_release", absent: true},
+		{typ: "http", absent: false},
+	} {
+		filled := &Filled{}
+		filled.refused(&generate.Asset{OS: "linux", Arch: "amd64", Type: tc.typ}, "status code 404")
+		if len(filled.Excluded) != 1 {
+			t.Fatalf("%s: what went is %+v", tc.typ, filled.Excluded)
+		}
+		if got := filled.Excluded[0].Absent; got != tc.absent {
+			t.Errorf("%s: absent is %v", tc.typ, got)
+		}
+	}
+}
