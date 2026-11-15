@@ -44,8 +44,16 @@ type RegistryConfig struct {
 // with two usable versions is barely better than one with none, so it wants to be
 // larger. The registry says which it is, because nothing here can tell.
 type Breadth struct {
-	// Versions ends the turn once the package has that many. Default 5.
+	// Versions ends the turn once the package has that many. Default 10.
 	Versions int `yaml:"versions,omitempty"`
+	// Step is how many versions a package already past Versions gets in a turn. Default
+	// Versions.
+	//
+	// A turn going on to whatever the run had left spent most of a lap on the history
+	// of the packages started first. With a step, every package gets that many more
+	// each lap: the registry holds the newest ten of everything, then the newest twenty,
+	// and so on, and raising the run's limit buys more of that rather than a deeper turn.
+	Step int `yaml:"step,omitempty"`
 	// Attempts ends the turn after that many versions have been tried, whether or
 	// not they worked.
 	//
@@ -65,7 +73,7 @@ type Breadth struct {
 // Small, because the first thing the registry needs is for every package to be
 // installable at all. Someone installing a package almost always wants a recent
 // version, and a package with nothing can't be installed from g2 at all.
-const defaultBreadthVersions = 5
+const defaultBreadthVersions = 10
 
 // GetVersions is how many versions ends a package's turn.
 func (b *Breadth) GetVersions() int {
@@ -73,6 +81,14 @@ func (b *Breadth) GetVersions() int {
 		return defaultBreadthVersions
 	}
 	return b.Versions
+}
+
+// GetStep is how many versions a package already past GetVersions gets in a turn.
+func (b *Breadth) GetStep() int {
+	if b == nil || b.Step <= 0 {
+		return b.GetVersions()
+	}
+	return b.Step
 }
 
 // GetAttempts is how many versions may be tried to get there, or zero for as many as
