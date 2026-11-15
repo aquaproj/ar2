@@ -46,3 +46,41 @@ func TestClient_post_retry(t *testing.T) {
 		})
 	}
 }
+
+// Enabling auto-merge is sent again when GitHub says something went wrong on its side, and
+// not when it refuses the pull request.
+func TestClient_EnableAutoMerge_retry(t *testing.T) {
+	t.Parallel()
+	wentWrong := `{"errors":[{"message":"Something went wrong while executing your query on 2026-11-15T04:49:27Z. Please include ` + "`ABCD`" + ` when reporting this issue."}]}`
+	clean := `{"errors":[{"message":"Pull request Pull request is in clean status"}]}`
+	ok := `{"data":{"enablePullRequestAutoMerge":{"clientMutationId":null}}}`
+	for _, d := range []struct {
+		name     string
+		answers  []string
+		wantErr  bool
+		wantSent int32
+	}{
+		{name: "a bad minute", answers: []string{wentWrong, ok}, wantSent: 2},
+		{name: "a bad few minutes", answers: []string{wentWrong, wentWrong, wentWrong, ok}, wantErr: true, wantSent: queryAttempts},
+		{name: "refused", answers: []string{clean, ok}, wantErr: true, wantSent: 1},
+	} {
+		t.Run(d.name, func(t *testing.T) {
+			t.Parallel()
+			var sent atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(d.answers[sent.Add(1)-1]))
+			}))
+			t.Cleanup(srv.Close)
+			c := NewClient(srv.Client())
+			c.endpoint = srv.URL
+			c.retryWait = 0
+			err := c.EnableAutoMerge(context.Background(), "PR_id")
+			if (err != nil) != d.wantErr {
+				t.Errorf("got %v, want an error: %t", err, d.wantErr)
+			}
+			if got := sent.Load(); got != d.wantSent {
+				t.Errorf("sent %d times, want %d", got, d.wantSent)
+			}
+		})
+	}
+}
