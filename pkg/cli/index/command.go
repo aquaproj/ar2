@@ -110,9 +110,17 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, pkgNames [
 		return err //nolint:wrapcheck // the error already names the token it is for
 	}
 
-	// Auto-merge is turned on with the ordinary token: it needs the pull request the
-	// app just opened, not the app.
-	graphql := github.NewClient(httpClient)
+	// Auto-merge is turned on with the app that opens the pull request and pushes to it,
+	// as 'ar2 run' does. GitHub turns auto-merge off when the head branch is pushed to by
+	// someone other than who turned it on, which the catalogue's branch is whenever a
+	// later run adds to it, and an event it raises for GITHUB_TOKEN's auto-merge starts
+	// no workflow, so nothing could turn it back on. The merge is also a push onto the
+	// default branch, which raises no workflow run when GITHUB_TOKEN made it.
+	graphqlClient := httpClient
+	if prClient := token.HTTPClient(ctx, token.PREnv); prClient != nil {
+		graphqlClient = prClient
+	}
+	graphql := github.NewClient(graphqlClient)
 
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
 	// The definitions come back with the table they were read out of, which is what the
