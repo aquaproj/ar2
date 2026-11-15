@@ -4,7 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"runtime/debug"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -69,7 +71,7 @@ func emptyRelease(pkg *state.Package, version string, err error, now time.Time) 
 // tiedUnder says whether the version tied under the definition as it is now.
 func tiedUnder(pkg *state.Package, def *definition, version string) bool {
 	fp, ok := pkg.Ties[version]
-	return ok && fp == def.fingerprint()
+	return ok && fp == tieFingerprint(def)
 }
 
 // tied records a version whose every environment tied, under the definition it tied under.
@@ -77,5 +79,36 @@ func tied(pkg *state.Package, def *definition, version string) {
 	if pkg.Ties == nil {
 		pkg.Ties = map[string]string{}
 	}
-	pkg.Ties[version] = def.fingerprint()
+	pkg.Ties[version] = tieFingerprint(def)
 }
+
+// tieFingerprint is what a tie was recorded under: the definition, and the aqua that read
+// the asset names.
+//
+// A tie is settled by the definition or by how names are read, and the second is aqua's
+// pkg/asset. Recorded under the definition alone, the versions that tied stayed passed
+// over after aqua learned to tell their assets apart -- ko-build/ko's
+// ko_0.15.4_Darwin_x86_64.tar.gz beside ko_Darwin_x86_64.tar.gz -- since nothing about the
+// definition had changed.
+func tieFingerprint(def *definition) string {
+	return def.fingerprint() + "@" + selectorVersion()
+}
+
+// selectorVersion is the version of the aqua module ar2 was built with, or "" when the
+// binary doesn't say.
+var selectorVersion = sync.OnceValue(func() string { //nolint:gochecknoglobals
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, dep := range info.Deps {
+		if dep.Path != "github.com/aquaproj/aqua/v2" {
+			continue
+		}
+		if dep.Replace != nil {
+			return dep.Replace.Version
+		}
+		return dep.Version
+	}
+	return ""
+})

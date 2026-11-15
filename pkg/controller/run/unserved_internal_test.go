@@ -131,6 +131,23 @@ func TestSettled_tie(t *testing.T) {
 	}
 }
 
+// A version that tied under another aqua is tried again, though the definition is the same:
+// aqua reading the asset names differently may settle it.
+func TestSettled_tieUnderAnotherAqua(t *testing.T) {
+	t.Parallel()
+	cfg := &aquag2.Config{}
+	if err := yaml.Unmarshal([]byte(cmctl), cfg); err != nil {
+		t.Fatal(err)
+	}
+	def := &definition{config: cfg}
+	// What a tie recorded before the aqua version was part of it looks like.
+	pkg := &state.Package{Ties: map[string]string{"v1.14.4": def.fingerprint()}}
+	logger := slog.New(slog.DiscardHandler)
+	if _, ok := settled(logger, def, pkg, []string{"v1.14.4"}, nil)["v1.14.4"]; ok && selectorVersion() != "" {
+		t.Error("a version that tied under another aqua isn't tried again")
+	}
+}
+
 // A tie in every environment is recorded and said as the environments it leaves out; any
 // other error isn't a tie.
 func TestController_tie(t *testing.T) {
