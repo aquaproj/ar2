@@ -255,10 +255,11 @@ func TestController_Sync_keepsWhatHasNoDefinition(t *testing.T) {
 func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 	t.Parallel()
 	reg := &fakeRegistry{
-		openPR: &gogithub.PullRequest{Number: new(7)},
+		openPR: &gogithub.PullRequest{Number: new(7), NodeID: new("PR_open")},
 		index:  &aquag2.Index{Packages: []*aquag2.IndexPackage{{Name: "aquaproj/aqua"}}},
 	}
-	err := newController(reg, &fakeMerger{}, nil).AddPackage(t.Context(), logger(), "cli/cli",
+	merger := &fakeMerger{}
+	err := newController(reg, merger, nil).AddPackage(t.Context(), logger(), "cli/cli",
 		config("GitHub's official command line tool"))
 	if err != nil {
 		t.Fatal(err)
@@ -274,6 +275,10 @@ func TestController_AddPackage_addsToTheOpenPullRequest(t *testing.T) {
 		if !strings.Contains(reg.committed[0].Content, name) {
 			t.Errorf("the catalogue lost %s:\n%s", name, reg.committed[0].Content)
 		}
+	}
+	// GitHub may turn auto-merge off when the head branch moves, so it is turned on again.
+	if diff := cmp.Diff([]string{"PR_open"}, merger.ids); diff != "" {
+		t.Errorf("auto-merge (-want +got):\n%s", diff)
 	}
 }
 

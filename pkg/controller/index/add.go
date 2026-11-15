@@ -81,9 +81,27 @@ func (c *Controller) write(ctx context.Context, logger *slog.Logger, t *target, 
 	if t.pr != nil {
 		logger.Info("added to the open pull request",
 			"number", t.pr.GetNumber(), "num_of_packages", len(change.packages()))
+		c.enableAutoMerge(ctx, logger, t.pr)
 		return nil
 	}
 	return c.openPullRequest(ctx, logger, change)
+}
+
+// enableAutoMerge turns auto-merge on for the catalogue's pull request, and warns rather
+// than fails when it can't: the pull request is open and correct, and just waits for
+// someone.
+//
+// It is done again whenever a run adds to the open pull request, since GitHub may turn
+// auto-merge off when the head branch moves: #13549 had it turned off as "Head branch was
+// modified" and waited for a person with every check passing.
+func (c *Controller) enableAutoMerge(ctx context.Context, logger *slog.Logger, pr *gogithub.PullRequest) {
+	if c.automerge == nil {
+		return
+	}
+	if err := c.automerge.EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
+		slogerr.WithError(logger, err).Warn("failed to turn on auto-merge",
+			"number", pr.GetNumber())
+	}
 }
 
 func (c *Controller) commit(ctx context.Context, logger *slog.Logger, ref string, files []*g2.File, change *change) error {
@@ -135,14 +153,7 @@ func (c *Controller) openPullRequest(ctx context.Context, logger *slog.Logger, c
 	// definitions that were reviewed when they arrived. There is nothing here for a
 	// person to decide, so it goes the way a package version does: the checks on main
 	// say whether it is a file aqua can read, and it merges itself when they pass.
-	if c.automerge == nil {
-		return nil
-	}
-	if err := c.automerge.EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
-		// The pull request is open and correct; it just waits for someone.
-		slogerr.WithError(logger, err).Warn("failed to turn on auto-merge",
-			"number", pr.GetNumber())
-	}
+	c.enableAutoMerge(ctx, logger, pr)
 	return nil
 }
 
