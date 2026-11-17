@@ -158,6 +158,7 @@ func pick(logger *slog.Logger, input *Input, def *aquaregistry.PackageInfo, name
 			return nil, err
 		}
 	}
+	sel.Assets = definedArchs(logger, sel.Assets, def)
 	sel.Ties = definedTies(logger, sel.Ties, def)
 	if len(sel.Assets) != 0 {
 		for _, t := range sel.Ties {
@@ -169,6 +170,30 @@ func pick(logger *slog.Logger, input *Input, def *aquaregistry.PackageInfo, name
 		return nil, tieError(sel.Ties)
 	}
 	return nil, errNoAsset
+}
+
+// definedArchs leaves out an asset whose name says no architecture from an environment the
+// definition's supported_envs doesn't name.
+//
+// Such an asset is placed on every architecture of its OS because nothing says which it is
+// for, so the placement is a guess rather than something the release says, and the
+// definition is where the answer goes. apple/container's container-1.5.0-installer-signed.pkg
+// holds an arm64 executable alone, and an Intel Mac can't run it. Where it is found out is
+// when the archive is unpacked, which a .pkg can't be on the Linux host a run is on, so the
+// definition has to say it. An asset whose name says its architecture is kept, as
+// supported_envs keeps every build the release names.
+func definedArchs(logger *slog.Logger, assets []*aquaasset.Selected, def *aquaregistry.PackageInfo) []*aquaasset.Selected {
+	if len(def.SupportedEnvs) == 0 {
+		return assets
+	}
+	return slices.DeleteFunc(assets, func(a *aquaasset.Selected) bool {
+		if a.Info == nil || !a.Info.NoArch || def.CheckSupportedEnvs(a.OS, a.Arch, a.Env()) {
+			return false
+		}
+		logger.Info("an asset whose name says no architecture is left out of an environment the definition doesn't support",
+			"asset", a.Name, "env", a.Env())
+		return true
+	})
 }
 
 // definedTies returns the ties in the environments the definition says the package is for.

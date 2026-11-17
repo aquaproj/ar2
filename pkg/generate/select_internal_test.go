@@ -178,3 +178,36 @@ func TestSelectAssets_leftOut(t *testing.T) {
 		t.Errorf("what is left out (-want +got):\n%s", diff)
 	}
 }
+
+// apple/container's .pkg names no architecture, so it is placed on both darwin
+// environments, and holds an arm64 executable alone. supported_envs leaves it out of
+// darwin/amd64, while an asset whose name says its architecture is kept wherever it is.
+func TestSelectAssets_noArchOutsideSupportedEnvs(t *testing.T) {
+	t.Parallel()
+	base := &aquaregistry.PackageInfo{
+		Type: "github_release", RepoOwner: "apple", RepoName: "container",
+		Files:         []*aquaregistry.File{{Name: "container", Src: "Payload/bin/container"}},
+		SupportedEnvs: aquaregistry.SupportedEnvs{"darwin/arm64"},
+	}
+	got := assetsByEnv(selected(t, &Input{PkgName: "apple/container", Version: "1.5.0"}, base,
+		"container-1.5.0-installer-signed.pkg",
+	))
+	if diff := cmp.Diff(map[string]string{"darwin/arm64": "container-1.5.0-installer-signed.pkg"}, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+
+	named := &aquaregistry.PackageInfo{
+		Type: "github_release", RepoOwner: "foo", RepoName: "foo",
+		SupportedEnvs: aquaregistry.SupportedEnvs{"darwin/arm64"},
+	}
+	got = assetsByEnv(selected(t, &Input{PkgName: "foo/foo", Version: "v1.0.0"}, named,
+		"foo-darwin-amd64.tar.gz", "foo-darwin-arm64.tar.gz",
+	))
+	want := map[string]string{
+		"darwin/amd64": "foo-darwin-amd64.tar.gz",
+		"darwin/arm64": "foo-darwin-arm64.tar.gz",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("a named asset (-want +got):\n%s", diff)
+	}
+}
