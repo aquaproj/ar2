@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -276,16 +277,27 @@ func (c *Client) post(ctx context.Context, query string, vars map[string]any, ou
 	wait := c.retryWait
 	for attempt := 1; ; attempt++ {
 		err := c.send(ctx, body, out)
-		if attempt == queryAttempts || !retryable(err) {
+		again, atLeast := retryable(err)
+		if attempt == queryAttempts || !again {
 			return err
 		}
+		next := max(wait, c.rateLimitWait(atLeast))
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(wait):
+		case <-time.After(next):
 		}
 		wait *= 2
 	}
+}
+
+// rateLimitWait is how long to wait out a rate limit that asked for d. A test that sets
+// retryWait to nothing waits nothing here either.
+func (c *Client) rateLimitWait(d time.Duration) time.Duration {
+	if c.retryWait == 0 {
+		return 0
+	}
+	return d
 }
 
 // send sends a GraphQL query once.
@@ -301,7 +313,7 @@ func (c *Client) send(ctx context.Context, body []byte, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("send a GraphQL request: %w", &statusError{code: resp.StatusCode})
+		return fmt.Errorf("send a GraphQL request: %w", newStatusError(resp))
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("read a GraphQL response as JSON: %w", err)
@@ -312,23 +324,86 @@ func (c *Client) send(ctx context.Context, body []byte, out any) error {
 // statusError is a GraphQL request answered with a status other than 200.
 type statusError struct {
 	code int
+	// message is the start of what the answer said, so that a refusal says why: a 403 is a
+	// token without the permission as often as it is a rate limit.
+	message string
+	// limited says GitHub answered that the request went over a rate limit, and retryAfter
+	// is how long it asked for before the next one, zero when it didn't say.
+	limited    bool
+	retryAfter time.Duration
+}
+
+// maxMessage is how much of a refusal's body is kept.
+const maxMessage = 300
+
+func newStatusError(resp *http.Response) *statusError {
+	e := &statusError{code: resp.StatusCode}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxMessage))
+	e.message = strings.TrimSpace(string(body))
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
+		return e
+	}
+	// What GitHub documents for both limits: a retry-after header, or the primary limit's
+	// remaining count at zero with the time it resets, or neither, for a secondary limit
+	// that says so only in the message.
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil {
+			e.limited = true
+			e.retryAfter = time.Duration(sec) * time.Second
+		}
+	}
+	if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
+		e.limited = true
+		if reset, err := strconv.ParseInt(resp.Header.Get("X-Ratelimit-Reset"), 10, 64); err == nil {
+			if d := time.Until(time.Unix(reset, 0)); d > e.retryAfter {
+				e.retryAfter = d
+			}
+		}
+	}
+	if strings.Contains(strings.ToLower(e.message), "rate limit") {
+		e.limited = true
+	}
+	return e
 }
 
 func (e *statusError) Error() string {
-	return fmt.Sprintf("status code %d", e.code)
+	if e.message == "" {
+		return fmt.Sprintf("status code %d", e.code)
+	}
+	return fmt.Sprintf("status code %d: %s", e.code, e.message)
 }
 
-// retryable says whether a failed query is worth sending again.
-func retryable(err error) bool {
+// maxRateLimitWait is the longest a query waits out a rate limit before its failure is the
+// run's. A secondary limit asks for a minute or so; the primary one can reset an hour away,
+// which no run waits for.
+const maxRateLimitWait = 2 * time.Minute
+
+// retryable says whether a failed query is worth sending again, and how long to wait at
+// least before it is.
+//
+// A rate limit is worth it when GitHub asks for no longer than maxRateLimitWait. Opening a
+// pull request a few seconds apart reaches the secondary limit now and then, and then turning
+// on auto-merge was refused with a 403 and left ogen-go/ogen's v1.15.0 and TaKO8Ki/frum's
+// v0.1.0 and v0.1.1 for a person, every check on them passing.
+func retryable(err error) (bool, time.Duration) {
 	e, ok := errors.AsType[*statusError](err)
 	if !ok {
-		return false
+		return false, 0
 	}
 	switch e.code {
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return true
+		return true, 0
+	case http.StatusForbidden, http.StatusTooManyRequests:
+		if !e.limited || e.retryAfter > maxRateLimitWait {
+			return false, 0
+		}
+		// GitHub asks for a minute when a secondary limit says nothing of when.
+		if e.retryAfter == 0 {
+			return true, time.Minute
+		}
+		return true, e.retryAfter
 	}
-	return false
+	return false, 0
 }
 
 // limitedAliases returns the aliases that failed with RESOURCE_LIMITS_EXCEEDED.
