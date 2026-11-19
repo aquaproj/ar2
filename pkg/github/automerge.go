@@ -13,8 +13,8 @@ import (
 // what makes CI the gate: the pull request merges itself once the checks pass, and
 // stays open when they don't.
 //
-// It is sent again when GitHub has a bad minute: a 502, 503 or 504, or an answer saying
-// something went wrong on its side. A pull request auto-merge didn't reach waits for a
+// It is sent again when GitHub has a bad minute: a 502, 503 or 504, an answer saying
+// something went wrong on its side, or a rate limit asking for a short wait (see retryable). A pull request auto-merge didn't reach waits for a
 // person while every check on it passes -- alebeck/boring's v0.12.0 was the one of ten
 // opened in the same minute that did.
 func (c *Client) EnableAutoMerge(ctx context.Context, pullRequestID string) error {
