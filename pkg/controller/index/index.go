@@ -179,6 +179,9 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string) *change {
 	have := entriesByName(index)
 	byID := entriesByID(index)
+	// The id each package's entry is made from: the first in id order, which is the one
+	// the run's own table of identities resolves a doubled package to.
+	claimed := map[string]string{}
 	ch := &change{}
 	// In id order, so that a pull request reads the same way whatever order the
 	// definitions came back in.
@@ -199,6 +202,15 @@ func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files m
 			logger.Warn("a definition doesn't name its package", "id", id)
 			continue
 		}
+		if first, ok := claimed[pkgName]; ok {
+			// Two directories hold the package. Both answering for the entry flipped it
+			// from one id to the other on every run (aquaproj/ar2#310); the first keeps
+			// it, and the other is somebody's to remove.
+			logger.Warn("two ids say they hold the same package; the catalogue keeps the first",
+				"package", pkgName, "id", first, "other_id", id)
+			continue
+		}
+		claimed[pkgName] = id
 		entry := aquag2.NewIndexPackage(pkgName, cfg)
 		// The directory the definition was read from is the id. Nothing is minted here:
 		// the package has one, and minting would give it a second.

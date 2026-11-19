@@ -69,6 +69,16 @@ type Definitions interface {
 // for it until that merges, so without reading the pull request the next run would mint
 // it a second id and open a second pull request.
 func ReadIdentities(ctx context.Context, logger *slog.Logger, defs Definitions) (*Identities, map[string]string, error) {
+	// The open pull requests first and the default branch after. A pull request that merges
+	// between the two readings is then on the default branch when it is read; read the
+	// other way round, it was on neither -- the default branch was read before it merged and
+	// its head branch was gone by the time its definition was asked for -- and the package
+	// was taken over a second time under a new id (aquaproj/ar2#310).
+	pending, err := pendingDefinitions(ctx, logger, defs)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	dirs, err := defs.Subtrees(ctx, DefaultBranch+":"+PackagesDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list the packages: %w", err)
@@ -78,34 +88,27 @@ func ReadIdentities(ctx context.Context, logger *slog.Logger, defs Definitions) 
 	if err != nil {
 		return nil, nil, err
 	}
-
-	pending, err := pendingDefinitions(ctx, logger, defs, ids)
-	if err != nil {
-		return nil, nil, err
+	// What the default branch holds says it, so a package both hold is the default
+	// branch's.
+	for _, id := range ids {
+		delete(pending, id)
 	}
 	return NewIdentities(logger, held, pending), held, nil
 }
 
-// pendingDefinitions is the definition each open pull request brings for a package the
-// default branch doesn't hold, keyed by id. A pull request whose definition can't be read
-// is there with an empty one, because it takes the id all the same.
-func pendingDefinitions(ctx context.Context, logger *slog.Logger, defs Definitions, held []string) (map[string]string, error) {
+// pendingDefinitions is the definition each open pull request brings for a package, keyed
+// by id. A pull request whose definition can't be read is there with an empty one, because
+// it takes the id all the same.
+func pendingDefinitions(ctx context.Context, logger *slog.Logger, defs Definitions) (map[string]string, error) {
 	heads, err := defs.OpenPullRequestHeads(ctx)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // the error says what it couldn't list
-	}
-	onMain := make(map[string]struct{}, len(held))
-	for _, id := range held {
-		onMain[id] = struct{}{}
 	}
 	ids := []string{}
 	exprs := []string{}
 	for _, head := range slices.Sorted(slices.Values(heads)) {
 		id, ok := HeadBranchID(head)
 		if !ok {
-			continue
-		}
-		if _, ok := onMain[id]; ok {
 			continue
 		}
 		ids = append(ids, id)
