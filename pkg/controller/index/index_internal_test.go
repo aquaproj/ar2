@@ -228,6 +228,42 @@ func TestController_Sync_upToDate(t *testing.T) {
 	}
 }
 
+// A definition renamed since its entry was made replaces the entry of the old name rather
+// than being added beside it: the old name kept as a package of its own and as the new
+// entry's alias is a catalogue validate-index refuses (aquaproj/ar2#309).
+func TestController_Sync_renamed(t *testing.T) {
+	t.Parallel()
+	index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+		{Name: "supernovae-st/nika", ID: minted, Description: "Workflow language"},
+		{Name: "cli/cli", ID: next, Description: "GitHub's official command line tool"},
+	}}
+	reg := &fakeRegistry{index: index, files: rendered(t, index)}
+	renamed := named("nika-open/nika", "Workflow language")
+	renamed.Aliases = []*aquaregistry.Alias{{Name: "supernovae-st/nika"}}
+	defs := definitions(t, map[string]*aquag2.Config{
+		minted: renamed,
+		next:   named("cli/cli", "GitHub's official command line tool"),
+	})
+
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.committed) == 0 {
+		t.Fatal("committed nothing")
+	}
+	got, err := aquag2.ReadIndex(strings.NewReader(reg.committed[0].Content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []*aquag2.IndexPackage{
+		{Name: "cli/cli", ID: next, Description: "GitHub's official command line tool"},
+		{Name: "nika-open/nika", ID: minted, Description: "Workflow language", Aliases: []string{"supernovae-st/nika"}},
+	}
+	if diff := cmp.Diff(want, got.Packages); diff != "" {
+		t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
+	}
+}
+
 // An entry is not removed because the registry holds no definition of it. It is a package waiting for
 // the pull request that brings one, which a run has already added to the catalogue, and
 // removing it would undo that.
