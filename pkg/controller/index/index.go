@@ -156,7 +156,9 @@ func (c *Controller) Refresh(ctx context.Context, logger *slog.Logger, pkgNames 
 // with them: a query per hundred packages, where fetching a definition for each package
 // the catalogue lacked was a request apiece.
 //
-// Nothing is removed. An entry with no definition behind it is either a package waiting
+// Nothing is removed but the entry of a renamed package's old name, which is replaced by
+// the new one: its id has a definition, and that definition names something else now.
+// An entry with no definition behind it is either a package waiting
 // for the pull request that brings its definition -- which a run has already added to the
 // catalogue, and removing it would undo -- or an orphan, which is somebody's decision
 // rather than a reconciliation's.
@@ -176,6 +178,7 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 // reconcile works out what the catalogue has to gain and what it has to say differently.
 func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files map[string]string) *change {
 	have := entriesByName(index)
+	byID := entriesByID(index)
 	ch := &change{}
 	// In id order, so that a pull request reads the same way whatever order the
 	// definitions came back in.
@@ -202,6 +205,19 @@ func (c *Controller) reconcile(logger *slog.Logger, index *aquag2.Index, files m
 		entry.ID = id
 		old, ok := have[pkgName]
 		if !ok {
+			if prev, listed := byID[id]; listed && prev.Name != pkgName {
+				// The id is listed under another name: the definition was renamed, by
+				// 'ar2 rename' or a run that found the repository transferred. The entry
+				// of the old name is the same package, and kept beside the new one it
+				// would be both a package and the new entry's alias, which the catalogue
+				// is checked for (aquaproj/ar2#309). Nothing else removes it, so this
+				// replaces it.
+				logger.Info("listing the package under its new name", "package", prev.Name, "renamed_to", pkgName)
+				index.Remove(prev.Name)
+				delete(have, prev.Name)
+				ch.updated = append(ch.updated, entry)
+				continue
+			}
 			logger.Info("adding a package to the catalogue", "package", pkgName)
 			ch.added = append(ch.added, entry)
 			continue
@@ -269,6 +285,18 @@ func ids(index *aquag2.Index) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+// entriesByID is the catalogue's entries, by the identifier they are listed under.
+func entriesByID(index *aquag2.Index) map[string]*aquag2.IndexPackage {
+	entries := make(map[string]*aquag2.IndexPackage, len(index.Packages))
+	for _, pkg := range index.Packages {
+		if pkg == nil || pkg.ID == "" {
+			continue
+		}
+		entries[pkg.ID] = pkg
+	}
+	return entries
 }
 
 // entriesByName is the catalogue's entries, by the package they describe.
