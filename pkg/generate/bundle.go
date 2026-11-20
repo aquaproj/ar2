@@ -172,15 +172,26 @@ func unbase64(b []byte) ([]byte, error) {
 }
 
 // signerOf reads who a certificate names.
+//
+// A workflow is named by a URI. An account is named by its email address: Fulcio issues a
+// certificate to a Google service account with the account's address as the subject, which
+// is how sigstore/cosign signs its checksum file before v3 and how knative signs its
+// releases, keyless@projectsigstore.iam.gserviceaccount.com and
+// signer@knative-releases.iam.gserviceaccount.com. cosign's --certificate-identity matches
+// either.
 func signerOf(der []byte) (*signer, error) {
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, fmt.Errorf("read the certificate: %w", err)
 	}
-	if len(cert.URIs) == 0 {
-		return nil, errCertificateNoIdentity
+	issuer := certificateIssuer(cert)
+	if len(cert.URIs) > 0 {
+		return &signer{Identity: cert.URIs[0].String(), Issuer: issuer}, nil
 	}
-	return &signer{Identity: cert.URIs[0].String(), Issuer: certificateIssuer(cert)}, nil
+	if len(cert.EmailAddresses) > 0 {
+		return &signer{Identity: cert.EmailAddresses[0], Issuer: issuer}, nil
+	}
+	return nil, errCertificateNoIdentity
 }
 
 // The extensions a Fulcio certificate records the issuer in. The newer one holds a
