@@ -13,13 +13,19 @@ import (
 	"github.com/aquaproj/ar2/pkg/generate"
 )
 
-// CheckChecksumFiles holds each entry's checksum to what the release's signed checksum files
-// list for its asset.
+// CheckChecksumFiles holds each entry's asset to what the release's signed checksum files
+// list for it.
 //
 // The signature is checked first, the way an asset's is, and the file is read only once it
 // holds. An asset the file lists under another digest isn't what the release published,
 // which is ErrTampered; an asset the file doesn't list is nothing the file says anything
 // about.
+//
+// Which algorithm the file lists is read off each digest's length rather than the file's
+// name: caddy's checksums.txt lists SHA512. A SHA256 is held to the entry's checksum, and
+// any other to what the asset hashed to when it was downloaded. An asset that wasn't
+// downloaded has only its SHA256, so a digest of another algorithm says nothing checkable
+// about it.
 func (v *Verifier) CheckChecksumFiles(ctx context.Context, logger *slog.Logger, pkgName, version string, reg *generate.Registry, files []*generate.ChecksumFile) error {
 	if v.signatures == nil || len(files) == 0 || len(reg.Assets) == 0 {
 		return nil
@@ -31,12 +37,19 @@ func (v *Verifier) CheckChecksumFiles(ctx context.Context, logger *slog.Logger, 
 		}
 		for _, asset := range reg.Assets {
 			want, ok := checksum.FindChecksum(listed, asset.Asset)
-			if !ok || asset.Checksum == "" {
+			if !ok {
 				continue
 			}
-			if !strings.EqualFold(want, asset.Checksum) {
-				return fmt.Errorf("%w: %s lists %s for %s, which hashes to %s",
-					ErrTampered, file.Asset, want, asset.Asset, asset.Checksum)
+			algo := algorithmOf(want)
+			got := v.digestOf(version, asset, algo)
+			if got == "" {
+				logger.Debug("the checksum file lists a digest nothing here can be compared with",
+					"checksum_file", file.Asset, "asset", asset.Asset, "algorithm", algo)
+				continue
+			}
+			if !strings.EqualFold(want, got) {
+				return fmt.Errorf("%w: %s lists %s %s for %s, which hashes to %s",
+					ErrTampered, file.Asset, algo, want, asset.Asset, got)
 			}
 		}
 		logger.Debug("the entries agree with the signed checksum file", "checksum_file", file.Asset)
@@ -91,4 +104,21 @@ func (v *Verifier) checksumFile(ctx context.Context, logger *slog.Logger, pkgNam
 		return nil, fmt.Errorf("read what the checksum file lists: %w", err)
 	}
 	return listed, nil
+}
+
+// digestOf returns what the entry's asset hashes to under algo, or an empty string when
+// nothing here knows: an algorithm the length named none of, or an asset that wasn't
+// downloaded and so has only the SHA256 its entry records.
+func (v *Verifier) digestOf(version string, asset *generate.Asset, algo string) string {
+	if algo == "" {
+		return ""
+	}
+	if algo == algoSHA256 && asset.Checksum != "" {
+		return asset.Checksum
+	}
+	url, err := downloadURL(version, asset)
+	if err != nil {
+		return ""
+	}
+	return v.digests.of(url, algo)
 }

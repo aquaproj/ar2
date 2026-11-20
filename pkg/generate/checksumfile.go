@@ -15,7 +15,8 @@ import (
 type ChecksumFile struct {
 	// Asset is the file's name in the release.
 	Asset string
-	// Algorithm is the hash the file lists, which is always the one every entry records.
+	// Algorithm is the hash the file's name says it lists. What is compared goes by each
+	// digest's length instead, since a name can be wrong: caddy's checksums.txt lists SHA512.
 	Algorithm string
 	// Cosign is how the file is signed, held to the signer the signature names.
 	Cosign *aquaregistry.Cosign
@@ -39,8 +40,9 @@ func (g *Generator) checksumFiles(ctx context.Context, logger *slog.Logger, inpu
 // an asset whose digest disagrees with what the signed file lists isn't what the release
 // published, however it got there.
 //
-// Only the files listing sha256 are read, which is the hash every entry records. A file
-// nothing signs vouches for nothing, and is left alone. The signer is read off the
+// Whatever hash a file lists, it is read: what an asset hashes to is computed under each one
+// a checksum file may list as it is downloaded. A file nothing signs vouches for nothing, and
+// is left alone. The signer is read off the
 // signature, the way it is for an asset.
 func (g *Generator) signedChecksumFiles(ctx context.Context, logger *slog.Logger, input *Input, names map[string]struct{}) []*ChecksumFile {
 	owner, name, err := repo(input.PkgName)
@@ -50,7 +52,7 @@ func (g *Generator) signedChecksumFiles(ctx context.Context, logger *slog.Logger
 	var out []*ChecksumFile
 	for _, file := range slices.Sorted(maps.Keys(names)) {
 		cfg := checksum.GetChecksumConfigFromFilename(file, input.Version)
-		if cfg == nil || cfg.Algorithm != checksumAlgorithm {
+		if cfg == nil {
 			continue
 		}
 		cosign := genrgst.InferCosign(owner, name, file, names)
