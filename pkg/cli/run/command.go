@@ -18,6 +18,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/cli/token"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/httpclient"
 	"github.com/aquaproj/ar2/pkg/migrate"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/state"
@@ -202,7 +203,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 	}
 
 	// The signing material is read without the token, as a run reads it.
-	generated, err := generate.New(gh.Repositories, http.DefaultClient).Generate(ctx, logger.Logger, &generate.Input{
+	generated, err := generate.New(gh.Repositories, httpclient.New(logger.Logger)).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,

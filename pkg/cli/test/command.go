@@ -4,13 +4,13 @@ package test
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/cli/flag"
 	ctrl "github.com/aquaproj/ar2/pkg/controller/test"
 	"github.com/aquaproj/ar2/pkg/g2"
+	"github.com/aquaproj/ar2/pkg/httpclient"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/verify"
 	"github.com/spf13/cobra"
@@ -123,11 +123,11 @@ func packageName(path string) (string, error) {
 // verifier builds what downloads and opens an asset.
 func verifier(ctx context.Context, logger *slogutil.Logger, signatures bool) (*verify.Verifier, error) {
 	if !signatures {
-		return verify.New(http.DefaultClient, nil), nil
+		return verify.New(httpclient.New(logger.Logger), nil), nil
 	}
-	s, err := sign.New(ctx, logger.Logger, http.DefaultClient)
+	s, err := sign.New(ctx, logger.Logger, httpclient.Plain())
 	if err != nil {
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
-	return verify.New(http.DefaultClient, s), nil
+	return verify.New(httpclient.New(logger.Logger), s), nil
 }

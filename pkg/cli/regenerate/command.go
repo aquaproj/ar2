@@ -15,6 +15,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/httpclient"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/verify"
@@ -171,7 +172,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	// No renamer: a regeneration is for one package under the name it has, and
 	// noticing that the name has changed is the sweep's job.
 	// What isn't GitHub's API is read without the token, as a run reads it.
-	return ctrl.New(gh, http.DefaultClient, generate.New(gh.Repositories, http.DefaultClient), reg,
+	return ctrl.New(gh, httpclient.New(logger.Logger), generate.New(gh.Repositories, httpclient.New(logger.Logger)), reg,
 		github.NewClient(httpClient), v, nil), nil
 }
 
@@ -179,16 +180,16 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 // be merged.
 func verifier(ctx context.Context, logger *slogutil.Logger, args *Args) (*verify.Verifier, error) {
 	if !args.Verify {
-		return verify.New(http.DefaultClient, nil), nil
+		return verify.New(httpclient.New(logger.Logger), nil), nil
 	}
-	signatures, err := sign.New(ctx, logger.Logger, http.DefaultClient)
+	signatures, err := sign.New(ctx, logger.Logger, httpclient.Plain())
 	if err != nil {
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
 	// Generating: an attestation the release doesn't have comes off the entry rather
 	// than stopping its files from being checked.
 	signatures.DropUnattested()
-	return verify.New(http.DefaultClient, signatures), nil
+	return verify.New(httpclient.New(logger.Logger), signatures), nil
 }
 
 // baseDefinition returns aqua-registry's definition of the package, which supplies

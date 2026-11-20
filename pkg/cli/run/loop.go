@@ -16,6 +16,7 @@ import (
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/github"
+	"github.com/aquaproj/ar2/pkg/httpclient"
 	"github.com/aquaproj/ar2/pkg/registry"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/aquaproj/ar2/pkg/state"
@@ -104,7 +105,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	// What isn't GitHub's API -- a forge, a signature, a certificate a definition names --
 	// is read without the token: it is GitHub's, and a host anywhere else has no business
 	// being handed it. storage.googleapis.com refuses a request carrying one it can't read.
-	c := ctrl.New(gh, http.DefaultClient, generate.New(gh.Repositories, http.DefaultClient), reg,
+	c := ctrl.New(gh, httpclient.New(logger.Logger), generate.New(gh.Repositories, httpclient.New(logger.Logger)), reg,
 		github.NewClient(httpClient), v, renamer)
 	// Auto-merge is turned on with the app that opened the pull request, where everything
 	// read here is the repository's own token. The merge is a push onto the default
@@ -127,16 +128,16 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 // and a run that skips the download has nothing to check either against.
 func verifier(ctx context.Context, logger *slogutil.Logger, args *Args) (*verify.Verifier, error) {
 	if !args.Verify {
-		return verify.New(http.DefaultClient, nil), nil
+		return verify.New(httpclient.New(logger.Logger), nil), nil
 	}
-	signatures, err := sign.New(ctx, logger.Logger, http.DefaultClient)
+	signatures, err := sign.New(ctx, logger.Logger, httpclient.Plain())
 	if err != nil {
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
 	// Generating: an attestation the release doesn't have comes off the entry rather
 	// than stopping its files from being checked.
 	signatures.DropUnattested()
-	return verify.New(http.DefaultClient, signatures), nil
+	return verify.New(httpclient.New(logger.Logger), signatures), nil
 }
 
 // syncState adds the packages aqua-registry has gained and stores the result.
