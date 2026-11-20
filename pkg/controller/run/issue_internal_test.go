@@ -280,3 +280,20 @@ func TestController_reportExcluded_absent(t *testing.T) {
 		t.Errorf("the absent environment is said:\n%s", body)
 	}
 }
+
+// An environment the generator left out because the release has no asset for it reaches the
+// issue as absent, so it opens none either: heartbeatsjp/check-tls-cert's windows/amd64,
+// which supported_envs names and no release has built, was said on every new version.
+func TestExcludedOf_absent(t *testing.T) {
+	t.Parallel()
+	got := excludedOf([]*generate.Left{
+		{OS: "windows", Arch: "amd64", Reason: "the release has no asset for an environment the definition supports", Absent: true},
+		{OS: "linux", Arch: "amd64", Reason: "assets of an environment can't be told apart by their names: a, b"},
+	}, &generate.Registry{})
+	if len(got) != 2 || !got[0].Absent || got[1].Absent {
+		t.Fatalf("absent isn't carried over: %+v %+v", got[0], got[1])
+	}
+	if left := fixable(got); len(left) != 1 || left[0].Asset.OS != "linux" {
+		t.Errorf("what is said is %+v", left)
+	}
+}

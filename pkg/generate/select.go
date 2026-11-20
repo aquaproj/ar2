@@ -68,6 +68,9 @@ type Left struct {
 	// Libc is the libc variant the environment is for, or "".
 	Libc   string
 	Reason string
+	// Absent is the release having no asset for the environment at all, which is its
+	// answer rather than anything a definition can change: see verify.Excluded.Absent.
+	Absent bool
 }
 
 // Environment is the environment left out, as os/arch.
@@ -136,7 +139,7 @@ func leftOut(sel *aquaasset.Selection, def *aquaregistry.PackageInfo) ([]*Left, 
 		if _, ok := covered[rt.Env()]; ok {
 			continue
 		}
-		left = append(left, &Left{OS: rt.GOOS, Arch: rt.GOARCH, Reason: errNoAssetForEnv.Error()})
+		left = append(left, &Left{OS: rt.GOOS, Arch: rt.GOARCH, Reason: errNoAssetForEnv.Error(), Absent: true})
 	}
 	return left, nil
 }
