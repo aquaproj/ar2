@@ -91,7 +91,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if _, _, err := identities.Read(ctx, logger.Logger, reg, httpClient, args.G2Owner, args.G2Repo); err != nil {
 		return nil, err //nolint:wrapcheck
 	}
-	v, err := verifier(ctx, logger, httpClient, args)
+	v, err := verifier(ctx, logger, args)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,10 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if !args.SkipPR {
 		renamer = renamectrl.New(reg, indexctrl.New(reg, nil, args.BaseBranch, nil))
 	}
-	c := ctrl.New(gh, httpClient, generate.New(gh.Repositories, httpClient), reg,
+	// What isn't GitHub's API -- a forge, a signature, a certificate a definition names --
+	// is read without the token: it is GitHub's, and a host anywhere else has no business
+	// being handed it. storage.googleapis.com refuses a request carrying one it can't read.
+	c := ctrl.New(gh, http.DefaultClient, generate.New(gh.Repositories, http.DefaultClient), reg,
 		github.NewClient(httpClient), v, renamer)
 	// Auto-merge is turned on with the app that opened the pull request, where everything
 	// read here is the repository's own token. The merge is a push onto the default
@@ -122,11 +125,11 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 //
 // Signatures are checked only when the archives are: both need the asset on disk,
 // and a run that skips the download has nothing to check either against.
-func verifier(ctx context.Context, logger *slogutil.Logger, httpClient *http.Client, args *Args) (*verify.Verifier, error) {
+func verifier(ctx context.Context, logger *slogutil.Logger, args *Args) (*verify.Verifier, error) {
 	if !args.Verify {
 		return verify.New(http.DefaultClient, nil), nil
 	}
-	signatures, err := sign.New(ctx, logger.Logger, httpClient)
+	signatures, err := sign.New(ctx, logger.Logger, http.DefaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}

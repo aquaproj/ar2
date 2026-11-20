@@ -160,7 +160,7 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
-	v, err := verifier(ctx, logger, httpClient, args)
+	v, err := verifier(ctx, logger, args)
 	if err != nil {
 		return nil, err
 	}
@@ -170,17 +170,18 @@ func controller(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Clien
 	}
 	// No renamer: a regeneration is for one package under the name it has, and
 	// noticing that the name has changed is the sweep's job.
-	return ctrl.New(gh, httpClient, generate.New(gh.Repositories, httpClient), reg,
+	// What isn't GitHub's API is read without the token, as a run reads it.
+	return ctrl.New(gh, http.DefaultClient, generate.New(gh.Repositories, http.DefaultClient), reg,
 		github.NewClient(httpClient), v, nil), nil
 }
 
 // verifier builds what downloads an asset and decides whether the entry for it can
 // be merged.
-func verifier(ctx context.Context, logger *slogutil.Logger, httpClient *http.Client, args *Args) (*verify.Verifier, error) {
+func verifier(ctx context.Context, logger *slogutil.Logger, args *Args) (*verify.Verifier, error) {
 	if !args.Verify {
 		return verify.New(http.DefaultClient, nil), nil
 	}
-	signatures, err := sign.New(ctx, logger.Logger, httpClient)
+	signatures, err := sign.New(ctx, logger.Logger, http.DefaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
