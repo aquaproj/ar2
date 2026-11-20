@@ -264,6 +264,42 @@ func TestController_Sync_renamed(t *testing.T) {
 	}
 }
 
+// Two directories holding one package don't flip its entry between their ids: the first
+// keeps it, run after run (aquaproj/ar2#310).
+func TestController_Sync_doubled(t *testing.T) {
+	t.Parallel()
+	for _, listed := range []string{minted, next} {
+		index := &aquag2.Index{Packages: []*aquag2.IndexPackage{
+			{Name: "takaishi/awscost", ID: listed, Description: "Print AWS costs"},
+		}}
+		reg := &fakeRegistry{index: index, files: rendered(t, index)}
+		defs := definitions(t, map[string]*aquag2.Config{
+			minted: named("takaishi/awscost", "Print AWS costs"),
+			next:   named("takaishi/awscost", "Print AWS costs"),
+		})
+		if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
+			t.Fatal(err)
+		}
+		if listed == minted {
+			if reg.committed != nil {
+				t.Errorf("listed under the first id, committed %+v, want nothing", reg.committed)
+			}
+			continue
+		}
+		if len(reg.committed) == 0 {
+			t.Fatal("listed under the second id, committed nothing")
+		}
+		got, err := aquag2.ReadIndex(strings.NewReader(reg.committed[0].Content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []*aquag2.IndexPackage{{Name: "takaishi/awscost", ID: minted, Description: "Print AWS costs"}}
+		if diff := cmp.Diff(want, got.Packages); diff != "" {
+			t.Errorf("the catalogue is wrong (-want +got):\n%s", diff)
+		}
+	}
+}
+
 // An entry is not removed because the registry holds no definition of it. It is a package waiting for
 // the pull request that brings one, which a run has already added to the catalogue, and
 // removing it would undo that.

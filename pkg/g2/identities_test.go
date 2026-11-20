@@ -12,6 +12,18 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
+func definitionYAML(pkgName string) string {
+	b, err := yaml.Marshal(&aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
+		Name:      pkgName,
+		RepoOwner: "owner",
+		RepoName:  "repo",
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 func definition(t *testing.T, pkgName string) string {
 	t.Helper()
 	b, err := yaml.Marshal(&aquag2.Config{PackageInfo: &aquaregistry.PackageInfo{
@@ -166,6 +178,62 @@ func TestReadIdentities(t *testing.T) {
 	}
 	if _, ok := ids.ID("junegunn/fzf"); ok {
 		t.Error("a misplaced directory was read as a package")
+	}
+}
+
+// mergingDefinitions is a pull request that merges while the identities are being read:
+// it is open when the open pull requests are listed, and by the time its head branch is
+// read the branch is gone and its definition is on the default branch.
+type mergingDefinitions struct {
+	merged bool
+}
+
+const (
+	mergingID   = "1794800456"
+	mergingHead = "ar2_" + mergingID + "_v0.0.10"
+	mergingDir  = "56/" + mergingID
+)
+
+func (f *mergingDefinitions) Subtrees(_ context.Context, expression string) ([]string, error) {
+	if expression != "main:pkgs" || !f.merged {
+		return nil, nil
+	}
+	return []string{mergingDir}, nil
+}
+
+func (f *mergingDefinitions) Blobs(_ context.Context, _ *slog.Logger, expressions []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, e := range expressions {
+		switch e {
+		case mergingHead + ":pkgs/" + mergingDir + "/registry.yaml":
+			// Asked for, and gone: it merged just now.
+			f.merged = true
+		case "main:pkgs/" + mergingDir + "/registry.yaml":
+			if f.merged {
+				out[e] = definitionYAML("takaishi/awscost")
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *mergingDefinitions) OpenPullRequestHeads(context.Context) ([]string, error) {
+	if f.merged {
+		return nil, nil
+	}
+	return []string{mergingHead}, nil
+}
+
+// A pull request that merges while the identities are read is still found, so the package
+// isn't taken over again under a second id (aquaproj/ar2#310).
+func TestReadIdentities_mergedMeanwhile(t *testing.T) {
+	t.Parallel()
+	ids, _, err := g2.ReadIdentities(context.Background(), slog.New(slog.DiscardHandler), &mergingDefinitions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := ids.ID("takaishi/awscost"); !ok || id != mergingID {
+		t.Errorf("the package that merged meanwhile is %q (%v), want %s", id, ok, mergingID)
 	}
 }
 
