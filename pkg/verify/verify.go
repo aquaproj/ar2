@@ -19,8 +19,6 @@ package verify
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -52,6 +50,9 @@ type Verifier struct {
 	signatures Signatures
 	// downloadLimit is how long one download may take.
 	downloadLimit time.Duration
+	// digests is what each asset downloaded hashes to under every algorithm a checksum file
+	// may list, for CheckChecksumFiles to compare with whichever the file does.
+	digests digests
 }
 
 // Signatures verifies an asset against the signatures its entry claims and reports
@@ -616,9 +617,11 @@ func (v *Verifier) fetch(ctx context.Context, url, path string) (string, error) 
 	}
 	defer f.Close()
 
-	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
+	h := newHasher()
+	if _, err := io.Copy(io.MultiWriter(f, h.writer()), resp.Body); err != nil {
 		return "", fmt.Errorf("write the asset: %w", err)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	sums := h.sums()
+	v.digests.record(url, sums)
+	return sums[algoSHA256], nil
 }
