@@ -68,20 +68,29 @@ func fulcioCertificate(t *testing.T, identity, issuer string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uri, err := url.Parse(identity)
-	if err != nil {
-		t.Fatal(err)
+	var uris []*url.URL
+	var emails []string
+	if strings.Contains(identity, "://") {
+		uri, err := url.Parse(identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		uris = []*url.URL{uri}
+	} else {
+		// An account rather than a workflow: Fulcio names it by its email address.
+		emails = []string{identity}
 	}
 	value, err := asn1.Marshal(issuer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(time.Hour),
-		URIs:         []*url.URL{uri},
+		SerialNumber:   big.NewInt(1),
+		Subject:        pkix.Name{},
+		NotBefore:      time.Now(),
+		NotAfter:       time.Now().Add(time.Hour),
+		URIs:           uris,
+		EmailAddresses: emails,
 		ExtraExtensions: []pkix.Extension{
 			{Id: oidIssuerV2, Value: value},
 		},
@@ -334,5 +343,27 @@ func TestInferSigning_definitionWins(t *testing.T) {
 	}
 	if reg.Assets[0].Cosign != declared {
 		t.Error("the definition's configuration was replaced")
+	}
+}
+
+// sigstore/cosign signs its checksum file before v3 keyless as a Google service account,
+// and the certificate names the account by its email address rather than by a URI. The
+// entry is held to the account: holding it to a workflow of sigstore/cosign, which is what
+// the inference assumes, is what no version verified under.
+func TestParseCertificateSigner_email(t *testing.T) {
+	t.Parallel()
+	const (
+		account = "keyless@projectsigstore.iam.gserviceaccount.com"
+		google  = "https://accounts.google.com"
+	)
+	got, err := parseCertificateSigner(certificatePEM(t, account, google))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Identity != account {
+		t.Errorf("the identity is %q", got.Identity)
+	}
+	if got.Issuer != google {
+		t.Errorf("the issuer is %q", got.Issuer)
 	}
 }
