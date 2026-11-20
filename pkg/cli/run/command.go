@@ -201,7 +201,8 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 		return err
 	}
 
-	generated, err := generate.New(gh.Repositories, httpClient).Generate(ctx, logger.Logger, &generate.Input{
+	// The signing material is read without the token, as a run reads it.
+	generated, err := generate.New(gh.Repositories, http.DefaultClient).Generate(ctx, logger.Logger, &generate.Input{
 		PkgName: pkgName,
 		Version: version,
 		Base:    base,
@@ -217,7 +218,7 @@ func single(ctx context.Context, logger *slogutil.Logger, gh *gogithub.Client, h
 
 	// Assets without a digest are hashed whether or not --verify is set: a
 	// registry.json missing a checksum would defeat the lock file.
-	v, err := verifier(ctx, logger, httpClient, args)
+	v, err := verifier(ctx, logger, args)
 	if err != nil {
 		return err
 	}
