@@ -36,6 +36,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/unarchive"
 	"github.com/aquaproj/aqua/v2/pkg/vacuum"
 	"github.com/aquaproj/ar2/pkg/generate"
+	"github.com/aquaproj/ar2/pkg/httpclient"
 	"github.com/suzuki-shunsuke/go-osenv/osenv"
 )
 
@@ -102,7 +103,8 @@ func New(ctx context.Context, logger *slog.Logger, httpClient *http.Client) (*Ve
 	rt := runtime.NewR(ctx)
 	httpDL := download.NewHTTPDownloader(logger, httpClient)
 	return &Verifier{
-		httpClient:    httpClient,
+		// aqua's downloaders retry on their own; what is read here directly doesn't.
+		httpClient:    httpclient.Retryable(logger, httpClient),
 		cosign:        cosignVerifier,
 		slsa:          slsaVerifier,
 		minisign:      minisignVerifier,
