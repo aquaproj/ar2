@@ -969,7 +969,7 @@ func excludedOf(left []*generate.Left, reg *generate.Registry) []*verify.Exclude
 			a := reg.Assets[0]
 			asset.Type, asset.RepoOwner, asset.RepoName, asset.Host = a.Type, a.RepoOwner, a.RepoName, a.Host
 		}
-		out = append(out, &verify.Excluded{Asset: asset, Reason: l.Reason})
+		out = append(out, &verify.Excluded{Asset: asset, Reason: l.Reason, Absent: l.Absent})
 	}
 	return out
 }

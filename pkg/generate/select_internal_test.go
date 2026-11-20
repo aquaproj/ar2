@@ -177,6 +177,15 @@ func TestSelectAssets_leftOut(t *testing.T) {
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("what is left out (-want +got):\n%s", diff)
 	}
+	// A tie is a definition's to settle, so it is said; a release with nothing for the
+	// environment is its answer, so it is marked absent and opens no issue.
+	absent := map[string]bool{}
+	for _, l := range left {
+		absent[l.Environment()] = l.Absent
+	}
+	if diff := cmp.Diff(map[string]bool{"linux/amd64": false, "darwin/amd64": true, "darwin/arm64": true}, absent); diff != "" {
+		t.Errorf("which are absent (-want +got):\n%s", diff)
+	}
 }
 
 // apple/container's .pkg names no architecture, so it is placed on both darwin
