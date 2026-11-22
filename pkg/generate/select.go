@@ -324,7 +324,8 @@ func declaredFormat(def *aquaregistry.PackageInfo, goos, goarch, libc string) st
 
 // withFormat is the selected asset with the format to unpack it as: the one its name ends
 // in, or, for an extension the parser doesn't know, the one the definition declares for
-// the environment when the name ends in that. ip7z/7zip's 7z2604-extra.7z is the latter.
+// the environment when the name ends in that. aqua reads a name off its own list and then
+// off the formats mholt/archives opens, so the latter is a format neither knows.
 func withFormat(a *aquaasset.Selected, def *aquaregistry.PackageInfo) *aquaasset.Selected {
 	if a.Info.Format != "" && a.Info.Format != formatRaw {
 		return a
