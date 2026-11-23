@@ -160,6 +160,20 @@ func checkShare(t *testing.T, budget, existing int, breadth *g2.Breadth, want *s
 	}
 }
 
+// TestTurnShare checks that a package the run was asked for by name takes the run's
+// whole limit, past the breadth that shares a run out among the order's packages.
+func TestTurnShare(t *testing.T) {
+	t.Parallel()
+	held := map[string]struct{}{"v1": {}, "v2": {}, "v3": {}, "v4": {}, "v5": {}, "v6": {}, "v7": {}, "v8": {}, "v9": {}, "v10": {}, "v11": {}}
+	breadth := &g2.Breadth{Versions: 10}
+	if diff := cmp.Diff(&share{attempts: 150}, turnShare(150, held, breadth, true), cmp.AllowUnexported(share{})); diff != "" {
+		t.Errorf("a named package's share is wrong (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(limitBudget(150, held, breadth), turnShare(150, held, breadth, false), cmp.AllowUnexported(share{})); diff != "" {
+		t.Errorf("the order's share is wrong (-want +got):\n%s", diff)
+	}
+}
+
 // TestRejoin checks that a package which was out of the order comes back at the end
 // of it rather than at the front.
 //
