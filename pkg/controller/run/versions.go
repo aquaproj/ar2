@@ -18,8 +18,17 @@ import (
 	gogithub "github.com/google/go-github/v93/github"
 )
 
-// versionsPerPage is how many versions are looked at per package in one run.
+// versionsPerPage is how many versions are looked at per page of releases or tags.
 const versionsPerPage = 100
+
+// namedPages is how many pages of releases or tags are read for a package a run was asked
+// for by name. Any other package is read one page deep.
+//
+// A package is named because somebody wants it looked at, often for versions older than
+// the newest hundred: loft-sh/vcluster publishes so many release candidates that its
+// hundredth release was v0.35.2, and v0.32.3 to v0.34.x, generated again after its
+// definition was fixed, were never reached. The run's limit still bounds what is generated.
+const namedPages = 10
 
 // versionSourceTag means the package's versions are its git tags rather than its
 // releases. flutter is one: it tags every build and publishes the SDK elsewhere.
@@ -32,8 +41,11 @@ const versionSourceTag = "github_tag"
 // tags 3.19.0-0.1.pre alongside 3.19.0, and its registry entry says a version is
 // three numbers and nothing else; generating the former fails on a download that
 // was never going to exist, and fails again on the next run, forever.
-func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *state.Package, base *aquaregistry.PackageInfo, def *definition) ([]string, error) {
-	tags, err := c.listVersions(ctx, pkg, base, def)
+//
+// pages is how many pages of releases or tags are read: one, or namedPages for a package
+// the run was asked for by name.
+func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *state.Package, base *aquaregistry.PackageInfo, def *definition, pages int) ([]string, error) {
+	tags, err := c.listVersions(ctx, pkg, base, def, pages)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +53,7 @@ func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *sta
 }
 
 // listVersions reads the versions from wherever the package publishes them.
-func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo, def *definition) ([]string, error) {
+func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo, def *definition, pages int) ([]string, error) {
 	// A package on a forge instance publishes them there, and the repository is the
 	// definition's: the package name begins with the instance, and the state's copy of
 	// the repository is written from what GitHub was asked for.
@@ -50,10 +62,10 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 	}
 
 	if base != nil && base.VersionSource == versionSourceTag {
-		return c.tagVersions(ctx, pkg)
+		return c.tagVersions(ctx, pkg, pages)
 	}
 
-	return c.releaseVersions(ctx, pkg, base, def.prerelease())
+	return c.releaseVersions(ctx, pkg, base, def.prerelease(), pages)
 }
 
 // releaseVersions reads the package's releases, newest first, or its tags when its
@@ -61,23 +73,23 @@ func (c *Controller) listVersions(ctx context.Context, pkg *state.Package, base 
 //
 // A draft is left out. A prerelease is kept when the definition asks for them or the
 // repository has published nothing else, the rule the sweep follows.
-func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo, prerelease bool) ([]string, error) {
-	// One page is enough: a run works on the newest versions, and the older ones are
-	// reached by later runs as the newest ones get recorded.
-	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
-	releases, _, err := c.gh.Repositories.ListReleases(ctx, pkg.RepoOwner, pkg.RepoName, opts)
+func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, base *aquaregistry.PackageInfo, prerelease bool, pages int) ([]string, error) {
+	// One page is enough for the order: a run works on the newest versions, and the older
+	// ones are reached by later runs as the newest ones get recorded. A named package is
+	// read deeper.
+	releases, err := c.listReleases(ctx, pkg, pages)
 	if err != nil {
-		return nil, fmt.Errorf("list releases: %w", err)
+		return nil, err
 	}
 	if len(releases) == 0 && mayBeTagged(base) {
-		tags, err := c.tagVersions(ctx, pkg)
+		tags, err := c.tagVersions(ctx, pkg, pages)
 		if err != nil {
 			return nil, err
 		}
 		return taggedVersions(tags, prerelease), nil
 	}
 	found := foundReleases(releases)
-	if !found.Stable && len(releases) == versionsPerPage {
+	if !found.Stable && len(releases) >= versionsPerPage {
 		// A page of prereleases says nothing about the releases on the next one.
 		stable, err := c.hasStableRelease(ctx, pkg)
 		if err != nil {
@@ -86,6 +98,24 @@ func (c *Controller) releaseVersions(ctx context.Context, pkg *state.Package, ba
 		found.Stable = stable
 	}
 	return found.Pick(prerelease), nil
+}
+
+// listReleases reads the repository's releases, newest first, as many pages as it is told.
+func (c *Controller) listReleases(ctx context.Context, pkg *state.Package, pages int) ([]*gogithub.RepositoryRelease, error) {
+	var releases []*gogithub.RepositoryRelease
+	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
+	for range pages {
+		page, resp, err := c.gh.Repositories.ListReleases(ctx, pkg.RepoOwner, pkg.RepoName, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list releases: %w", err)
+		}
+		releases = append(releases, page...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return releases, nil
 }
 
 // foundReleases reads the versions out of a page of releases, leaving out the drafts.
@@ -133,15 +163,21 @@ func taggedVersions(tags []string, prerelease bool) []string {
 }
 
 // tagVersions reads the package's tags, newest first.
-func (c *Controller) tagVersions(ctx context.Context, pkg *state.Package) ([]string, error) {
+func (c *Controller) tagVersions(ctx context.Context, pkg *state.Package, pages int) ([]string, error) {
+	var versions []string
 	opts := &gogithub.ListOptions{PerPage: versionsPerPage}
-	tags, _, err := c.gh.Repositories.ListTags(ctx, pkg.RepoOwner, pkg.RepoName, opts)
-	if err != nil {
-		return nil, fmt.Errorf("list tags: %w", err)
-	}
-	versions := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		versions = append(versions, tag.GetName())
+	for range pages {
+		tags, resp, err := c.gh.Repositories.ListTags(ctx, pkg.RepoOwner, pkg.RepoName, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list tags: %w", err)
+		}
+		for _, tag := range tags {
+			versions = append(versions, tag.GetName())
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 	return versions, nil
 }

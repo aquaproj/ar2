@@ -352,9 +352,9 @@ func timeUp(input *Input) bool {
 // A package the run was asked for by name has its history walked whatever the state says. It
 // is named because somebody wants it looked at, often because versions older than the newest
 // a sweep reads are missing: anomalyco/opencode's v1.18.4 to v1.18.22, generated again after
-// its definition was fixed, were further down than the sweep reaches the next day. A walk
-// still reads one page of releases, the newest hundred, and the run's limit still bounds what
-// is generated.
+// its definition was fixed, were further down than the sweep reaches the next day. The walk
+// reads namedPages pages of releases rather than the newest hundred, and the run's limit
+// still bounds what is generated.
 func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, moved map[string]struct{}, swept map[string]*github.Found, now time.Time, named bool) (work, []string) {
 	if _, ok := moved[candidate.Name]; ok {
 		// Its branch is under another name now, and so is what the state says about
