@@ -544,7 +544,7 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	done := settled(logger, def, candidate.Package, versions, decided)
 	record(candidate.Package, swept, versions, done, todo)
 
-	share, ok := c.shareOf(logger, def, candidate.Name, limitBudget(budget, existing, breadth), inFlight)
+	share, ok := c.shareOf(logger, def, candidate.Name, turnShare(budget, existing, breadth, len(input.Packages) > 0), inFlight)
 	if !ok {
 		return 0, 0, nil
 	}
@@ -670,6 +670,20 @@ type share struct {
 // generated as it was for. The rest of the package's history is the next turn's.
 func (s *share) spent(attempted, generated int) bool {
 	return attempted >= s.attempts || s.versions > 0 && generated >= s.versions
+}
+
+// turnShare is how much of the run's remaining budget one package may take.
+//
+// A package the run was asked for by name takes all of it. The breadth is how the order
+// shares a run out among every package, and a run that names packages shares it among
+// those alone: the run's limit is what bounds it. With the breadth, tofuutils/tenv named
+// with a limit of 150 got ten versions, and the hundred-odd older ones it was named for
+// would have taken a dozen runs.
+func turnShare(budget int, existing map[string]struct{}, breadth *g2.Breadth, named bool) *share {
+	if named {
+		return &share{attempts: budget}
+	}
+	return limitBudget(budget, existing, breadth)
 }
 
 // limitBudget limits how much of the run's remaining budget one package may take.
