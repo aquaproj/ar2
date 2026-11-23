@@ -2,6 +2,7 @@ package generate
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestSignedChecksumFiles(t *testing.T) {
 		"foo_linux_amd64.tar.gz",
 		"checksums.txt", "checksums.txt.sig", "checksums.txt.pem",
 		"other_checksums.txt",
-	))
+	), nil)
 	if len(files) != 1 {
 		t.Fatalf("found %d signed checksum files: %+v", len(files), files)
 	}
@@ -38,6 +39,28 @@ func TestSignedChecksumFiles(t *testing.T) {
 	}
 }
 
+// The options the definition gives that the release can't tell go after the ones read off
+// the signature, and the signer is still the one the certificate names.
+func TestSignedChecksumFiles_extra(t *testing.T) {
+	t.Parallel()
+	const signedBy = "https://github.com/foo/foo/.github/workflows/release.yaml@refs/tags/v1.0.0"
+	download := "/foo/foo/releases/download/v1.0.0/"
+	g := serving(t, map[string][]byte{download + "checksums.txt.pem": certificatePEM(t, signedBy, issuer)})
+	files := g.signedChecksumFiles(context.Background(), discardLogger(), &Input{PkgName: "foo/foo", Version: "v1.0.0"}, names(
+		"checksums.txt", "checksums.txt.sig", "checksums.txt.pem",
+	), []string{"--insecure-ignore-sct"})
+	if len(files) != 1 {
+		t.Fatalf("found %d signed checksum files: %+v", len(files), files)
+	}
+	opts := files[0].Cosign.Opts
+	if !slices.Contains(opts, signedBy) {
+		t.Errorf("the signer isn't the one the certificate names: %v", opts)
+	}
+	if opts[len(opts)-1] != "--insecure-ignore-sct" {
+		t.Errorf("the definition's option isn't added: %v", opts)
+	}
+}
+
 // A checksum file listing a hash other than SHA256 is read too: what is compared goes by
 // each digest's length, and every algorithm a file may list is computed as the asset is
 // downloaded.
@@ -48,7 +71,7 @@ func TestSignedChecksumFiles_sha512(t *testing.T) {
 	g := serving(t, map[string][]byte{download + "sha512sums.txt.pem": certificatePEM(t, signedBy, issuer)})
 	files := g.signedChecksumFiles(context.Background(), discardLogger(), &Input{PkgName: "foo/foo", Version: "v1.0.0"}, names(
 		"foo_linux_amd64.tar.gz", "sha512sums.txt", "sha512sums.txt.sig", "sha512sums.txt.pem",
-	))
+	), nil)
 	if len(files) != 1 || files[0].Asset != "sha512sums.txt" || files[0].Algorithm != "sha512" {
 		t.Fatalf("the signed checksum files are %+v", files)
 	}

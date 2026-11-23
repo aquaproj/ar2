@@ -29,7 +29,7 @@ func (g *Generator) checksumFiles(ctx context.Context, logger *slog.Logger, inpu
 		logger.Warn("the definition turns off the signature of the release's checksum files, so they aren't checked")
 		return nil
 	}
-	return g.signedChecksumFiles(ctx, logger, input, names)
+	return g.signedChecksumFiles(ctx, logger, input, names, uninferableOpts(base))
 }
 
 // signedChecksumFiles returns the checksum files of the release that cosign signs.
@@ -44,7 +44,10 @@ func (g *Generator) checksumFiles(ctx context.Context, logger *slog.Logger, inpu
 // a checksum file may list as it is downloaded. A file nothing signs vouches for nothing, and
 // is left alone. The signer is read off the
 // signature, the way it is for an asset.
-func (g *Generator) signedChecksumFiles(ctx context.Context, logger *slog.Logger, input *Input, names map[string]struct{}) []*ChecksumFile {
+//
+// extra are the options the definition gives that the signature can't tell: see
+// uninferableOpts. They go after the ones read off the signature.
+func (g *Generator) signedChecksumFiles(ctx context.Context, logger *slog.Logger, input *Input, names map[string]struct{}, extra []string) []*ChecksumFile {
 	owner, name, err := repo(input.PkgName)
 	if err != nil {
 		return nil
@@ -63,6 +66,7 @@ func (g *Generator) signedChecksumFiles(ctx context.Context, logger *slog.Logger
 		if cosign == nil {
 			continue
 		}
+		cosign.Opts = withOpts(cosign.Opts, extra)
 		out = append(out, &ChecksumFile{Asset: file, Algorithm: cfg.Algorithm, Cosign: cosign})
 	}
 	return out
@@ -82,4 +86,43 @@ func checksumSigningOff(base *aquaregistry.PackageInfo) bool {
 		return false
 	}
 	return base.Checksum.Cosign.Enabled != nil && !*base.Checksum.Cosign.Enabled
+}
+
+// uninferableFlags are the cosign options a definition may give for a checksum file's
+// signature: the ones that say how far to trust it, which nothing in the release says.
+//
+// Who signed, and where the signature and certificate are, are read off the release, so a
+// definition naming them would only be a second answer that can be wrong. Whether to accept
+// a certificate without an embedded SCT, or a signature missing from the transparency log, is
+// a person's decision about one release: orlangure/gocovsh's v0.5.0 and v0.5.1 sign
+// checksums.txt with a certificate that carries no SCT, which cosign refuses today, and the
+// signer is still the release workflow.
+var uninferableFlags = map[string]struct{}{ //nolint:gochecknoglobals
+	"--insecure-ignore-sct":  {},
+	"--insecure-ignore-tlog": {},
+}
+
+// uninferableOpts returns the options of the definition's checksum.cosign.opts that are among
+// uninferableFlags, in the order given. Any other option there is left out.
+func uninferableOpts(base *aquaregistry.PackageInfo) []string {
+	if base == nil || base.Checksum == nil || base.Checksum.Cosign == nil {
+		return nil
+	}
+	var opts []string
+	for _, opt := range base.Checksum.Cosign.Opts {
+		if _, ok := uninferableFlags[opt]; ok {
+			opts = append(opts, opt)
+		}
+	}
+	return opts
+}
+
+// withOpts appends the options that aren't already there.
+func withOpts(opts, extra []string) []string {
+	for _, opt := range extra {
+		if !slices.Contains(opts, opt) {
+			opts = append(opts, opt)
+		}
+	}
+	return opts
 }
