@@ -504,18 +504,125 @@ func TestGainedEnvironments(t *testing.T) {
 	}
 }
 
-// A version covering a platform the one before it didn't is left for review, with the
-// platform said.
+// named builds an asset of the given name.
+func named(os, arch, name string) *generate.Asset {
+	a := signed(os, arch)
+	a.Asset = name
+	return a
+}
+
+// A version covering a platform the one before it didn't, with an asset named like its
+// others, merges, with the platform said.
 func TestCheckSigning_gainedEnvironment(t *testing.T) {
 	t.Parallel()
 	versions := []*version{
-		{Version: "v1.1.0", Registry: registryOf(signed("linux", "amd64"), signed("windows", "amd64"))},
+		{Version: "v0.10.0", Registry: registryOf(
+			named("linux", "amd64", "git-chglog_0.10.0_linux_amd64.tar.gz"),
+			named("linux", "arm64", "git-chglog_0.10.0_linux_arm64.tar.gz"),
+		)},
 	}
-	checkSigning(discardLogger(), "kcp-dev/kcp", versions, registryOf(signed("linux", "amd64")))
-	if !versions[0].NeedsReview {
-		t.Error("a version that gained a platform should be left for review")
+	checkSigning(discardLogger(), "git-chglog/git-chglog", versions,
+		registryOf(named("linux", "amd64", "git-chglog_0.9.1_linux_amd64.tar.gz")))
+	if versions[0].NeedsReview {
+		t.Error("a version that gained a platform with an asset named like the rest should merge")
 	}
-	if diff := cmp.Diff([]string{"windows/amd64"}, versions[0].GainedEnvironments); diff != "" {
+	if diff := cmp.Diff([]string{"linux/arm64"}, versions[0].GainedEnvironments); diff != "" {
 		t.Errorf("what it gained is wrong (-want +got):\n%s", diff)
+	}
+	if len(versions[0].StrangerEnvironments) != 0 {
+		t.Errorf("no platform should be strange: %v", versions[0].StrangerEnvironments)
+	}
+}
+
+// A platform gained with an asset named unlike the rest -- another program of the release
+// -- is left for review.
+func TestCheckSigning_strangerEnvironment(t *testing.T) {
+	t.Parallel()
+	versions := []*version{
+		{Version: "v4.0.0", Registry: registryOf(
+			named("linux", "amd64", "gh-action-linux-amd64"),
+			named("darwin", "amd64", "gh-action-yaml-gen-darwin-amd64"),
+		)},
+	}
+	checkSigning(discardLogger(), "DeNA/unity-meta-check/gh-action", versions,
+		registryOf(named("linux", "amd64", "gh-action-linux-amd64")))
+	if !versions[0].NeedsReview {
+		t.Error("a platform gained with another program's asset should be left for review")
+	}
+	if diff := cmp.Diff([]string{"darwin/amd64"}, versions[0].StrangerEnvironments); diff != "" {
+		t.Errorf("what is strange is wrong (-want +got):\n%s", diff)
+	}
+}
+
+type strangerTest struct {
+	name    string
+	version string
+	reg     *aquag2.Registry
+	gained  []string
+	want    []string
+}
+
+func TestStrangerEnvironments(t *testing.T) {
+	t.Parallel()
+	for _, tt := range strangerTests() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, strangerEnvironments(tt.reg, tt.version, tt.gained)); diff != "" {
+				t.Errorf("what is strange is wrong (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func strangerTests() []strangerTest {
+	return []strangerTest{
+		{
+			name:    "another program's installer",
+			version: "v2.3.1",
+			reg: registryOf(
+				named("linux", "amd64", "teip-2.3.1.x86_64-unknown-linux-musl.tar.gz"),
+				named("windows", "amd64", "teip_installer-2.3.1-x86_64-pc-windows-msvc.exe"),
+			),
+			gained: []string{"windows/amd64"},
+			want:   []string{"windows/amd64"},
+		},
+		{
+			name:    "a separator that differs",
+			version: "v3.8.2",
+			reg: registryOf(
+				named("linux", "amd64", "dysk_3.8.2.zip"),
+				named("windows", "amd64", "dysk-v3.8.2-x86_64-pc-windows-gnu.zip"),
+			),
+			gained: []string{"windows/amd64"},
+			want:   nil,
+		},
+		{
+			name:    "a name saying no os",
+			version: "v0.20.1",
+			reg: registryOf(
+				named("linux", "amd64", "fclones-0.20.1.tgz"),
+				named("darwin", "amd64", "fclones-0.20.1-apple-darwin.x86_64.zip"),
+				named("darwin", "arm64", "fclones-0.20.1-apple-darwin.x86_64.zip"),
+			),
+			gained: []string{"darwin/amd64", "darwin/arm64"},
+			want:   nil,
+		},
+		{
+			name:    "an odd spelling of the arch",
+			version: "v0.14.2",
+			reg: registryOf(
+				named("linux", "amd64", "zk-v0.14.2-linux-amd64.tar.gz"),
+				named("windows", "amd64", "zk-v0.14.2-windows_x64_86.tar.gz"),
+			),
+			gained: []string{"windows/amd64"},
+			want:   nil,
+		},
+		{
+			name:    "nothing to compare with",
+			version: "v1.0.0",
+			reg:     registryOf(named("windows", "amd64", "foo-windows-amd64.zip")),
+			gained:  []string{"windows/amd64"},
+			want:    []string{"windows/amd64"},
+		},
 	}
 }

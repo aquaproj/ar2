@@ -243,6 +243,22 @@ func TestPRBodyReason(t *testing.T) {
 	}
 }
 
+// A platform gained with an asset named unlike the rest is said apart from the platforms
+// gained with assets named like it, and only it keeps the pull request from merging.
+func TestPRBodyGained(t *testing.T) {
+	t.Parallel()
+	body := prBody([]*version{{
+		Version:              "v4.0.0",
+		NeedsReview:          true,
+		GainedEnvironments:   []string{"darwin/amd64", "linux/arm64"},
+		StrangerEnvironments: []string{"darwin/amd64"},
+	}}, nil, true, releases{})
+	if !strings.Contains(body, "with an asset named unlike the others:\n\n- v4.0.0 darwin/amd64\n") ||
+		!strings.Contains(body, "the version before them didn't:\n\n- v4.0.0 linux/arm64\n") {
+		t.Fatalf("the body doesn't tell the gained platforms apart:\n%s", body)
+	}
+}
+
 // The versions that can't merge go together, on the package's waiting branch, and the ones
 // that can are left for pull requests of their own.
 func TestOpenUnresolved(t *testing.T) {
