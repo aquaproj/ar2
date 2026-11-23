@@ -3,10 +3,12 @@ package run
 import (
 	"context"
 	"log/slog"
+	"path"
 	"slices"
 	"sort"
 	"strings"
 
+	aquaasset "github.com/aquaproj/aqua/v2/pkg/asset"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
 )
@@ -168,7 +170,9 @@ func checkSigning(logger *slog.Logger, pkgName string, versions []*version, base
 }
 
 // compareWith marks the version for review when it can be verified with less than the
-// version before it, covers fewer environments, or covers platforms that one didn't.
+// version before it, covers fewer environments, or covers a platform that one didn't with
+// an asset named unlike the rest. A platform gained with an asset named like the rest is
+// recorded, to be said in the pull request, and merges.
 func compareWith(logger *slog.Logger, pkgName string, v *version, before *aquag2.Registry) {
 	if lost := lostSigning(before, v.Registry); len(lost) > 0 {
 		logger.Warn("this version can be verified with less than the one before it",
@@ -183,11 +187,85 @@ func compareWith(logger *slog.Logger, pkgName string, v *version, before *aquag2
 		v.LostEnvironments = lost
 	}
 	if gained := gainedEnvironments(before, v.Registry); len(gained) > 0 {
-		logger.Warn("this version covers platforms the one before it didn't",
+		logger.Info("this version covers platforms the one before it didn't",
 			"package", pkgName, "version", v.Version, "gained", strings.Join(gained, ", "))
-		v.NeedsReview = true
 		v.GainedEnvironments = gained
+		if strangers := strangerEnvironments(v.Registry, v.Version, gained); len(strangers) > 0 {
+			logger.Warn("a platform this version gained is given an asset named unlike the others",
+				"package", pkgName, "version", v.Version, "platforms", strings.Join(strangers, ", "))
+			v.NeedsReview = true
+			v.StrangerEnvironments = strangers
+		}
 	}
+}
+
+// strangerEnvironments returns the gained platforms whose asset is named unlike every
+// asset of the platforms the version already covered.
+//
+// A platform a version gains is almost always a build the release started publishing,
+// and that merges as it is: of 206 pull requests left for review for nothing else, not
+// one had a wrong entry for the platform it gained. What the review was there for is the
+// other reason a platform can come: the asset names are read from the release, and
+// another program of the same release is placed wherever its name says.
+// DeNA/unity-meta-check's gh-action-yaml-gen-darwin-amd64 was given to gh-action, whose
+// builds are gh-action-linux-amd64, and greymd/teip's Windows installer,
+// teip_installer-<version>-x86_64-pc-windows-msvc.exe, to teip.
+//
+// Another program is told apart by its name: what comes before the os, arch and version
+// is the program's name, and it differs. That is what is compared, so a platform whose
+// asset is named like the rest merges itself and one that isn't is left for review.
+func strangerEnvironments(reg *aquag2.Registry, version string, gained []string) []string {
+	isGained := make(map[string]struct{}, len(gained))
+	for _, env := range gained {
+		isGained[env] = struct{}{}
+	}
+	known := map[string]struct{}{}
+	for _, a := range reg.Assets {
+		if _, ok := isGained[a.OS+"/"+a.Arch]; ok {
+			continue
+		}
+		if stem := assetStem(a, version); stem != "" {
+			known[stem] = struct{}{}
+		}
+	}
+	seen := map[string]struct{}{}
+	var strangers []string
+	for _, a := range reg.Assets {
+		env := a.OS + "/" + a.Arch
+		if _, ok := isGained[env]; !ok {
+			continue
+		}
+		if _, ok := seen[env]; ok {
+			continue
+		}
+		if _, ok := known[assetStem(a, version)]; ok {
+			continue
+		}
+		seen[env] = struct{}{}
+		strangers = append(strangers, env)
+	}
+	sort.Strings(strangers)
+	return strangers
+}
+
+// assetStem is the part of an asset's name before the os, arch, version or format: the
+// name of the program, as far as the name says. It is lowercased and has the separator
+// before the first of them taken off, so dysk_3.8.2.zip and dysk-v3.8.2-x86_64-pc-windows-gnu.zip
+// are both dysk. A name with none of them is all stem: alexellis/arkade's Linux build is
+// arkade. It is "" for an entry that names no asset.
+func assetStem(a *generate.Asset, version string) string {
+	name := a.Asset
+	if name == "" && a.URL != "" {
+		name = path.Base(a.URL)
+	}
+	if name == "" {
+		return ""
+	}
+	tmpl := aquaasset.ParseAssetName(name, version).Template
+	if i := strings.Index(tmpl, "{{"); i >= 0 {
+		tmpl = tmpl[:i]
+	}
+	return strings.ToLower(strings.TrimRight(tmpl, "-_."))
 }
 
 // before is the version a generated version is compared with: the nearest older one the

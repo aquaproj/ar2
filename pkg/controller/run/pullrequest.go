@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
@@ -26,6 +27,10 @@ type version struct {
 	// GainedEnvironments names the platforms, as os/arch, this version covers and the
 	// version before it didn't.
 	GainedEnvironments []string
+	// StrangerEnvironments are the gained platforms whose asset is named unlike the
+	// assets of the platforms the version already covered: another program of the
+	// release, as likely as not. They are what leaves a gained platform for review.
+	StrangerEnvironments []string
 	// Unresolved names the environments whose entry points at a file the archive doesn't
 	// hold. Such a version goes to a pull request of its own: what it says can't be true,
 	// so it can't merge, and in the pull request with the rest it would stop the versions
@@ -197,11 +202,26 @@ func lostEnvironmentLines(versions []*version) []string {
 	return lines
 }
 
-func gainedEnvironmentLines(versions []*version) []string {
+// strangerEnvironmentLines describes the platforms each version gained with an asset
+// named unlike its others.
+func strangerEnvironmentLines(versions []*version) []string {
 	var lines []string
 	for _, v := range versions {
-		for _, gained := range v.GainedEnvironments {
-			lines = append(lines, v.Version+" "+gained)
+		for _, env := range v.StrangerEnvironments {
+			lines = append(lines, v.Version+" "+env)
+		}
+	}
+	return lines
+}
+
+// ordinaryGainedLines describes the rest of the platforms each version gained.
+func ordinaryGainedLines(versions []*version) []string {
+	var lines []string
+	for _, v := range versions {
+		for _, env := range v.GainedEnvironments {
+			if !slices.Contains(v.StrangerEnvironments, env) {
+				lines = append(lines, v.Version+" "+env)
+			}
 		}
 	}
 	return lines
@@ -234,11 +254,16 @@ func prBody(versions []*version, unconverted []string, needsReview bool, rel rel
 			"to a spelling the parser doesn't know produces no entry for that environment at all. The "+
 			"definition is where the answer goes, as a replacement naming the spelling. A release that "+
 			"stopped building for the environment is the other reason, and then there is nothing to fix.")
-	writeLost(&b, gainedEnvironmentLines(versions),
-		"These versions cover platforms the version before them didn't:",
+	writeLost(&b, strangerEnvironmentLines(versions),
+		"These versions cover platforms the version before them didn't, with an asset named unlike the others:",
 		"The asset names are read from the release, so an asset placed on a platform it wasn't on before "+
-			"may be a build the release started publishing, or another program of the release that its "+
-			"name doesn't tell apart. The first merges as it is; the second is what all_assets_filter is for.")
+			"may be another program of the release rather than a build of this one. What comes before the "+
+			"os, arch and version in its name differs from every other asset of the version, which is how "+
+			"another program looks. If it is one, all_assets_filter is where it is left out.")
+	writeLost(&b, ordinaryGainedLines(versions),
+		"These versions cover platforms the version before them didn't:",
+		"Each of these assets is named like the version's other assets, so it is taken as a build the "+
+			"release started publishing, which needs nothing.")
 	writeUnconverted(&b, unconverted)
 	writeWaiting(&b, unconverted, needsReview)
 	return b.String()
