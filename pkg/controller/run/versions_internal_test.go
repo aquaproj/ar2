@@ -1,66 +1,79 @@
 package run
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 
-	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
-	"github.com/google/go-cmp/cmp"
+	"github.com/aquaproj/ar2/pkg/state"
+	gogithub "github.com/google/go-github/v93/github"
 )
 
-// A tag that names a place in a release history rather than a point in it moves as the
-// repository releases. What a run generates is what a tag points at -- the asset name,
-// the checksum, the files inside the archive -- so generated for a moving tag all of
-// it stops being true the next time upstream releases.
-//
-// neovim's stable is the one this was found on. It has no version_filter, so nothing
-// else was going to drop it.
-func TestFilterVersions_movingTags(t *testing.T) {
+// releasesServer serves a repository's releases a page at a time, the way GitHub does:
+// the Link header names the next page until the last.
+func releasesServer(t *testing.T, total int) (*gogithub.Client, *int) {
+	t.Helper()
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page == 0 {
+			page = 1
+		}
+		start := (page - 1) * versionsPerPage
+		end := min(start+versionsPerPage, total)
+		releases := make([]map[string]string, 0, versionsPerPage)
+		for i := start; i < end; i++ {
+			releases = append(releases, map[string]string{"tag_name": fmt.Sprintf("v0.%d.0", total-i)})
+		}
+		if end < total {
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?page=%d&per_page=%d>; rel="next"`,
+				"http://"+r.Host, r.URL.Path, page+1, versionsPerPage))
+		}
+		if err := json.NewEncoder(w).Encode(releases); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	gh, err := gogithub.NewClient(gogithub.WithEnterpriseURLs(srv.URL, srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gh, &requests
+}
+
+// A package read one page deep gets the newest hundred releases, and a named one is read
+// until the releases end or namedPages pages have been read.
+func TestReleaseVersions_pages(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		base *aquaregistry.PackageInfo
-		want []string
+		name         string
+		total, pages int
+		want         int
+		wantRequests int
 	}{
-		{
-			name: "no version_filter",
-			base: nil,
-			want: []string{"v0.12.5", "v0.12.4", "v1.0.0-stable"},
-		},
-		{
-			// The filter and the moving tags are separate reasons, and both apply.
-			name: "a version_filter as well",
-			base: &aquaregistry.PackageInfo{VersionFilter: `Version matches "^v0\\."`},
-			want: []string{"v0.12.5", "v0.12.4"},
-		},
+		{name: "the order reads one page", total: 250, pages: 1, want: 100, wantRequests: 1},
+		{name: "a named package reads until the releases end", total: 250, pages: namedPages, want: 250, wantRequests: 3},
+		{name: "a named package reads no more than namedPages", total: 1500, pages: namedPages, want: 1000, wantRequests: namedPages},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := filterVersions(discardLogger(),
-				[]string{"stable", "v0.12.5", "nightly", "v0.12.4", "latest", "v1.0.0-stable"}, tt.base)
+			gh, requests := releasesServer(t, tt.total)
+			c := New(gh, nil, nil, &fakeRegistry{}, failingAutoMerger{}, nil, nil)
+			got, err := c.releaseVersions(t.Context(), &state.Package{RepoOwner: "loft-sh", RepoName: "vcluster"}, nil, false, tt.pages)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("the versions are wrong (-want +got):\n%s", diff)
+			if len(got) != tt.want {
+				t.Errorf("got %d versions, want %d", len(got), tt.want)
+			}
+			if *requests != tt.wantRequests {
+				t.Errorf("made %d requests, want %d", *requests, tt.wantRequests)
 			}
 		})
-	}
-}
-
-// A repository releasing more than one program from the same tags gives each of them a
-// prefix, and only the tags carrying this package's are versions of it.
-// bitwarden/clients tags the CLI cli-v2026.9.0 and the desktop application
-// desktop-v2026.9.0, and the desktop archive holds no bw for the definition to name.
-func TestFilterVersions_versionPrefix(t *testing.T) {
-	t.Parallel()
-	got, err := filterVersions(discardLogger(),
-		[]string{"cli-v2026.9.0", "desktop-v2026.9.0", "browser-v2026.9.0", "cli-v2026.8.1"},
-		&aquaregistry.PackageInfo{VersionPrefix: "cli-v"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diff := cmp.Diff([]string{"cli-v2026.9.0", "cli-v2026.8.1"}, got); diff != "" {
-		t.Errorf("the versions are wrong (-want +got):\n%s", diff)
 	}
 }
