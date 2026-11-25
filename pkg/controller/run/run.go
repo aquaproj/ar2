@@ -855,6 +855,7 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 	generated := make([]*version, 0, budget.attempts)
 	out := &stopped{}
 	attempted := 0
+	settle := settleFor(input)
 	for _, tag := range versions {
 		if budget.spent(attempted, len(generated)) || timeUp(input) {
 			return generated, out, attempted
@@ -862,11 +863,8 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 		if _, ok := existing[tag]; ok {
 			continue
 		}
-		v, err := c.generate(ctx, logger, input, def, pkgName, tag)
-		if emptyRelease(candidate.Package, tag, err, time.Now()) {
-			// Not an attempt: there was nothing to generate, and there never will be.
-			logger.Info("the release has no assets, so the version is passed over from now on",
-				"package", pkgName, "version", tag)
+		v, err := c.generate(ctx, logger, input, def, pkgName, tag, settle)
+		if passOver(logger, candidate, tag, err) {
 			continue
 		}
 		attempted++
@@ -898,6 +896,24 @@ func (c *Controller) generateVersions(ctx context.Context, logger *slog.Logger, 
 	return generated, out, attempted
 }
 
+// passOver says whether the version's error is one that isn't an attempt: a release with
+// nothing to generate, which is passed over from now on, or one whose assets are still
+// changing, which waits for a later turn. Neither is a failure.
+func passOver(logger *slog.Logger, candidate *Candidate, tag string, err error) bool {
+	if emptyRelease(candidate.Package, tag, err, time.Now()) {
+		logger.Info("the release has no assets, so the version is passed over from now on",
+			"package", candidate.Name, "version", tag)
+		return true
+	}
+	if e, ok := errors.AsType[*generate.UnsettledReleaseError](err); ok {
+		// The version is still missing on the next turn, which generates it.
+		logger.Info("the release's assets changed recently, so the version waits for a later turn",
+			"package", candidate.Name, "version", tag, "last_upload", e.LastUpload)
+		return true
+	}
+	return false
+}
+
 // repos is what a package's releases are read from: the instance's client when the
 // definition says the package is on one, and nil otherwise, which the generator reads as
 // GitHub.
@@ -909,14 +925,30 @@ func (c *Controller) repos(def *definition, base *aquaregistry.PackageInfo) genr
 	return forge.For(c.httpClient, info.Type, info.GetHost())
 }
 
-// generate builds registry.json for one package version and completes it.
-func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string) (*version, error) {
+// releaseSettles is how long a release's assets have to stay as they are before a run of
+// the order generates it. See generate.Input.Settle.
+const releaseSettles = time.Hour
+
+// settleFor is how long the run waits for a release's assets to settle: releaseSettles for
+// a run of the order, and nothing for one that names its packages, since a person naming a
+// package wants it generated now and can see what the release holds.
+func settleFor(input *Input) time.Duration {
+	if len(input.Packages) > 0 {
+		return 0
+	}
+	return releaseSettles
+}
+
+// generate builds registry.json for one package version and completes it. settle is how
+// long the release's assets have to have stayed as they are; zero doesn't wait.
+func (c *Controller) generate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string, settle time.Duration) (*version, error) {
 	generated, err := c.generator.Generate(ctx, logger, &generate.Input{
 		PkgName: pkgName,
 		Version: tag,
 		Base:    input.PkgInfos[pkgName],
 		Config:  def.config,
 		Repos:   c.repos(def, input.PkgInfos[pkgName]),
+		Settle:  settle,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate registry.json: %w", err)

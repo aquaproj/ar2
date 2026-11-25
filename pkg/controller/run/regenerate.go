@@ -275,7 +275,9 @@ type regenerated struct {
 
 // regenerate generates one version and renders it the way it would be committed.
 func (c *Controller) regenerate(ctx context.Context, logger *slog.Logger, input *Input, def *definition, pkgName, tag string) (*version, string, error) {
-	v, err := c.generate(ctx, logger, input, def, pkgName, tag)
+	// A regeneration is asked for by a person, for a version already served, so it
+	// doesn't wait for the release to settle.
+	v, err := c.generate(ctx, logger, input, def, pkgName, tag, 0)
 	if err != nil {
 		c.problems = append(c.problems, &summary.Problem{
 			Package: pkgName, Version: tag, Reason: err.Error(),
