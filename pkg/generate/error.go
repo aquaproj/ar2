@@ -43,3 +43,17 @@ type EmptyReleaseError struct {
 func (e *EmptyReleaseError) Error() string {
 	return "the release has no assets"
 }
+
+// UnsettledReleaseError says a release's assets changed too recently to generate it: they
+// may still be being uploaded, or uploaded again. Nothing is wrong with the version, and a
+// later turn generates it.
+type UnsettledReleaseError struct {
+	// LastUpload is when the newest asset was uploaded.
+	LastUpload time.Time
+	// Settle is how long the assets have to stay as they are.
+	Settle time.Duration
+}
+
+func (e *UnsettledReleaseError) Error() string {
+	return "the release's assets changed less than " + e.Settle.String() + " ago, at " + e.LastUpload.UTC().Format(time.RFC3339)
+}

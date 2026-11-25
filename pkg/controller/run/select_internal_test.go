@@ -282,3 +282,15 @@ func TestOrder_fresh(t *testing.T) {
 		t.Errorf("order is wrong (-want +got):\n%s", diff)
 	}
 }
+
+// TestSettleFor checks that only a run of the order waits for a release's assets to settle:
+// a person naming a package wants it generated now.
+func TestSettleFor(t *testing.T) {
+	t.Parallel()
+	if got := settleFor(&Input{}); got != releaseSettles {
+		t.Errorf("the order waits %v, want %v", got, releaseSettles)
+	}
+	if got := settleFor(&Input{Packages: []string{"cloudnative-pg/cloudnative-pg/kubectl-cnpg"}}); got != 0 {
+		t.Errorf("a named run waits %v, want nothing", got)
+	}
+}

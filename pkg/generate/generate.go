@@ -39,6 +39,11 @@ type Input struct {
 	// GitHub's does: the asset naming is then inferred by the same code, and only the
 	// host it was read from differs. It may be nil, which is GitHub.
 	Repos genrgst.RepositoriesService
+	// Settle is how long a release's assets have to have stayed as they are before it is
+	// generated. A release whose newest asset is younger is an UnsettledReleaseError.
+	// Zero generates it whatever its assets are doing, which is what a person naming
+	// the package asks for.
+	Settle time.Duration
 }
 
 // Generator builds registry.json from a release.
@@ -237,6 +242,8 @@ type release struct {
 	published time.Time
 	// prerelease says the release is marked as a prerelease.
 	prerelease bool
+	// lastUpload is when the newest of its uploaded assets was uploaded, or replaced.
+	lastUpload time.Time
 }
 
 // release reads the release's asset list.
@@ -245,7 +252,8 @@ type release struct {
 // request instead of two per version. Assets whose upload never completed are left
 // out: GitHub keeps them in the "starter" state, where they are hidden from the
 // release page and can't be downloaded. A release left with none is an
-// EmptyReleaseError.
+// EmptyReleaseError, and one whose assets changed within input.Settle an
+// UnsettledReleaseError.
 func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistry.PackageInfo) (*release, error) {
 	owner, name, err := repoOf(input, base)
 	if err != nil {
@@ -267,6 +275,7 @@ func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistr
 			continue
 		}
 		out.names[asset.GetName()] = struct{}{}
+		out.lastUpload = latest(out.lastUpload, asset.GetCreatedAt().Time, asset.GetUpdatedAt().Time)
 		if digest := asset.GetDigest(); digest != "" {
 			out.digests[asset.GetName()] = strings.TrimPrefix(digest, "sha256:")
 		}
@@ -274,7 +283,39 @@ func (g *Generator) release(ctx context.Context, input *Input, base *aquaregistr
 	if len(out.names) == 0 {
 		return nil, &EmptyReleaseError{PublishedAt: out.published}
 	}
+	if err := unsettled(out, input.Settle, time.Now()); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// unsettled says the release's assets changed too recently to be generated from.
+//
+// A release is published before its assets are, and it can be given them again after:
+// cloudnative-pg's v1.31.0-rc1 was published at 11:33, generated at 12:41 with only some
+// of its assets, and had every asset uploaded again from 12:47 to 12:49, its SLSA
+// provenance among them. How long ago the release was published doesn't tell that apart;
+// how long ago an asset last changed does. A run that waits generates the version on a
+// later turn, since it is still missing from the registry.
+func unsettled(rel *release, settle time.Duration, now time.Time) error {
+	if settle <= 0 || rel.lastUpload.IsZero() {
+		return nil
+	}
+	if now.Sub(rel.lastUpload) >= settle {
+		return nil
+	}
+	return &UnsettledReleaseError{LastUpload: rel.lastUpload, Settle: settle}
+}
+
+// latest is the latest of the times.
+func latest(times ...time.Time) time.Time {
+	var out time.Time
+	for _, t := range times {
+		if t.After(out) {
+			out = t
+		}
+	}
+	return out
 }
 
 // assetStateUploaded is the state of an asset whose upload has completed.
