@@ -1,7 +1,10 @@
 package verify
 
 import (
+	"bytes"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/generate"
@@ -62,5 +65,27 @@ func TestEmulates(t *testing.T) {
 		if got := emulates(goos); got != want {
 			t.Errorf("%s: got %t", goos, got)
 		}
+	}
+}
+
+// A 32-bit ARM build that emulate gives the amd64 build is not reported as the environment
+// going: only an environment that really goes is warned about.
+func TestFilled_nothingFor_warnsOnlyWhatGoes(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	f := &Filled{}
+	f.nothingFor(logger, &generate.Asset{OS: "windows", Arch: "arm64", Asset: "foo_Windows_arm.zip"}, errNotArm64)
+	if buf.Len() != 0 {
+		t.Errorf("warned about an environment emulate may keep: %s", buf.String())
+	}
+	f.nothingFor(logger, &generate.Asset{OS: "linux", Arch: "arm64", Asset: "foo_Linux_arm.tar.gz"}, errNotArm64)
+	if !strings.Contains(buf.String(), "os=linux") {
+		t.Errorf("didn't warn about linux/arm64 going: %q", buf.String())
+	}
+	buf.Reset()
+	f.emulate(logger, nil)
+	if !strings.Contains(buf.String(), "no amd64 build to emulate") {
+		t.Errorf("didn't warn about windows/arm64 going with nothing to emulate: %q", buf.String())
 	}
 }
