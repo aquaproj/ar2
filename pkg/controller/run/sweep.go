@@ -234,7 +234,7 @@ func decide(pkg *state.Package, swept []string, now time.Time) work {
 // looks at. A package named in the run is walked namedPages deep rather than one page.
 func (c *Controller) candidateVersions(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate, def *definition, todo work, swept []string) ([]string, error) {
 	if todo == workSweep {
-		return filterVersions(logger, swept, input.PkgInfos[candidate.Name])
+		return filterVersions(logger, swept, versionRules(input.PkgInfos[candidate.Name], def))
 	}
 	pages := 1
 	if len(input.Packages) > 0 {

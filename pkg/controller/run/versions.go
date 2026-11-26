@@ -49,7 +49,25 @@ func (c *Controller) versions(ctx context.Context, logger *slog.Logger, pkg *sta
 	if err != nil {
 		return nil, err
 	}
-	return filterVersions(logger, tags, base)
+	return filterVersions(logger, tags, versionRules(base, def))
+}
+
+// versionRules is the definition that says which of a repository's tags are versions of
+// the package: this registry's own, which is what a person edits, or aqua-registry's when
+// there is none to go by.
+//
+// Filtering with aqua-registry's alone left this registry's version_filter unread where
+// it counts. airbytehq/abctl's says not (Version startsWith "airbox-"), since the
+// repository releases airbox too, and aqua-registry's says nothing, so a run listed
+// airbox-v0.1.0 and airbox-v0.1.1 as versions of abctl and opened a pull request waiting
+// for a definition that already said they weren't. A definition converted from
+// aqua-registry carries its version_filter and version_prefix over, so going by this
+// registry's loses nothing aqua-registry said.
+func versionRules(base *aquaregistry.PackageInfo, def *definition) *aquaregistry.PackageInfo {
+	if def != nil && def.config != nil && def.config.PackageInfo != nil {
+		return def.config.PackageInfo
+	}
+	return base
 }
 
 // listVersions reads the versions from wherever the package publishes them.
