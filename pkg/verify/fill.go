@@ -183,13 +183,7 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 		// What the release has for the arch is a build for another -- 32-bit ARM for
 		// arm64, arm64 alone for amd64 -- which is the release having nothing for the
 		// environment as much as a 404 is.
-		logger.Warn("the release has nothing for this environment, so the file won't offer it",
-			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
-		if errWrongArch(err) {
-			filled.wrongArch(asset, err)
-		} else {
-			filled.refused(asset, err.Error())
-		}
+		filled.nothingFor(logger, asset, err)
 		return false, true, nil
 	case err != nil:
 		// The entry isn't mergeable as it stands, but it is most of the way
@@ -249,13 +243,31 @@ func (v *Verifier) signedOnly(ctx context.Context, logger *slog.Logger, pkgName,
 	}
 }
 
+// nothingFor records an environment the release has nothing for: its asset refused, or a
+// build for another arch.
+func (f *Filled) nothingFor(logger *slog.Logger, asset *generate.Asset, err error) {
+	if !errWrongArch(err) {
+		f.refused(asset, err.Error())
+	} else if f.wrongArch(asset, err) {
+		// emulate may yet give the environment the amd64 build, and says which it came
+		// to: saying here that the file won't offer it read as the environment going when
+		// it didn't.
+		return
+	}
+	logger.Warn("the release has nothing for this environment, so the file won't offer it",
+		"os", asset.OS, "arch", asset.Arch, "error", err.Error())
+}
+
 // wrongArch records an environment whose build is for another arch, which the release has
-// nothing for, and keeps a 32-bit ARM build of macOS or Windows for emulate.
-func (f *Filled) wrongArch(asset *generate.Asset, err error) {
+// nothing for, and keeps a 32-bit ARM build of macOS or Windows for emulate. It says whether
+// it kept it, in which case emulate decides what becomes of the environment.
+func (f *Filled) wrongArch(asset *generate.Asset, err error) bool {
 	f.absent(asset, err.Error())
 	if errors.Is(err, errNotArm64) && emulates(asset.OS) {
 		f.arm32 = append(f.arm32, asset)
+		return true
 	}
+	return false
 }
 
 // emulates says whether an arm64 machine of the OS runs amd64 builds: macOS through
@@ -278,6 +290,8 @@ func (f *Filled) emulate(logger *slog.Logger, kept []*generate.Asset) []*generat
 	for _, arm := range f.arm32 {
 		idx := slices.IndexFunc(kept, func(a *generate.Asset) bool { return a.OS == arm.OS && a.Arch == archAmd64 })
 		if idx < 0 {
+			logger.Warn("the release has nothing for this environment, so the file won't offer it",
+				"os", arm.OS, "arch", arm.Arch, "error", errNotArm64.Error()+", and there is no amd64 build to emulate")
 			continue
 		}
 		emulated := *kept[idx]
