@@ -11,6 +11,11 @@ import (
 	"github.com/aquaproj/ar2/pkg/generate"
 )
 
+const (
+	archArm64 = "arm64"
+	archAmd64 = "amd64"
+)
+
 // errNotArm64 is an arm64 entry whose executables are built for 32-bit ARM.
 var errNotArm64 = errors.New("the executables are built for 32-bit ARM, not arm64")
 
@@ -57,7 +62,7 @@ func ambiguousArm(name string) bool {
 // A file whose header can't be read -- a script, a jar -- says nothing either way, so
 // only what can be read decides.
 func checkArm64(dir string, asset *generate.Asset, files []*generate.File) error {
-	if asset.Arch != "arm64" {
+	if asset.Arch != archArm64 {
 		return nil
 	}
 	name := asset.Asset
@@ -119,7 +124,7 @@ func arm32(path string) bool {
 // unlike checkArm64 this asks whatever the name says. A file whose header can't be read
 // says nothing either way.
 func checkAmd64(dir string, asset *generate.Asset, files []*generate.File) error {
-	if asset.Arch != "amd64" {
+	if asset.Arch != archAmd64 {
 		return nil
 	}
 	for _, file := range files {
