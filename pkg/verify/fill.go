@@ -2,8 +2,10 @@ package verify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
@@ -48,6 +50,11 @@ type Filled struct {
 	// generated: what becomes of such a version is the caller's, and what it has to
 	// work with is what was tried.
 	Offered int
+
+	// arm32 are the arm64 entries of macOS and Windows whose executables turned out to be
+	// built for 32-bit ARM. Those machines run the amd64 build, so emulate gives each the
+	// amd64 entry instead of leaving the environment out.
+	arm32 []*generate.Asset
 }
 
 // Excluded is one environment the registry doesn't offer this version for.
@@ -90,6 +97,7 @@ func (v *Verifier) Complete(ctx context.Context, logger *slog.Logger, pkgName, v
 			kept = append(kept, asset)
 		}
 	}
+	kept = filled.emulate(logger, kept)
 	filled.Offered = len(kept)
 	if len(kept) > 0 {
 		reg.Assets = kept
@@ -178,7 +186,7 @@ func (v *Verifier) extracted(ctx context.Context, logger *slog.Logger, pkgName, 
 		logger.Warn("the release has nothing for this environment, so the file won't offer it",
 			"os", asset.OS, "arch", asset.Arch, "error", err.Error())
 		if errWrongArch(err) {
-			filled.absent(asset, err.Error())
+			filled.wrongArch(asset, err)
 		} else {
 			filled.refused(asset, err.Error())
 		}
@@ -239,6 +247,53 @@ func (v *Verifier) signedOnly(ctx context.Context, logger *slog.Logger, pkgName,
 		// The download recorded the checksum, so there is nothing else for this entry.
 		return true, true, nil
 	}
+}
+
+// wrongArch records an environment whose build is for another arch, which the release has
+// nothing for, and keeps a 32-bit ARM build of macOS or Windows for emulate.
+func (f *Filled) wrongArch(asset *generate.Asset, err error) {
+	f.absent(asset, err.Error())
+	if errors.Is(err, errNotArm64) && emulates(asset.OS) {
+		f.arm32 = append(f.arm32, asset)
+	}
+}
+
+// emulates says whether an arm64 machine of the OS runs amd64 builds: macOS through
+// Rosetta 2 and Windows through its emulation. Linux has neither.
+func emulates(goos string) bool {
+	return goos == "darwin" || goos == "windows"
+}
+
+// emulate gives each arm64 entry whose build turned out to be 32-bit ARM the amd64 entry of
+// its OS, which the machine runs through emulation, and returns the entries the file keeps.
+//
+// Code-Hex/gqldoc v0.0.4 added Windows_arm.zip, a 32-bit ARM build, beside Windows_x86_64.zip.
+// The asset's name reads as arm64, so windows/arm64 took it, and checkArm64 rightly turned it
+// down -- Windows on arm64 hasn't run 32-bit ARM since 24H2 -- which left the environment
+// out, although v0.0.3 had given it the x86_64 build through emulation. The amd64 entry has
+// been checked by then, its executables built for amd64, so the arm64 entry is that entry
+// marked as emulated, the way a definition declaring the emulation writes it. An OS with no
+// amd64 entry kept leaves the environment out as before.
+func (f *Filled) emulate(logger *slog.Logger, kept []*generate.Asset) []*generate.Asset {
+	for _, arm := range f.arm32 {
+		idx := slices.IndexFunc(kept, func(a *generate.Asset) bool { return a.OS == arm.OS && a.Arch == archAmd64 })
+		if idx < 0 {
+			continue
+		}
+		emulated := *kept[idx]
+		emulated.Arch = archArm64
+		emulated.Files = slices.Clone(emulated.Files)
+		if arm.OS == "darwin" {
+			emulated.Rosetta2 = true
+		} else {
+			emulated.WindowsARMEmulation = true
+		}
+		kept = append(kept, &emulated)
+		f.Excluded = slices.DeleteFunc(f.Excluded, func(e *Excluded) bool { return e.Asset == arm })
+		logger.Info("the arm64 build is 32-bit ARM, so the environment gets the amd64 build through emulation",
+			"os", arm.OS, "arm_asset", arm.Asset, "asset", emulated.Asset)
+	}
+	return kept
 }
 
 // exclude records an environment the file won't offer.
