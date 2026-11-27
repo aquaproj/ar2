@@ -245,30 +245,33 @@ const VersionsBranch = HeadBranchPrefix + "versions"
 // after they merge. The list ref holds is the starting point, and only the versions it lacks
 // are read and the ones gone taken out; a list that can't be read is made again from every
 // version.
-func (c *Client) VersionsListFile(ctx context.Context, logger *slog.Logger, ref, id string) (*File, error) {
+//
+// It also says how many registry.json it read, one for each version the list didn't hold
+// yet, which is what making a list costs and what update-versions bounds a run by.
+func (c *Client) VersionsListFile(ctx context.Context, logger *slog.Logger, ref, id string) (*File, int, error) {
 	dir := PackageDir(id)
 	listPath := dir + "/" + aquag2.VersionsFileName
 	tree, err := c.versionsTree(ctx, ref, dir)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	content, err := c.File(ctx, ref, listPath)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if tree == "" {
 		if content == "" {
-			return nil, nil //nolint:nilnil // no versions and no list, which is in step
+			return nil, 0, nil // no versions and no list, which is in step
 		}
-		return &File{Path: listPath, Deleted: true}, nil
+		return &File{Path: listPath, Deleted: true}, 0, nil
 	}
 	held := readList(content)
 	if held != nil && held.Source == tree {
-		return nil, nil //nolint:nilnil // the list is of what the directory holds
+		return nil, 0, nil // the list is of what the directory holds
 	}
-	entries, err := c.listedEntries(ctx, logger, ref, dir, held)
+	entries, read, err := c.listedEntries(ctx, logger, ref, dir, held)
 	if err != nil {
-		return nil, err
+		return nil, read, err
 	}
 	out := &aquag2.Versions{Source: tree, Versions: make([]*aquag2.Version, 0, len(entries))}
 	for _, v := range entries {
@@ -277,17 +280,18 @@ func (c *Client) VersionsListFile(ctx context.Context, logger *slog.Logger, ref,
 	out.Sort()
 	rendered, err := marshalVersions(out)
 	if err != nil {
-		return nil, err
+		return nil, read, err
 	}
-	return &File{Path: listPath, Content: rendered}, nil
+	return &File{Path: listPath, Content: rendered}, read, nil
 }
 
 // listedEntries is what the list should say about each version the directory on ref holds:
-// what held says about the ones it lists, and what each other one's file says.
-func (c *Client) listedEntries(ctx context.Context, logger *slog.Logger, ref, dir string, held *aquag2.Versions) (map[string]*aquag2.Version, error) {
+// what held says about the ones it lists, and what each other one's file says. It also says
+// how many of those files it read.
+func (c *Client) listedEntries(ctx context.Context, logger *slog.Logger, ref, dir string, held *aquag2.Versions) (map[string]*aquag2.Version, int, error) {
 	versions, err := c.versionsIn(ctx, logger, ref, dir)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	entries := map[string]*aquag2.Version{}
 	if held != nil {
@@ -300,17 +304,19 @@ func (c *Client) listedEntries(ctx context.Context, logger *slog.Logger, ref, di
 			}
 		}
 	}
+	read := 0
 	for version := range versions {
 		if _, ok := entries[version]; ok {
 			continue
 		}
 		file, err := c.File(ctx, ref, dir+"/"+aquag2.Path(version))
+		read++
 		if err != nil {
-			return nil, fmt.Errorf("read the registry.json of %s: %w", version, err)
+			return nil, read, fmt.Errorf("read the registry.json of %s: %w", version, err)
 		}
 		entries[version] = versionEntry(logger, version, file)
 	}
-	return entries, nil
+	return entries, read, nil
 }
 
 // readList reads a list of versions, or nil when there is none or it can't be read.

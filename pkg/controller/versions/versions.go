@@ -15,7 +15,7 @@ import (
 
 // Registry is the part of aqua-registry-g2 an update of the lists reads and writes.
 type Registry interface {
-	VersionsListFile(ctx context.Context, logger *slog.Logger, ref, id string) (*g2.File, error)
+	VersionsListFile(ctx context.Context, logger *slog.Logger, ref, id string) (*g2.File, int, error)
 	File(ctx context.Context, ref, path string) (string, error)
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
@@ -36,11 +36,25 @@ type Controller struct {
 	blobs      g2.Blobs
 	baseBranch string
 	dryRun     bool
+	maxReads   int
 }
 
 // DryRun makes Update say which lists are behind and commit nothing.
 func (c *Controller) DryRun() {
 	c.dryRun = true
+}
+
+// LimitReads bounds how many registry.json a run reads to make lists, which is what a list
+// costs: one REST call for each version it doesn't hold yet. Zero is no bound.
+//
+// The lists fell a day behind once, when every run failed from 2026-11-26 14:12Z, and the
+// first run that worked again had about 3,000 versions to read: far past the job's fifteen
+// minutes and GITHUB_TOKEN's thousand requests an hour, and a run that times out commits
+// nothing, so the next would have started over and timed out the same way. With a bound a
+// run commits what it made and leaves the rest; nothing is remembered between runs, so the
+// next one finds the lists still behind and goes on from there.
+func (c *Controller) LimitReads(n int) {
+	c.maxReads = n
 }
 
 // New creates a Controller. automerge may be nil, and then the pull request waits for
@@ -116,8 +130,17 @@ func checkIDs(ids []string) error {
 // ref holds.
 func (c *Controller) files(ctx context.Context, logger *slog.Logger, ref string, ids []string) ([]*g2.File, error) {
 	out := make([]*g2.File, 0, len(ids))
-	for _, id := range ids {
-		file, err := c.g2.VersionsListFile(ctx, logger, c.baseBranch, id)
+	reads := 0
+	for i, id := range ids {
+		if c.maxReads > 0 && reads >= c.maxReads {
+			// A list is made whole or not at all, so the bound is checked before one is
+			// started, and the last one made may take the run past it.
+			logger.Info("the run read as many registry.json as it may, so the rest of the lists are left for the next run",
+				"max_reads", c.maxReads, "num_of_reads", reads, "num_of_lists_left", len(ids)-i)
+			break
+		}
+		file, read, err := c.g2.VersionsListFile(ctx, logger, c.baseBranch, id)
+		reads += read
 		if err != nil {
 			return nil, fmt.Errorf("make the list of versions of %s: %w", id, err)
 		}

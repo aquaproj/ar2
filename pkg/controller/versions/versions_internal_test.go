@@ -21,6 +21,8 @@ type fakeRegistry struct {
 	opened    int
 	stale     []string
 	listRef   string
+	reads     map[string]int
+	asked     []string
 }
 
 func (f *fakeRegistry) StaleVersionsLists(_ context.Context, _ *slog.Logger, _ g2.Blobs, listRef string) ([]string, error) {
@@ -28,8 +30,9 @@ func (f *fakeRegistry) StaleVersionsLists(_ context.Context, _ *slog.Logger, _ g
 	return f.stale, nil
 }
 
-func (f *fakeRegistry) VersionsListFile(_ context.Context, _ *slog.Logger, _, id string) (*g2.File, error) {
-	return f.lists[id], nil
+func (f *fakeRegistry) VersionsListFile(_ context.Context, _ *slog.Logger, _, id string) (*g2.File, int, error) {
+	f.asked = append(f.asked, id)
+	return f.lists[id], f.reads[id], nil
 }
 
 func (f *fakeRegistry) File(_ context.Context, ref, path string) (string, error) {
@@ -184,5 +187,33 @@ func TestController_Update_staleOnOpenPullRequest(t *testing.T) {
 	}
 	if onMerger.enabled != 0 {
 		t.Errorf("auto-merge already on was turned on %d times", onMerger.enabled)
+	}
+}
+
+// A run stops starting lists once it has read as many registry.json as it may, commits the
+// ones it made, and leaves the rest to the next run.
+func TestController_Update_limitReads(t *testing.T) {
+	t.Parallel()
+	reg := &fakeRegistry{
+		stale: []string{"1790772701", "1790772702", "1790772703"},
+		lists: map[string]*g2.File{
+			"1790772701": {Path: "pkgs/01/1790772701/versions.json", Content: "a"},
+			"1790772702": {Path: "pkgs/02/1790772702/versions.json", Content: "b"},
+			"1790772703": {Path: "pkgs/03/1790772703/versions.json", Content: "c"},
+		},
+		reads: map[string]int{"1790772701": 3, "1790772702": 4, "1790772703": 1},
+	}
+	c := New(reg, &recordingAutoMerger{}, nil, "main")
+	c.LimitReads(5)
+	if err := c.Update(context.Background(), discardLogger(), nil); err != nil {
+		t.Fatal(err)
+	}
+	// The second list takes the run past the bound, since a list is made whole; the third
+	// isn't started.
+	if diff := cmp.Diff([]string{"1790772701", "1790772702"}, reg.asked); diff != "" {
+		t.Errorf("the lists made (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"pkgs/01/1790772701/versions.json", "pkgs/02/1790772702/versions.json"}, paths(reg.committed)); diff != "" {
+		t.Errorf("what was committed (-want +got):\n%s", diff)
 	}
 }
