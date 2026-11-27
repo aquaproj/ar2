@@ -184,6 +184,30 @@ func TestBefore(t *testing.T) {
 	}
 }
 
+// A project releasing several lines interleaved has a version compared with the one
+// before it in its own line: coder/coder published v2.29.30 right after v2.34.22.
+func TestBefore_lines(t *testing.T) {
+	t.Parallel()
+	versions := []string{"v2.29.30", "v2.34.22", "v2.37.15", "v2.29.29", "v2.34.21"}
+	existing := map[string]struct{}{"v2.34.22": {}, "v2.37.15": {}, "v2.29.29": {}, "v2.34.21": {}}
+	generated := map[string]*version{"v2.29.30": {}}
+	if got := before("v2.29.30", versions, existing, generated); got != "v2.29.29" {
+		t.Errorf("before(v2.29.30) = %q, want v2.29.29", got)
+	}
+	// A tag with a prefix is compared with the tags of the same prefix.
+	versions = []string{"faber-v1.6.0", "other-v9.0.0", "faber-v1.5.0"}
+	existing = map[string]struct{}{"other-v9.0.0": {}, "faber-v1.5.0": {}}
+	if got := before("faber-v1.6.0", versions, existing, nil); got != "faber-v1.5.0" {
+		t.Errorf("before(faber-v1.6.0) = %q, want faber-v1.5.0", got)
+	}
+	// A tag that isn't a version goes by the order of the releases.
+	versions = []string{"nightly-latest", "v1.0.0"}
+	existing = map[string]struct{}{"v1.0.0": {}}
+	if got := before("nightly-latest", versions, existing, nil); got != "v1.0.0" {
+		t.Errorf("before(nightly-latest) = %q, want v1.0.0", got)
+	}
+}
+
 // Filling in a history, a version lacking a platform the package gained later isn't left
 // for review: volta-cli/volta's 1.0.8 had no linux/arm64 build.
 func TestReviewLostSigning_history(t *testing.T) {
