@@ -26,6 +26,7 @@ type Args struct {
 	DryRun     bool
 	G2Owner    string
 	G2Repo     string
+	TreesFrom  string
 }
 
 // New returns the update-versions command.
@@ -50,6 +51,13 @@ up to date isn't made again. Nothing is remembered between runs, so a run that d
 happen -- cancelled, or never raised by its push -- is caught by the next. It costs two
 objects a package, read a hundred to a query.
 
+Which packages there are, and what each versions directory is, come from the tree under
+pkgs. GitHub's API returns that tree in one response of limited size, which the registry
+has outgrown, so a run in CI reads it with git from a checkout of the base branch instead,
+which may be blobless:
+
+$ ar2 update-versions --trees-from .
+
 Packages named by their ids are made again without asking the rest:
 
 $ ar2 update-versions 1790772767 1791650998
@@ -73,6 +81,7 @@ ghtkn when it isn't set. AR2_PR_TOKEN commits and opens the pull request.`,
 	fs.BoolVar(&args.DryRun, "dry-run", false, "say which lists are behind without committing anything")
 	fs.StringVar(&args.G2Owner, "g2-owner", "aquaproj", "the owner of the aqua-registry-g2 repository")
 	fs.StringVar(&args.G2Repo, "g2-repo", "aqua-registry-g2", "the aqua-registry-g2 repository")
+	fs.StringVar(&args.TreesFrom, "trees-from", "", "a checkout of the base branch whose trees git reads instead of the API's, which can't return the whole tree under pkgs")
 	return cmd
 }
 
@@ -100,6 +109,9 @@ func action(ctx context.Context, logger *slogutil.Logger, args *Args, ids []stri
 	// app just opened, not the app.
 	graphql := github.NewClient(httpClient)
 	registry := g2.New(gh, prGH, args.G2Owner, args.G2Repo, args.Version)
+	if args.TreesFrom != "" {
+		registry.ReadTreesFrom(args.TreesFrom)
+	}
 	c := ctrl.New(registry, graphql, graphql.Repository(args.G2Owner, args.G2Repo), args.BaseBranch)
 	if args.DryRun {
 		c.DryRun()

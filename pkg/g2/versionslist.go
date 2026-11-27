@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"path"
 	"strings"
 
@@ -358,16 +359,11 @@ type Blobs interface {
 // Which packages there are and what each versions directory is come from one read of the
 // tree under pkgs, and the lists from blobs, a hundred to a query.
 func (c *Client) StaleVersionsLists(ctx context.Context, logger *slog.Logger, blobs Blobs, listRef string) ([]string, error) {
-	tree, _, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, DefaultBranch+":"+PackagesDir, true)
+	entries, err := c.packagesTree(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("read the tree of the packages: %w", err)
+		return nil, err
 	}
-	if tree.GetTruncated() {
-		// The limit is 100,000 entries, which the registry is far from. A part of the tree
-		// would leave packages unchecked without saying so.
-		return nil, fmt.Errorf("%w: %s", errTreeTruncated, PackagesDir)
-	}
-	ids, shas := packagesOfTree(logger, tree.Entries)
+	ids, shas := packagesOfTree(logger, entries)
 	exprs := make([]string, len(ids))
 	for i, id := range ids {
 		exprs[i] = listRef + ":" + PackageDir(id) + "/" + aquag2.VersionsFileName
@@ -390,6 +386,70 @@ func (c *Client) StaleVersionsLists(ctx context.Context, logger *slog.Logger, bl
 		}
 	}
 	return stale, nil
+}
+
+// ReadTreesFrom makes StaleVersionsLists read the tree under pkgs from a checkout of the
+// registry's default branch in dir, with git, instead of from GitHub's API.
+//
+// The API gives a recursive tree in one response of at most 7 MB, and the registry outgrew
+// it: with about 35,000 versions the tree under pkgs has 80,000 entries, the API cut it off
+// at 75,000 and said it was truncated, and update-versions failed on every run from
+// 2026-11-26. git reads the trees of a checkout, a blobless one included, whatever their
+// size, and calls no API.
+func (c *Client) ReadTreesFrom(dir string) {
+	c.treesDir = dir
+}
+
+// packagesTree returns the entries of the tree under pkgs on the default branch, each path
+// relative to pkgs: from the checkout ReadTreesFrom named, or from GitHub's API.
+func (c *Client) packagesTree(ctx context.Context) ([]*gogithub.TreeEntry, error) {
+	if c.treesDir != "" {
+		return localTrees(ctx, c.treesDir)
+	}
+	tree, _, err := c.gh.Git.GetTree(ctx, c.owner, c.repo, DefaultBranch+":"+PackagesDir, true)
+	if err != nil {
+		return nil, fmt.Errorf("read the tree of the packages: %w", err)
+	}
+	if tree.GetTruncated() {
+		// A part of the tree would leave packages unchecked without saying so. The registry
+		// has outgrown what the API returns at once; ReadTreesFrom is the way round it.
+		return nil, fmt.Errorf("%w: %s", errTreeTruncated, PackagesDir)
+	}
+	return tree.Entries, nil
+}
+
+// localTrees lists the trees under pkgs at HEAD of the checkout in dir. Only trees are
+// listed: a package and its versions directory are all packagesOfTree reads, and a blobless
+// checkout holds every tree.
+func localTrees(ctx context.Context, dir string) ([]*gogithub.TreeEntry, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "ls-tree", "-r", "-d", "-z", "HEAD", PackagesDir)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list the trees under %s in %s with git: %w", PackagesDir, dir, err)
+	}
+	return parseLsTree(out), nil
+}
+
+// parseLsTree reads the output of git ls-tree -z, "<mode> <type> <object>\t<path>" each,
+// into tree entries whose paths are relative to pkgs. pkgs itself is left out.
+func parseLsTree(out []byte) []*gogithub.TreeEntry {
+	var entries []*gogithub.TreeEntry
+	for record := range strings.SplitSeq(string(out), "\x00") {
+		meta, p, ok := strings.Cut(record, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) != 3 { //nolint:mnd // mode, type and object
+			continue
+		}
+		rel, ok := strings.CutPrefix(p, PackagesDir+"/")
+		if !ok {
+			continue
+		}
+		entries = append(entries, &gogithub.TreeEntry{Path: new(rel), Type: new(fields[1]), SHA: new(fields[2])})
+	}
+	return entries
 }
 
 // packagesOfTree reads, from the entries of the tree under pkgs, the ids of the packages, in
