@@ -7,4 +7,6 @@ rin = "rin"
 
 [files]
 # A provenance published by a release, kept as it was published. Its base64 isn't prose.
-extend-exclude = ["pkg/generate/testdata/*.intoto.jsonl"]
+# go.mod and go.sum are written by go: a pseudo-version ends in a commit hash, whose hex
+# reads as words now and then -- aquaproj/aqua's 015411ba91c4 has "ba".
+extend-exclude = ["pkg/generate/testdata/*.intoto.jsonl", "go.mod", "go.sum"]
