@@ -28,6 +28,9 @@ type Client struct {
 	// requests and that is all, so the checks still decide what merges. When it
 	// isn't configured the ordinary client is used, which is what a local run does.
 	prGH *gogithub.Client
+	// treesDir is a checkout of the registry's default branch whose trees git reads in place
+	// of the API's: see ReadTreesFrom. Empty is the API.
+	treesDir string
 	// version is the ar2 that is running. Every pull request it opens is labelled with
 	// it, so that the ones an older ar2 made can be found together.
 	version string

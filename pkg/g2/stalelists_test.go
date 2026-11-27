@@ -6,6 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aquaproj/ar2/pkg/g2"
@@ -91,5 +95,57 @@ func TestClient_StaleVersionsLists(t *testing.T) {
 	}
 	if diff := cmp.Diff([]string{"1790000004", "1790000005"}, got); diff != "" {
 		t.Errorf("against the pull request's branch (-want +got):\n%s", diff)
+	}
+}
+
+// The tree under pkgs is read with git from a checkout when one is named, which is how a
+// registry whose tree the API can't return whole is read. The answer is the one the API
+// would have given.
+func TestClient_StaleVersionsLists_fromCheckout(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(p, content string) {
+		t.Helper()
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("pkgs/01/1790000001/registry.yaml", "name: a\n")
+	write("pkgs/01/1790000001/versions/v1.0.0/registry-1.json", "{}\n")
+	write("pkgs/02/1790000002/registry.yaml", "name: b\n")
+	write("pkgs/02/1790000002/versions/v2.0.0/registry-1.json", "{}\n")
+	write("pkgs/03/1790000003/registry.yaml", "name: c\n")
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...) //nolint:gosec // the test's own arguments
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q")
+	git("add", "-A")
+	git("commit", "-q", "-m", "init")
+	versionsSHA := func(id, shard string) string { return git("rev-parse", "HEAD:pkgs/"+shard+"/"+id+"/versions") }
+
+	list := func(id string) string { return "main:" + g2.PackageDir(id) + "/versions.json" }
+	blobs := fakeBlobs{
+		list("1790000001"): `{"source":"` + versionsSHA("1790000001", "01") + `","versions":[]}`, // in step
+		list("1790000002"): `{"source":"old","versions":[]}`,                                     // behind
+		// 1790000003 has neither versions nor a list, which is in step.
+	}
+	client := g2.New(nil, nil, "aquaproj", "aqua-registry-g2", "")
+	client.ReadTreesFrom(dir)
+	got, err := client.StaleVersionsLists(context.Background(), slog.New(slog.DiscardHandler), blobs, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"1790000002"}, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
