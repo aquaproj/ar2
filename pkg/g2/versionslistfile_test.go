@@ -29,7 +29,7 @@ func TestClient_VersionsListFile_behind(t *testing.T) {
 			"main:" + testDir + "/versions/v2.0.0/registry-1.json": `{"published_at":"2026-10-01T00:00:00Z","assets":[]}`,
 		},
 	}
-	file, err := newTestClient(t, git).VersionsListFile(context.Background(), slog.New(slog.DiscardHandler), "main", testID)
+	file, _, err := newTestClient(t, git).VersionsListFile(context.Background(), slog.New(slog.DiscardHandler), "main", testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestClient_VersionsListFile_upToDate(t *testing.T) {
 		versionsTrees: map[string]string{"main": "now"},
 		files:         map[string]string{"main:" + testDir + "/versions.json": `{"source":"now","versions":[]}`},
 	}
-	file, err := newTestClient(t, git).VersionsListFile(context.Background(), slog.New(slog.DiscardHandler), "main", testID)
+	file, _, err := newTestClient(t, git).VersionsListFile(context.Background(), slog.New(slog.DiscardHandler), "main", testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestClient_VersionsListFile_noVersions(t *testing.T) {
 	git := &fakeGit{
 		files: map[string]string{"main:" + testDir + "/versions.json": `{"source":"before","versions":[]}`},
 	}
-	file, err := newTestClient(t, git).VersionsListFile(context.Background(), slog.New(slog.DiscardHandler), "main", testID)
+	file, _, err := newTestClient(t, git).VersionsListFile(context.Background(), slog.New(slog.DiscardHandler), "main", testID)
 	if err != nil {
 		t.Fatal(err)
 	}
