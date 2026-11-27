@@ -7,10 +7,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	aquaasset "github.com/aquaproj/aqua/v2/pkg/asset"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/generate"
+	goversion "github.com/hashicorp/go-version"
 )
 
 // signingKinds names each way an asset can be verified, in the order they are
@@ -277,20 +279,72 @@ func assetStem(a *generate.Asset, version string) string {
 // the package gained later: volta-cli/volta's 1.0.8 had no linux/arm64 build, which came
 // after it. Compared with the version before it, it lost nothing. Versions this run
 // generated count, so that a history filled in newest first is compared step by step.
+//
+// Older is by version number where the tags are versions, and by the order the releases
+// came in otherwise. The order of the releases is when they were published, and a project
+// that maintains several lines releases them interleaved: coder/coder published v2.29.30
+// right after v2.34.22, so v2.29.30 was compared with v2.34.22 and reported as having lost
+// the build provenance that line has and the 2.29 line never had. The version before
+// v2.29.30 is v2.29.29.
 func before(tag string, versions []string, existing map[string]struct{}, generated map[string]*version) string {
+	known := func(v string) bool {
+		_, held := existing[v]
+		_, made := generated[v]
+		return held || made
+	}
+	if older, ok := beforeByNumber(tag, versions, known); ok {
+		return older
+	}
 	i := slices.Index(versions, tag)
 	if i < 0 {
 		return ""
 	}
 	for _, older := range versions[i+1:] {
-		if _, ok := existing[older]; ok {
-			return older
-		}
-		if _, ok := generated[older]; ok {
+		if known(older) {
 			return older
 		}
 	}
 	return ""
+}
+
+// beforeByNumber is the highest version below tag among those known, comparing only the
+// tags that read as versions with the same prefix -- v for v1.2.3, faber-v for
+// faber-v1.6.0. It says false when tag doesn't read as a version, and the order of the
+// releases decides instead.
+func beforeByNumber(tag string, versions []string, known func(string) bool) (string, bool) {
+	prefix, number := splitVersion(tag)
+	if number == nil {
+		return "", false
+	}
+	best := ""
+	var bestNumber *goversion.Version
+	for _, v := range versions {
+		if v == tag || !known(v) {
+			continue
+		}
+		p, n := splitVersion(v)
+		if n == nil || p != prefix || !n.LessThan(number) {
+			continue
+		}
+		if bestNumber == nil || n.GreaterThan(bestNumber) {
+			best, bestNumber = v, n
+		}
+	}
+	return best, true
+}
+
+// splitVersion splits a tag into what comes before its first digit and the version that
+// follows, or returns a nil version for a tag the rest of which isn't one.
+func splitVersion(tag string) (string, *goversion.Version) {
+	i := strings.IndexFunc(tag, unicode.IsDigit)
+	if i < 0 {
+		return "", nil
+	}
+	n, err := goversion.NewSemver(tag[i:])
+	if err != nil {
+		return "", nil
+	}
+	return tag[:i], n
 }
 
 // signingBaseline reads the registry.json this run's versions are compared against,
