@@ -228,6 +228,11 @@ func (v *Verifier) Verify(ctx context.Context, logger *slog.Logger, pkgName, ver
 	if err := checkArch(dest, asset, result.Files); err != nil {
 		return nil, err
 	}
+	if notRunnable := unrunnableRaw(dest, asset, result.Files); len(notRunnable) > 0 {
+		logger.Warn("the asset isn't an archive, and what it installs can't be run",
+			"os", asset.OS, "arch", asset.Arch, "asset", asset.Asset, "files", notRunnable)
+		result.NeedsReview = true
+	}
 	// Only Linux has a libc to be linked against, and the files are the resolved
 	// ones because that is where the executables actually are.
 	if asset.OS == "linux" {
@@ -339,6 +344,33 @@ func (r *resolver) runnable(rel string) bool {
 		}
 	}
 	return executableHeader(filepath.Join(r.dir, filepath.FromSlash(rel)))
+}
+
+// unrunnableRaw names the files of an asset that isn't an archive which can't be run.
+//
+// Such an asset is installed as it is downloaded, so the asset is the command. When the
+// inference takes the wrong asset, nothing else notices: the file is there and its checksum
+// matches. kubernetes-sigs/zeitgeist's windows/amd64 entry installed zeitgeist.intoto.json,
+// and kubernetes-sigs/kubebuilder's 4.13.0 to 4.16.0 installed their CycloneDX SBOMs, and
+// both merged. A command begins the way an executable does, or is a script Windows runs by
+// its extension. A .jar is run by java rather than by itself, and is left alone.
+func unrunnableRaw(dir string, asset *generate.Asset, files []*generate.File) []string {
+	if !unarchive.IsUnarchived(asset.Format, asset.Asset) {
+		return nil
+	}
+	r := &resolver{dir: dir, goos: asset.OS}
+	var out []string
+	for _, file := range files {
+		src := file.Src
+		if src == "" {
+			src = file.Name
+		}
+		if strings.HasSuffix(strings.ToLower(src), ".jar") || r.runnable(src) {
+			continue
+		}
+		out = append(out, src)
+	}
+	return out
 }
 
 // windowsScriptExts are the extensions of the scripts Windows runs, which carry no header to
