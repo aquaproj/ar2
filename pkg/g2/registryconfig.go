@@ -143,8 +143,13 @@ func (c *Client) RegistryConfig(ctx context.Context, ref string) (*RegistryConfi
 	if err != nil {
 		return nil, fmt.Errorf("read the registry configuration: %w", err)
 	}
+	return ParseRegistryConfig([]byte(body))
+}
+
+// ParseRegistryConfig reads the registry's configuration from its content.
+func ParseRegistryConfig(body []byte) (*RegistryConfig, error) {
 	cfg := &RegistryConfig{}
-	if err := yaml.Unmarshal([]byte(body), cfg); err != nil {
+	if err := yaml.Unmarshal(body, cfg); err != nil {
 		return nil, fmt.Errorf("read the registry configuration as YAML: %w", err)
 	}
 	if err := cfg.validate(); err != nil {

@@ -1,0 +1,3 @@
+# Fields aqua's definition has that template-1 refuses: added after template-1 was
+# introduced, and changing what is resolved, so an aqua older than them would drop them and
+# resolve something else. They wait for template-2. See TemplateExcludedFields in template.go.

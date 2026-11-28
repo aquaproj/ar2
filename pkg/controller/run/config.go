@@ -98,6 +98,16 @@ func (d *definition) prerelease() bool {
 	return d != nil && d.config != nil && d.config.Prerelease
 }
 
+// servedAsTemplate reports whether the registry's definition of the package declares it
+// served as a template. A package the registry doesn't hold isn't.
+func (c *Controller) servedAsTemplate(ctx context.Context, pkgName string) (bool, error) {
+	cfg, err := c.g2.Config(ctx, pkgName)
+	if err != nil {
+		return false, fmt.Errorf("get the package definition: %w", err)
+	}
+	return g2.IsTemplate(cfg), nil
+}
+
 // resolveDefinition returns the definition to generate from: the one on the package's
 // branch, or the one converted from aqua-registry when the branch has none.
 //

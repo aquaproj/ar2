@@ -59,6 +59,15 @@ func Validate(w io.Writer, path string) error {
 	if err := validateAssetRules(cfg.AssetRules); err != nil {
 		return fmt.Errorf("%s: %w", cfg.Name, err)
 	}
+	if g2.IsTemplate(cfg) {
+		// Served as a template: aqua reads the definition as it is, so it is checked
+		// here for what generating a version would have caught.
+		if err := g2.ValidateTemplate(cfg); err != nil {
+			return fmt.Errorf("%s: %w", cfg.Name, err)
+		}
+		fmt.Fprintf(w, "%s: %s, served as a template\n", cfg.Name, cfg.Type)
+		return nil
+	}
 	fmt.Fprintf(w, "%s: %s\n", cfg.Name, cfg.Type)
 	return nil
 }

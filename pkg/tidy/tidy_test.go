@@ -221,3 +221,29 @@ func TestDefinition_keepsThemWithoutAType(t *testing.T) {
 		t.Errorf("the definition changed:\n%s", got)
 	}
 }
+
+// A definition served as a template is installed as written, so nothing in it is redundant.
+func TestDefinition_template(t *testing.T) {
+	t.Parallel()
+	in := `type: github_release
+repo_owner: example
+repo_name: cli
+asset: cli_{{.OS}}_{{.Arch}}.tar.gz
+replacements:
+  amd64: x86_64
+checksum:
+  type: github_release
+  asset: checksums.txt
+  algorithm: sha256
+template:
+  reason: every asset is too large to verify in time
+  skip_test: too large
+`
+	got, removed, err := tidy.Definition(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != in || removed.Any() {
+		t.Errorf("a template's definition changed:\n%s", got)
+	}
+}

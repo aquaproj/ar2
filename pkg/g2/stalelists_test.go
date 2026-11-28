@@ -122,6 +122,10 @@ func TestClient_StaleVersionsLists_fromCheckout(t *testing.T) {
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...) //nolint:gosec // the test's own arguments
+		// A git hook runs the tests with GIT_DIR and GIT_INDEX_FILE pointing at the
+		// repository being committed to, and they win over -C: the commit below landed
+		// there, replacing its tree with this one.
+		cmd.Env = withoutGitEnv(os.Environ())
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
@@ -148,4 +152,16 @@ func TestClient_StaleVersionsLists_fromCheckout(t *testing.T) {
 	if diff := cmp.Diff([]string{"1790000002"}, got); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
+}
+
+// withoutGitEnv drops the variables a git hook sets for the repository it runs in.
+func withoutGitEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

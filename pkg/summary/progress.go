@@ -29,6 +29,9 @@ func (w *Writer) Progress(p *state.Progress) error {
 	if p.Renamed > 0 {
 		fmt.Fprintf(&body, "| names moved to another | %d |\n", p.Renamed)
 	}
+	if p.Templates > 0 {
+		fmt.Fprintf(&body, "| served as templates | %d |\n", p.Templates)
+	}
 	body.WriteString("\n")
 	return w.append(body.String())
 }

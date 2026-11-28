@@ -122,3 +122,43 @@ func (v *Verifier) digestOf(version string, asset *generate.Asset, algo string) 
 	}
 	return v.digests.of(url, algo)
 }
+
+// CheckListedChecksum compares an asset already downloaded by Verify with what a checksum
+// file lists for it, for a package served as a template, whose entries carry no checksum
+// of their own.
+//
+// The file isn't required to be signed: what this establishes is that the definition says
+// where the checksums are and how they are written, which aqua relies on once the file is
+// signed. An asset the file doesn't list is an error, since the definition says it does.
+func (v *Verifier) CheckListedChecksum(ctx context.Context, logger *slog.Logger, version string, asset *generate.Asset, checksumURL, assetName string, cfg *aquaregistry.Checksum) error {
+	dir, err := os.MkdirTemp("", "ar2-checksums")
+	if err != nil {
+		return fmt.Errorf("create a temporary directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "checksums")
+	logger.Debug("downloading the checksum file the definition names", "url", checksumURL)
+	if _, err := v.download(ctx, checksumURL, path); err != nil {
+		return err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read the checksum file: %w", err)
+	}
+	want, err := checksum.GetChecksum(logger, assetName, string(content), cfg)
+	if err != nil {
+		return fmt.Errorf("find the asset in the checksum file: %w", err)
+	}
+	algo := algorithmOf(want)
+	got := v.digestOf(version, asset, algo)
+	if got == "" {
+		logger.Info("the checksum file lists a digest nothing here can be compared with",
+			"asset", assetName, "algorithm", algo)
+		return nil
+	}
+	if !strings.EqualFold(want, got) {
+		return fmt.Errorf("%w: the checksum file lists %s %s for %s, which hashes to %s",
+			ErrTampered, algo, want, assetName, got)
+	}
+	return nil
+}

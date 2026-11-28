@@ -29,6 +29,15 @@ type fakeRegistry struct {
 	parent     string
 	createdPRs int
 	configRead []string
+	// registryConfig is ar2.yaml. Nil is a registry without one.
+	registryConfig *g2.RegistryConfig
+}
+
+func (f *fakeRegistry) RegistryConfig(_ context.Context, _ string) (*g2.RegistryConfig, error) {
+	if f.registryConfig == nil {
+		return &g2.RegistryConfig{}, nil
+	}
+	return f.registryConfig, nil
 }
 
 func (f *fakeRegistry) Index(_ context.Context, ref string) (*aquag2.Index, error) {
@@ -665,5 +674,82 @@ func TestCommitMessage(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// templated is the definition of a package served as a template.
+func templated(pkgName string) *aquag2.Config {
+	return &aquag2.Config{
+		PackageInfo: &aquaregistry.PackageInfo{
+			Name: pkgName,
+			Type: "http",
+			URL:  "https://example.com/{{.Version}}/cli.tar.gz",
+		},
+		Template: &aquag2.Template{Reason: "no list of versions", TestVersions: []string{"v1.0.0"}},
+	}
+}
+
+func committedPaths(files []*g2.File) map[string]*g2.File {
+	out := map[string]*g2.File{}
+	for _, f := range files {
+		out[f.Path] = f
+	}
+	return out
+}
+
+// A package served as a template has its template rendered into the catalogue's commit, and
+// a template already as rendered isn't written again.
+func TestController_Sync_template(t *testing.T) {
+	t.Parallel()
+	const id = "1795000001"
+	cfg := templated("example/cli")
+	reg := &fakeRegistry{files: map[string]string{}}
+	defs := definitions(t, map[string]*aquag2.Config{id: cfg})
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	path := g2.PackageDir(id) + "/" + g2.TemplateFileName
+	got, ok := committedPaths(reg.committed)[path]
+	if !ok {
+		t.Fatalf("the template wasn't committed: %v", committedPaths(reg.committed))
+	}
+	want, err := g2.MarshalTemplate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(string(want), got.Content); diff != "" {
+		t.Errorf("the template is wrong (-want +got):\n%s", diff)
+	}
+
+	// Everything as rendered: nothing to commit.
+	held := &fakeRegistry{files: map[string]string{path: string(want)}}
+	for _, f := range reg.committed {
+		held.files[f.Path] = f.Content
+	}
+	held.index = reg.index
+	if err := newController(held, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	if len(held.committed) != 0 {
+		t.Errorf("committed %v, want nothing", committedPaths(held.committed))
+	}
+}
+
+// A package ar2.yaml ignores keeps its definition, so its template is taken out here.
+func TestController_Sync_templateIgnored(t *testing.T) {
+	t.Parallel()
+	const id = "1795000001"
+	path := g2.PackageDir(id) + "/" + g2.TemplateFileName
+	reg := &fakeRegistry{
+		files:          map[string]string{path: "{}\n"},
+		registryConfig: &g2.RegistryConfig{IgnoredPackages: []*g2.IgnoredPackage{{Name: "example/cli", Reason: "malware"}}},
+	}
+	defs := definitions(t, map[string]*aquag2.Config{id: templated("example/cli")})
+	if err := newController(reg, &fakeMerger{}, defs).Sync(t.Context(), logger()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := committedPaths(reg.committed)[path]
+	if !ok || !got.Deleted {
+		t.Fatalf("the ignored package's template must be removed, got %+v", got)
 	}
 }

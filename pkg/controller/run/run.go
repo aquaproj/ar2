@@ -392,7 +392,13 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 func (c *Controller) candidates(logger *slog.Logger, input *Input, cfg *g2.RegistryConfig) []*Candidate {
 	// Dropped before the sweep, so that a repository nobody expects to answer isn't
 	// asked about either.
-	candidates := rejoin(logger, ignore(logger, order(input.State), cfg))
+	ordered := order(input.State)
+	if len(input.Packages) == 0 {
+		// A run naming packages reads their definitions whatever the state says, which is
+		// how a package that stopped being a template is noticed.
+		ordered = withoutTemplates(logger, ordered)
+	}
+	candidates := rejoin(logger, ignore(logger, ordered, cfg))
 	return only(logger, candidates, input.Packages)
 }
 
@@ -466,6 +472,63 @@ func rejoin(logger *slog.Logger, candidates []*Candidate) []*Candidate {
 	return candidates
 }
 
+// noRepository handles a package without a repository: its definition is read only to see
+// whether the registry serves it as a template, so the state can say what it is.
+func (c *Controller) noRepository(ctx context.Context, logger *slog.Logger, candidate *Candidate) error {
+	served, err := c.servedAsTemplate(ctx, candidate.Name)
+	if err != nil {
+		return err
+	}
+	if served {
+		markTemplate(logger, candidate.Package, candidate.Name)
+		return nil
+	}
+	candidate.Package.Template = false
+	return nil
+}
+
+// definitionToGenerate is the definition the package's versions are generated from, or nil
+// when there is nothing to generate: the registry serves the package as a template.
+func (c *Controller) definitionToGenerate(ctx context.Context, logger *slog.Logger, input *Input, candidate *Candidate) (*definition, error) {
+	pkg := candidate.Package
+	def, err := c.resolveDefinition(ctx, logger, input, candidate.Name)
+	if err != nil {
+		return nil, err
+	}
+	if def.held && g2.IsTemplate(def.config) {
+		markTemplate(logger, pkg, candidate.Name)
+		return nil, nil //nolint:nilnil // nothing to generate, which isn't a failure
+	}
+	pkg.Template = false
+	if err := c.checkRepoID(def, pkg.RepoOwner+"/"+pkg.RepoName); err != nil {
+		return nil, err
+	}
+	return def, nil
+}
+
+// markTemplate records that the package is served as a template, which leaves it out of
+// every later run.
+func markTemplate(logger *slog.Logger, pkg *state.Package, pkgName string) {
+	logger.Info("the package is served as a template; nothing to generate", "package", pkgName)
+	pkg.Template = true
+}
+
+// withoutTemplates leaves out the packages a run found served as templates: there is no
+// version of theirs to generate, so a sweep listing their releases would be a request
+// for nothing. A run naming a package doesn't leave it out, and reading its definition
+// takes the mark off when the definition no longer declares a template.
+func withoutTemplates(logger *slog.Logger, candidates []*Candidate) []*Candidate {
+	out := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Package != nil && candidate.Package.Template {
+			logger.Debug("the package is served as a template", "package", candidate.Name)
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
 // ignore drops the packages the registry says to leave alone.
 //
 // They are dropped before anything asks GitHub about them: a package is usually on
@@ -514,18 +577,16 @@ func (c *Controller) runPackage(ctx context.Context, logger *slog.Logger, input 
 	pkg := candidate.Package
 	if pkg.RepoOwner == "" || pkg.RepoName == "" {
 		// Versions can only be listed for a GitHub repository. Packages without one
-		// need another source and aren't handled yet.
-		return 0, 0, nil
+		// need another source and aren't handled yet -- unless the registry serves
+		// them as templates, which most packages without one are.
+		return 0, 0, c.noRepository(ctx, logger, candidate)
 	}
 	// The definition is read once for the package rather than once per version: it
 	// is the same file for all of them, and it decides how they are generated. A
 	// package whose branch has none is converted here, before anything is generated
 	// from it.
-	def, err := c.resolveDefinition(ctx, logger, input, candidate.Name)
-	if err != nil {
-		return 0, 0, err
-	}
-	if err := c.checkRepoID(def, pkg.RepoOwner+"/"+pkg.RepoName); err != nil {
+	def, err := c.definitionToGenerate(ctx, logger, input, candidate)
+	if def == nil || err != nil {
 		return 0, 0, err
 	}
 	// Remembered for the sweep, which picks the versions before any definition is read.

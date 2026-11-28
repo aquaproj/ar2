@@ -17,6 +17,7 @@ import (
 	"github.com/aquaproj/aqua/v2/pkg/asset"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
+	"go.yaml.in/yaml/v4"
 )
 
 const (
@@ -80,12 +81,19 @@ func (r *Removed) Any() bool {
 // Every replacements block is reached, wherever it is: the definition's own, each
 // version_override's, and each override's within them. A block left with nothing goes
 // altogether rather than staying as an empty map.
+//
+// A definition served as a template is left as it is. aqua reads it as written, with no
+// release to work the spellings out from and no generator to find the checksum file, so
+// what looks redundant elsewhere is what installs it.
 func Definition(content string) (string, *Removed, error) {
 	file, err := parser.ParseBytes([]byte(content), parser.ParseComments)
 	if err != nil {
 		return "", nil, fmt.Errorf("parse a package definition as YAML: %w", err)
 	}
 	removed := &Removed{}
+	if servedAsTemplate(content) {
+		return content, removed, nil
+	}
 	if len(file.Docs) == 0 {
 		return content, removed, nil
 	}
@@ -416,4 +424,15 @@ func without(values []*ast.MappingValueNode, value *ast.MappingValueNode) []*ast
 		}
 	}
 	return out
+}
+
+// servedAsTemplate reports whether a definition declares its package served as a template.
+func servedAsTemplate(content string) bool {
+	var def struct {
+		Template any `yaml:"template"`
+	}
+	if err := yaml.Unmarshal([]byte(content), &def); err != nil {
+		return false
+	}
+	return def.Template != nil
 }
