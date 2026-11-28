@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
 	"github.com/aquaproj/ar2/pkg/g2"
 	"github.com/google/go-cmp/cmp"
@@ -118,5 +119,24 @@ func TestMarshalTemplate(t *testing.T) {
 	}
 	if diff := cmp.Diff(aquag2.NewTemplate(cfg), tmpl.PackageInfo); diff != "" {
 		t.Errorf("the template doesn't round-trip (-want +got):\n%s", diff)
+	}
+}
+
+// An empty list in a version_override clears what it inherits, and JSON leaves it out, so a
+// definition relying on one is refused rather than written meaning something else.
+func TestValidateTemplate_lostInJSON(t *testing.T) {
+	t.Parallel()
+	cfg := templateDefinition(t)
+	cfg.Overrides = []*aquaregistry.Override{{GOOS: "windows", Format: "zip"}}
+	cfg.VersionOverrides[1].Overrides = []*aquaregistry.Override{}
+	if err := g2.ValidateTemplate(cfg); err == nil {
+		t.Error("an empty overrides in a version_override must be refused")
+	}
+	read, err := g2.RoundTrip(templateDefinition(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Template == nil {
+		t.Error("the round trip must keep how the template is tested")
 	}
 }

@@ -222,6 +222,9 @@ func ValidateTemplate(cfg *aquag2.Config) error {
 	if field := generatorField(cfg); field != "" {
 		return fmt.Errorf("%w: %s", errTemplateGeneratorField, field)
 	}
+	if err := survivesJSON(cfg); err != nil {
+		return err
+	}
 	allowedFields := map[string]struct{}{}
 	for _, field := range TemplateFields() {
 		allowedFields[field] = struct{}{}
@@ -232,6 +235,42 @@ func ValidateTemplate(cfg *aquag2.Config) error {
 		}
 	}
 	return nil
+}
+
+// survivesJSON checks that template-1.json says what the definition says. aqua's definition
+// leaves an empty list or map out of JSON, and an override reads one that is absent as
+// "inherit": `overrides: []` in a version_override, which clears the overrides above it,
+// would come back as nothing and keep them. Such a definition is refused rather than
+// written meaning something else; leaving the base without what the override cleared, and
+// writing it into the overrides that need it, says the same in a form JSON keeps.
+func survivesJSON(cfg *aquag2.Config) error {
+	b, err := MarshalTemplate(cfg)
+	if err != nil {
+		return err
+	}
+	read, err := aquag2.ParseTemplate(b)
+	if err != nil {
+		return fmt.Errorf("read the rendered template back: %w", err)
+	}
+	if !reflect.DeepEqual(aquag2.NewTemplate(cfg), read.PackageInfo) {
+		return errTemplateLostInJSON
+	}
+	return nil
+}
+
+// RoundTrip is the definition as aqua reads it from template-1.json, which is what a test
+// of the template installs.
+func RoundTrip(cfg *aquag2.Config) (*aquag2.Config, error) {
+	b, err := MarshalTemplate(cfg)
+	if err != nil {
+		return nil, err
+	}
+	read, err := aquag2.ParseTemplate(b)
+	if err != nil {
+		return nil, fmt.Errorf("read the rendered template back: %w", err)
+	}
+	read.Template = cfg.Template
+	return read, nil
 }
 
 // generatorField is the first field the definition sets that only generating a version
@@ -264,5 +303,6 @@ var (
 	errTemplateTest           = errors.New("a template must have exactly one of template.test_versions and template.skip_test")
 	errTemplateTopConstraint  = errors.New("a template has no version_constraint at the top: version_overrides are read newest first, and a version none of them matches takes the first")
 	errTemplateGeneratorField = errors.New("a template has no release to read assets from, so this field does nothing")
+	errTemplateLostInJSON     = errors.New("the template doesn't survive being written as JSON: an empty list or map, such as overrides: [] or replacements: {} in a version_override, is left out and read as inheriting the one above it")
 	errTemplateField          = errors.New("the field isn't one template-1 allows: an aqua older than the field would drop it without a word")
 )

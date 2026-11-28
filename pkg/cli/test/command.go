@@ -160,26 +160,36 @@ func template(cmd *cobra.Command, logger *slogutil.Logger, args *Args, paths []s
 	}
 	env := ctrl.Environment{OS: args.OS, Arch: args.Arch}
 	for _, path := range paths {
-		cfg, err := definition(path)
-		if err != nil {
-			return err
-		}
-		if args.Environments {
-			envs, err := ctrl.TemplateEnvironments(logger.Logger, cfg)
-			if err != nil {
-				return fmt.Errorf("%s: %w", path, err)
-			}
-			for _, e := range envs {
-				fmt.Fprintln(cmd.OutOrStdout(), e)
-			}
-			continue
-		}
-		l := logger.With("package_name", cfg.GetName())
-		if err := ctrl.New(v, env).RunTemplate(cmd.Context(), l, cfg, v); err != nil {
+		if err := templateOne(cmd, logger, args, v, env, path); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}
 	return nil
+}
+
+// templateOne checks, or lists the environments of, one package served as a template.
+func templateOne(cmd *cobra.Command, logger *slogutil.Logger, args *Args, v *verify.Verifier, env ctrl.Environment, path string) error {
+	cfg, err := definition(path)
+	if err != nil {
+		return err
+	}
+	if args.Environments {
+		envs, err := ctrl.TemplateEnvironments(logger.Logger, cfg)
+		if err != nil {
+			return err //nolint:wrapcheck
+		}
+		for _, e := range envs {
+			fmt.Fprintln(cmd.OutOrStdout(), e)
+		}
+		return nil
+	}
+	// What aqua installs is template-1.json, so that is what is tested: the definition
+	// written as JSON and read back.
+	read, err := g2.RoundTrip(cfg)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+	return ctrl.New(v, env).RunTemplate(cmd.Context(), logger.With("package_name", cfg.GetName()), read, v) //nolint:wrapcheck
 }
 
 // definition reads a package's registry.yaml.
