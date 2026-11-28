@@ -28,8 +28,16 @@ func IsTemplate(cfg *aquag2.Config) bool {
 //go:embed template_fields.txt
 var templateFieldsFile string
 
+// templateExcludedFile is the fields aqua's definition has that template-1 doesn't allow:
+// ones added after template-1 whose absence changes what an older aqua resolves. See
+// TemplateExcludedFields.
+//
+//go:embed template_excluded_fields.txt
+var templateExcludedFile string
+
 // TemplateFields is every field template-1 allows, as paths: "url", "files[].src",
-// "replacements{}", "version_overrides[].checksum.url".
+// "replacements{}", "version_overrides[].checksum.url". A path is matched as it is: a field
+// below one template-1 allows isn't allowed for that.
 //
 // aqua reads a template with encoding/json, which drops a field it doesn't know without a
 // word. A field added to aqua's definition after template-1 was introduced, used in a
@@ -39,10 +47,23 @@ var templateFieldsFile string
 //
 // A test compares the list with aqua's definition, so that updating aqua stops at every
 // field it adds: one that changes nothing when it is dropped can join template-1, and one
-// that changes what is resolved needs template-2.
+// that changes what is resolved needs template-2, and goes in TemplateExcludedFields.
 func TemplateFields() []string {
+	return fieldsOf(templateFieldsFile)
+}
+
+// TemplateExcludedFields is the fields aqua's definition has that template-1 refuses: added
+// to aqua after template-1, and changing what is resolved, so that an aqua older than them
+// would resolve something else. They wait for template-2. Together with TemplateFields they
+// are every field aqua's definition has, which is what the test holds them to: a field aqua
+// gains is decided on, one way or the other, before ar2 can use that aqua.
+func TemplateExcludedFields() []string {
+	return fieldsOf(templateExcludedFile)
+}
+
+func fieldsOf(content string) []string {
 	var fields []string
-	for line := range strings.SplitSeq(templateFieldsFile, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
 			fields = append(fields, line)
 		}
@@ -178,29 +199,6 @@ func walkStruct(v reflect.Value, prefix string, fields map[string]struct{}) {
 	}
 }
 
-// allowed reports whether a field is one template-1 allows. A field below a type that holds
-// itself is spelled from where the type first appeared, so the path is also tried with each
-// repetition folded away.
-func allowed(field string, fields map[string]struct{}) bool {
-	if _, ok := fields[field]; ok {
-		return true
-	}
-	// version_overrides[].overrides[].url and overrides[].url are the same field of the
-	// same type: a nested occurrence is allowed when its tail is.
-	for i := strings.Index(field, "."); i >= 0; {
-		tail := field[i+1:]
-		if _, ok := fields[tail]; ok {
-			return true
-		}
-		j := strings.Index(tail, ".")
-		if j < 0 {
-			break
-		}
-		i += j + 1
-	}
-	return false
-}
-
 // ValidateTemplate checks a definition that declares its package served as a template.
 //
 // A template is read by aqua as it is, so what a generator would catch for a generated
@@ -229,7 +227,7 @@ func ValidateTemplate(cfg *aquag2.Config) error {
 		allowedFields[field] = struct{}{}
 	}
 	for _, field := range usedFields(aquag2.NewTemplate(cfg)) {
-		if !allowed(field, allowedFields) {
+		if _, ok := allowedFields[field]; !ok {
 			return fmt.Errorf("%w: %s", errTemplateField, field)
 		}
 	}

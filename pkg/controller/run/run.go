@@ -392,7 +392,13 @@ func (c *Controller) todo(logger *slog.Logger, candidate *Candidate, inFlight, m
 func (c *Controller) candidates(logger *slog.Logger, input *Input, cfg *g2.RegistryConfig) []*Candidate {
 	// Dropped before the sweep, so that a repository nobody expects to answer isn't
 	// asked about either.
-	candidates := rejoin(logger, ignore(logger, withoutTemplates(logger, order(input.State)), cfg))
+	ordered := order(input.State)
+	if len(input.Packages) == 0 {
+		// A run naming packages reads their definitions whatever the state says, which is
+		// how a package that stopped being a template is noticed.
+		ordered = withoutTemplates(logger, ordered)
+	}
+	candidates := rejoin(logger, ignore(logger, ordered, cfg))
 	return only(logger, candidates, input.Packages)
 }
 
@@ -466,11 +472,6 @@ func rejoin(logger *slog.Logger, candidates []*Candidate) []*Candidate {
 	return candidates
 }
 
-// ignore drops the packages the registry says to leave alone.
-//
-// They are dropped before anything asks GitHub about them: a package is usually on
-// this list because its repository isn't there any more, and the sweep would spend a
-// request finding that out every half hour.
 // noRepository handles a package without a repository: its definition is read only to see
 // whether the registry serves it as a template, so the state can say what it is.
 func (c *Controller) noRepository(ctx context.Context, logger *slog.Logger, candidate *Candidate) error {
@@ -480,7 +481,9 @@ func (c *Controller) noRepository(ctx context.Context, logger *slog.Logger, cand
 	}
 	if served {
 		markTemplate(logger, candidate.Package, candidate.Name)
+		return nil
 	}
+	candidate.Package.Template = false
 	return nil
 }
 
@@ -496,6 +499,7 @@ func (c *Controller) definitionToGenerate(ctx context.Context, logger *slog.Logg
 		markTemplate(logger, pkg, candidate.Name)
 		return nil, nil //nolint:nilnil // nothing to generate, which isn't a failure
 	}
+	pkg.Template = false
 	if err := c.checkRepoID(def, pkg.RepoOwner+"/"+pkg.RepoName); err != nil {
 		return nil, err
 	}
@@ -511,7 +515,8 @@ func markTemplate(logger *slog.Logger, pkg *state.Package, pkgName string) {
 
 // withoutTemplates leaves out the packages a run found served as templates: there is no
 // version of theirs to generate, so a sweep listing their releases would be a request
-// for nothing.
+// for nothing. A run naming a package doesn't leave it out, and reading its definition
+// takes the mark off when the definition no longer declares a template.
 func withoutTemplates(logger *slog.Logger, candidates []*Candidate) []*Candidate {
 	out := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -524,6 +529,11 @@ func withoutTemplates(logger *slog.Logger, candidates []*Candidate) []*Candidate
 	return out
 }
 
+// ignore drops the packages the registry says to leave alone.
+//
+// They are dropped before anything asks GitHub about them: a package is usually on
+// this list because its repository isn't there any more, and the sweep would spend a
+// request finding that out every half hour.
 func ignore(logger *slog.Logger, candidates []*Candidate, cfg *g2.RegistryConfig) []*Candidate {
 	if cfg == nil || len(cfg.IgnoredPackages) == 0 {
 		return candidates

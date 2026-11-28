@@ -194,8 +194,10 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 // here, or the package would still install.
 //
 // Only the template packages' own paths are read, a request each. Which directories hold a
-// template is decided by the definitions: a package that stopped being a template is
-// refused by the registry's checks, so there is no template to look for elsewhere.
+// template is decided by the definitions. A definition that stops being a template isn't
+// handled here: aqua-registry-g2's checks refuse such a pull request (check-templates.sh),
+// since taking a package from a template to generated versions isn't supported yet, and its
+// template would otherwise be left for aqua to read.
 func (c *Controller) templates(ctx context.Context, logger *slog.Logger, ref string, files map[string]string) ([]*g2.File, error) {
 	// ar2.yaml as the default branch has it: the catalogue's branch was cut from it
 	// whenever its pull request was opened, and an ignore added since is what matters.

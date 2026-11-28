@@ -1,6 +1,7 @@
 package g2_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,8 +17,15 @@ import (
 // template-2.
 func TestTemplateFields(t *testing.T) {
 	t.Parallel()
-	if diff := cmp.Diff(g2.TemplateFields(), g2.DefinitionFields()); diff != "" {
-		t.Errorf("aqua's definition differs from template-1 (-template-1 +aqua). Decide whether each added field can join template-1 (pkg/g2/template_fields.txt) or needs template-2:\n%s", diff)
+	known := append(g2.TemplateFields(), g2.TemplateExcludedFields()...)
+	slices.Sort(known)
+	if diff := cmp.Diff(known, g2.DefinitionFields()); diff != "" {
+		t.Errorf("aqua's definition differs from what template-1 decided (-decided +aqua). For each field aqua added, decide whether an older aqua dropping it changes nothing (add it to pkg/g2/template_fields.txt) or changes what is resolved (add it to pkg/g2/template_excluded_fields.txt, for template-2):\n%s", diff)
+	}
+	for _, field := range g2.TemplateExcludedFields() {
+		if slices.Contains(g2.TemplateFields(), field) {
+			t.Errorf("%s is both allowed and excluded", field)
+		}
 	}
 }
 

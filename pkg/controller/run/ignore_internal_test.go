@@ -74,3 +74,27 @@ func TestWithoutTemplates(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+// A run naming a package served as a template still reaches it, which is how a definition
+// that no longer declares a template is noticed.
+func TestCandidates_template(t *testing.T) {
+	t.Parallel()
+	s := state.New()
+	s.Packages["1password/cli"] = &state.Package{Template: true}
+	s.Packages["cli/cli"] = &state.Package{RepoOwner: "cli", RepoName: "cli"}
+	c := &Controller{}
+	logger := slog.New(slog.DiscardHandler)
+	names := func(cs []*Candidate) []string {
+		out := make([]string, 0, len(cs))
+		for _, c := range cs {
+			out = append(out, c.Name)
+		}
+		return out
+	}
+	if got := names(c.candidates(logger, &Input{State: s}, nil)); len(got) != 1 || got[0] != "cli/cli" {
+		t.Errorf("the order: got %v, want cli/cli alone", got)
+	}
+	if got := names(c.candidates(logger, &Input{State: s, Packages: []string{"1password/cli"}}, nil)); len(got) != 1 || got[0] != "1password/cli" {
+		t.Errorf("a named run: got %v, want 1password/cli", got)
+	}
+}
