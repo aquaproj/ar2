@@ -38,6 +38,7 @@ func Summary(w io.Writer, s *state.State) error {
 	fmt.Fprintf(&b, "turns the order is on            %d\n", p.Lap)
 	fmt.Fprintf(&b, "waiting for that turn            %d\n", p.Waiting)
 	fmt.Fprintf(&b, "names moved to another           %d\n", p.Renamed)
+	fmt.Fprintf(&b, "served as templates              %d\n", p.Templates)
 	if !s.UpdatedAt.IsZero() {
 		fmt.Fprintf(&b, "written                          %s\n", s.UpdatedAt.Format(time.RFC3339))
 	}

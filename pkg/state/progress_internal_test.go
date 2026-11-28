@@ -48,3 +48,22 @@ func TestState_Progress_empty(t *testing.T) {
 		t.Errorf("got %+v", p)
 	}
 }
+
+// A package served as a template has nothing to generate, so it is counted apart and in
+// none of the other counts.
+func TestState_Progress_template(t *testing.T) {
+	t.Parallel()
+	s := New()
+	s.Packages["a"] = &Package{Round: 4, CaughtUp: true, LastDeepCheck: time.Now()}
+	s.Packages["t"] = &Package{Template: true}
+	p := s.Progress()
+	if p.Packages != 1 || p.Templates != 1 {
+		t.Errorf("packages %d, templates %d", p.Packages, p.Templates)
+	}
+	if p.Unwalked != 0 || p.Untouched != 0 {
+		t.Errorf("unwalked %d, untouched %d", p.Unwalked, p.Untouched)
+	}
+	if p.Lap != 4 || p.Waiting != 1 {
+		t.Errorf("lap %d, waiting %d", p.Lap, p.Waiting)
+	}
+}

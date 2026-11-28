@@ -27,6 +27,7 @@ type Args struct {
 	Arch         string
 	Environments bool
 	Signatures   bool
+	Template     bool
 }
 
 // New creates the 'ar2 test' command.
@@ -59,9 +60,20 @@ $ ar2 test --os windows --arch amd64 versions/v1.5.6/registry-1.json
 that the jobs can be worked out from the files rather than fixed in advance.
 
 An asset in a format this machine can't open is reported and passed over rather than
-failed: a dmg on Linux is a package this machine can't look inside.`,
+failed: a dmg on Linux is a package this machine can't look inside.
+
+--template checks a package served as a template instead. Its registry.yaml is the
+argument, and each of its template.test_versions is expanded the way aqua expands it and
+installed: downloaded, opened, checked for its files and signatures, and held to the
+checksum file the definition names. With --environments it lists the environments those
+versions expand to.
+
+$ ar2 test --template --os linux --arch amd64 pkgs/01/1795000001/registry.yaml`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, paths []string) error {
+			if args.Template {
+				return template(cmd, logger, args, paths)
+			}
 			if args.Environments {
 				return ctrl.Environments(cmd.OutOrStdout(), paths)
 			}
@@ -75,6 +87,7 @@ failed: a dmg on Linux is a package this machine can't look inside.`,
 	fs.StringVar(&args.Arch, "arch", "", "check only the entries of this architecture")
 	fs.BoolVar(&args.Environments, "environments", false, "list the environments the files describe instead of checking them")
 	fs.BoolVar(&args.Signatures, "signatures", true, "check the signatures the entries claim")
+	fs.BoolVar(&args.Template, "template", false, "check a package served as a template: the arguments are its registry.yaml, and its test_versions are installed")
 	return cmd
 }
 
@@ -130,4 +143,57 @@ func verifier(ctx context.Context, logger *slogutil.Logger, signatures bool) (*v
 		return nil, fmt.Errorf("prepare the signature verification: %w", err)
 	}
 	return verify.New(httpclient.New(logger.Logger), s), nil
+}
+
+// template checks packages served as templates, one registry.yaml each.
+func template(cmd *cobra.Command, logger *slogutil.Logger, args *Args, paths []string) error {
+	if err := logger.SetLevel(args.LogLevel); err != nil {
+		return fmt.Errorf("set log level: %w", err)
+	}
+	var v *verify.Verifier
+	if !args.Environments {
+		var err error
+		v, err = verifier(cmd.Context(), logger, args.Signatures)
+		if err != nil {
+			return err
+		}
+	}
+	env := ctrl.Environment{OS: args.OS, Arch: args.Arch}
+	for _, path := range paths {
+		cfg, err := definition(path)
+		if err != nil {
+			return err
+		}
+		if args.Environments {
+			envs, err := ctrl.TemplateEnvironments(logger.Logger, cfg)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			for _, e := range envs {
+				fmt.Fprintln(cmd.OutOrStdout(), e)
+			}
+			continue
+		}
+		l := logger.With("package_name", cfg.GetName())
+		if err := ctrl.New(v, env).RunTemplate(cmd.Context(), l, cfg, v); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// definition reads a package's registry.yaml.
+func definition(path string) (*aquag2.Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the package definition: %w", err)
+	}
+	cfg := &aquag2.Config{}
+	if err := yaml.Unmarshal(b, cfg); err != nil {
+		return nil, fmt.Errorf("read the package definition as YAML: %w", err)
+	}
+	if cfg.PackageInfo == nil || cfg.GetName() == "" {
+		return nil, errNoName
+	}
+	return cfg, nil
 }

@@ -62,3 +62,15 @@ func TestIgnore(t *testing.T) {
 		})
 	}
 }
+
+// A package a run found served as a template leaves the order, so no sweep asks about it.
+func TestWithoutTemplates(t *testing.T) {
+	t.Parallel()
+	got := withoutTemplates(slog.New(slog.DiscardHandler), []*Candidate{
+		{Name: "cli/cli", Package: &state.Package{}},
+		{Name: "1password/cli", Package: &state.Package{Template: true}},
+	})
+	if len(got) != 1 || got[0].Name != "cli/cli" {
+		t.Errorf("got %v", got)
+	}
+}

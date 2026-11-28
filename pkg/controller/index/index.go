@@ -29,6 +29,7 @@ type Registry interface {
 	BranchSHA(ctx context.Context, branch string) (string, error)
 	Commit(ctx context.Context, branch, parent, message string, files []*g2.File) error
 	IndexPullRequest(ctx context.Context) (*gogithub.PullRequest, error)
+	RegistryConfig(ctx context.Context, ref string) (*g2.RegistryConfig, error)
 	CreateIndexPullRequest(ctx context.Context, logger *slog.Logger, base, title, body string) (*gogithub.PullRequest, error)
 }
 
@@ -172,7 +173,93 @@ func (c *Controller) Sync(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, logger, t, c.reconcile(logger, t.index, c.defs))
+	ch := c.reconcile(logger, t.index, c.defs)
+	templates, err := c.templates(ctx, logger, t.ref, c.defs)
+	if err != nil {
+		return err
+	}
+	ch.templates = templates
+	return c.write(ctx, logger, t, ch)
+}
+
+// templates is the template-1.json files the branch the update is written to doesn't hold
+// as the definitions render them, and the ones it holds for a package ar2.yaml ignores.
+//
+// A template is generated from the definition, the way the catalogue is, so it travels the
+// same way: in the catalogue's pull request, written by this and by nothing else, so that
+// what aqua reads is always what ar2 rendered from a reviewed definition.
+//
+// An ignored package keeps its definition -- 'ar2 remove' leaves it, taking the package out
+// of the catalogue and its versions out of the tree -- so its template has to be taken out
+// here, or the package would still install.
+//
+// Only the template packages' own paths are read, a request each. Which directories hold a
+// template is decided by the definitions: a package that stopped being a template is
+// refused by the registry's checks, so there is no template to look for elsewhere.
+func (c *Controller) templates(ctx context.Context, logger *slog.Logger, ref string, files map[string]string) ([]*g2.File, error) {
+	// ar2.yaml as the default branch has it: the catalogue's branch was cut from it
+	// whenever its pull request was opened, and an ignore added since is what matters.
+	rcfg, err := c.g2.RegistryConfig(ctx, c.baseBranch)
+	if err != nil {
+		return nil, fmt.Errorf("read the registry's configuration: %w", err)
+	}
+	claimed := map[string]struct{}{}
+	var out []*g2.File
+	for _, id := range slices.Sorted(maps.Keys(files)) {
+		cfg := parseConfig(logger, id, files[id])
+		if cfg == nil || g2.IsClaim(cfg) || cfg.Name == "" {
+			continue
+		}
+		if _, ok := claimed[cfg.Name]; ok {
+			// The same package in a second directory, which the catalogue doesn't
+			// list either. See reconcile.
+			continue
+		}
+		claimed[cfg.Name] = struct{}{}
+		if !g2.IsTemplate(cfg) {
+			continue
+		}
+		file, err := c.templateFile(ctx, logger, ref, rcfg, id, cfg)
+		if err != nil {
+			return nil, err
+		}
+		if file != nil {
+			out = append(out, file)
+		}
+	}
+	return out, nil
+}
+
+// templateFile is what one template package's template-1.json has to become on the branch,
+// or nil when it is that already.
+func (c *Controller) templateFile(ctx context.Context, logger *slog.Logger, ref string, rcfg *g2.RegistryConfig, id string, cfg *aquag2.Config) (*g2.File, error) {
+	path := g2.PackageDir(id) + "/" + g2.TemplateFileName
+	held, err := c.g2.File(ctx, ref, path)
+	if err != nil {
+		return nil, fmt.Errorf("read the template of %s: %w", cfg.Name, err)
+	}
+	if rcfg.Ignores(cfg.Name) {
+		if held == "" {
+			return nil, nil //nolint:nilnil // nothing to write: the branch holds the template as it should
+		}
+		logger.Info("removing the template of an ignored package", "package", cfg.Name)
+		return &g2.File{Path: path, Deleted: true}, nil
+	}
+	if err := g2.ValidateTemplate(cfg); err != nil {
+		// The registry's checks refuse such a definition, so this is one that got past
+		// them. Its template isn't written rather than written wrong.
+		slogerr.WithError(logger, err).Warn("a template's definition is invalid", "package", cfg.Name)
+		return nil, nil //nolint:nilnil // nothing to write: the branch holds the template as it should
+	}
+	b, err := g2.MarshalTemplate(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("render the template of %s: %w", cfg.Name, err)
+	}
+	if held == string(b) {
+		return nil, nil //nolint:nilnil // nothing to write: the branch holds the template as it should
+	}
+	logger.Info("writing the package's template", "package", cfg.Name)
+	return &g2.File{Path: path, Content: string(b)}, nil
 }
 
 // reconcile works out what the catalogue has to gain and what it has to say differently.

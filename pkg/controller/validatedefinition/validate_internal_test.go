@@ -150,3 +150,28 @@ func TestValidate_assetRules(t *testing.T) {
 		t.Errorf("a filter that isn't an expression should be refused: %v", err)
 	}
 }
+
+// A definition served as a template is checked for what aqua reads as it is.
+func TestValidate_template(t *testing.T) {
+	t.Parallel()
+	const tmpl = `name: example/cli
+type: http
+url: https://example.com/{{.Version}}/cli_{{.OS}}_{{.Arch}}.tar.gz
+files:
+  - name: cli
+template:
+  reason: the vendor publishes no list of versions
+  test_versions:
+    - v1.0.0
+`
+	var out strings.Builder
+	if err := Validate(&out, at(t, tmpl)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "served as a template") {
+		t.Errorf("got %q", out.String())
+	}
+	if err := Validate(io.Discard, at(t, tmpl+"version_constraint: \"false\"\n")); err == nil {
+		t.Error("a template with a version_constraint at the top must be refused")
+	}
+}

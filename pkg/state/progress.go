@@ -26,35 +26,48 @@ type Progress struct {
 	// Renamed is how many names the registry has stopped holding, each pointing at the
 	// one it holds now.
 	Renamed int
+	// Templates is how many packages are served as templates. They have no versions to
+	// generate, so they are in none of the counts above.
+	Templates int
+}
+
+// count adds one package to the counts. A package served as a template is counted apart:
+// it has nothing to generate.
+func (p *Progress) count(pkg *Package) {
+	if pkg == nil {
+		return
+	}
+	if pkg.Template {
+		p.Templates++
+		return
+	}
+	p.Packages++
+	if pkg.CaughtUp {
+		p.CaughtUp++
+	}
+	if pkg.Round == 0 {
+		p.Untouched++
+	}
+	if pkg.LastDeepCheck.IsZero() {
+		p.Unwalked++
+	}
+	p.Lap = min(p.Lap, pkg.Round)
 }
 
 // Progress reports how far the registry has got.
 func (s *State) Progress() *Progress {
 	p := &Progress{
-		Packages: len(s.Packages),
-		Renamed:  len(s.Renamed),
-		Lap:      math.MaxInt,
+		Renamed: len(s.Renamed),
+		Lap:     math.MaxInt,
 	}
 	for _, pkg := range s.Packages {
-		if pkg == nil {
-			continue
-		}
-		if pkg.CaughtUp {
-			p.CaughtUp++
-		}
-		if pkg.Round == 0 {
-			p.Untouched++
-		}
-		if pkg.LastDeepCheck.IsZero() {
-			p.Unwalked++
-		}
-		p.Lap = min(p.Lap, pkg.Round)
+		p.count(pkg)
 	}
 	if p.Lap == math.MaxInt {
 		p.Lap = 0
 	}
 	for _, pkg := range s.Packages {
-		if pkg != nil && pkg.Round == p.Lap {
+		if pkg != nil && !pkg.Template && pkg.Round == p.Lap {
 			p.Waiting++
 		}
 	}

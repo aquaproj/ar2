@@ -191,6 +191,10 @@ type Package struct {
 	// definition they tie the same way, so they are passed over until it changes: a filter
 	// added to it is what settles them.
 	Ties map[string]string `json:"ties,omitempty"`
+	// Template says aqua-registry-g2 serves the package as a template, which its
+	// definition declares: no version is generated for it, so a run leaves it out of
+	// the order and nothing counts it as a package whose history is still to be walked.
+	Template bool `json:"template,omitempty"`
 }
 
 // Fingerprint reduces a sweep's versions to something worth storing for every
