@@ -8,8 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aquaproj/aqua/v2/pkg/config"
+	"github.com/aquaproj/aqua/v2/pkg/config/aqua"
 	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	aquag2 "github.com/aquaproj/aqua/v2/pkg/g2"
+	"github.com/aquaproj/aqua/v2/pkg/runtime"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/verify"
 	"github.com/google/go-cmp/cmp"
@@ -132,5 +135,25 @@ func TestTemplateEnvironments(t *testing.T) {
 	}
 	if !slices.Equal(envs, []string{"darwin/arm64", "linux/amd64"}) {
 		t.Errorf("got %v", envs)
+	}
+}
+
+// A checksum file of a GitHub release is downloaded from the release the asset is in.
+func TestChecksumFileURL_githubRelease(t *testing.T) {
+	t.Parallel()
+	pkg := &config.Package{
+		Package: &aqua.Package{Name: "example/cli", Version: "v1.0.0"},
+		PackageInfo: &aquaregistry.PackageInfo{
+			Type: "github_release", RepoOwner: "example", RepoName: "cli",
+			Asset:    "cli_{{.OS}}_{{.Arch}}.tar.gz",
+			Checksum: &aquaregistry.Checksum{Type: "github_release", Asset: "cli_{{.Version}}_checksums.txt", Algorithm: "sha256"},
+		},
+	}
+	got, err := checksumFileURL(pkg, &runtime.Runtime{GOOS: "linux", GOARCH: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://github.com/example/cli/releases/download/v1.0.0/cli_v1.0.0_checksums.txt"; got != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }

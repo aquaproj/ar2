@@ -2,6 +2,7 @@ package verify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	aquaregistry "github.com/aquaproj/aqua/v2/pkg/config/registry"
 	"github.com/aquaproj/ar2/pkg/generate"
 	"github.com/aquaproj/ar2/pkg/sign"
 	"github.com/google/go-cmp/cmp"
@@ -200,5 +202,39 @@ func TestHasher(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, h.sums()); diff != "" {
 		t.Error(diff)
+	}
+}
+
+// A template's asset, downloaded already, is held to what the checksum file its definition
+// names lists for it.
+func TestCheckListedChecksum(t *testing.T) {
+	t.Parallel()
+	const assetURL = "https://example.com/v1.0.0/foo_linux_amd64.tar.gz"
+	sha := strings.Repeat("a", 64)
+	asset := &generate.Asset{OS: "linux", Arch: "amd64", Type: "http", URL: assetURL}
+	cfg := &aquaregistry.Checksum{Type: "http", URL: "https://example.com/v1.0.0/checksums.txt", Algorithm: "sha256"}
+	for name, tc := range map[string]struct {
+		content string
+		err     error
+		ok      bool
+	}{
+		"listed":     {content: sha + "  foo_linux_amd64.tar.gz\n", ok: true},
+		"tampered":   {content: strings.Repeat("b", 64) + "  foo_linux_amd64.tar.gz\n", err: ErrTampered},
+		"not listed": {content: sha + "  foo_darwin_arm64.tar.gz\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			v := New(checksumServer(t, http.StatusOK, tc.content), nil)
+			v.digests.record(assetURL, map[string]string{"sha256": sha})
+			err := v.CheckListedChecksum(t.Context(), slog.New(slog.DiscardHandler), "v1.0.0", asset, cfg.URL, "foo_linux_amd64.tar.gz", cfg)
+			switch {
+			case tc.ok && err != nil:
+				t.Errorf("refused: %v", err)
+			case !tc.ok && err == nil:
+				t.Error("must be refused")
+			case tc.err != nil && !errors.Is(err, tc.err):
+				t.Errorf("got %v, want %v", err, tc.err)
+			}
+		})
 	}
 }
