@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -429,6 +430,9 @@ func (c *Client) packagesTree(ctx context.Context) ([]*gogithub.TreeEntry, error
 // checkout holds every tree.
 func localTrees(ctx context.Context, dir string) ([]*gogithub.TreeEntry, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "ls-tree", "-r", "-d", "-z", "HEAD", PackagesDir)
+	// The checkout in dir is what is read. GIT_DIR and the like, set when ar2 runs under a
+	// git hook, would win over -C and read another repository.
+	cmd.Env = withoutGitEnv(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("list the trees under %s in %s with git: %w", PackagesDir, dir, err)
@@ -476,4 +480,17 @@ func packagesOfTree(logger *slog.Logger, entries []*gogithub.TreeEntry) ([]strin
 		}
 	}
 	return packageIDs(logger, dirs), shas
+}
+
+// withoutGitEnv drops the variables that point git at a repository, such as GIT_DIR, which
+// a git hook sets for the repository it runs in.
+func withoutGitEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
